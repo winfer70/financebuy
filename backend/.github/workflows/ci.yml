@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test_and_scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Run tests
+        run: |
+          pytest -q
+
+      - name: Static analysis (semgrep)
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: 'auto'
+
+      - name: Dependency scan (GitHub Dependabot review)
+        uses: actions/dependency-review-action@v1
+
+  build_and_push:
+    runs-on: ubuntu-latest
+    needs: test_and_scan
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.CR_PAT }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository }}/financebuy:latest
+
+      - name: Sign image (cosign)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          # Requires COSIGN_PRIVATE_KEY in secrets for real signing
+          echo "Signing step placeholder - configure cosign and secrets"
