@@ -3,10 +3,12 @@ repos:
     rev: stable
     hooks:
       - id: black
-        language_version: python3.11
+        # allow default_language_version to control interpreter
+        language_version: default
 
   - repo: https://github.com/charliermarsh/ruff-pre-commit
     rev: main
     hooks:
       - id: ruff
         args: ["--fix"]
+      - id: ruff

@@ -4,6 +4,7 @@ from sqlalchemy.sql import func
 import uuid
 from .db import Base
 
+
 class Transaction(Base):
     __tablename__ = "transactions"
     transaction_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
