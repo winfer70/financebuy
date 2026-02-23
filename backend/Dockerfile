@@ -27,7 +27,15 @@ RUN python -m pip install --no-index --find-links=/wheels -r /app/requirements.t
 # copy application code
 COPY backend/app /app/app
 
+# copy alembic migrations and docker-specific config
+COPY backend/alembic /app/alembic
+COPY backend/alembic.docker.ini /app/alembic.ini
+
+# copy and configure entrypoint
+COPY backend/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["/app/entrypoint.sh"]

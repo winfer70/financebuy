@@ -1,7 +1,9 @@
 import os
-from argon2 import PasswordHasher
 from datetime import datetime, timedelta
-from jose import jwt
+from typing import Optional
+
+from argon2 import PasswordHasher
+from jose import JWTError, jwt
 
 PWD_HASher = PasswordHasher()
 JWT_SECRET = os.getenv("JWT_SECRET", "please-change-me")
@@ -25,6 +27,14 @@ def create_access_token(subject: str, expires_minutes: int = 15) -> str:
         "exp": datetime.utcnow() + timedelta(minutes=expires_minutes),
     }
     return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALG)
+
+
+def decode_access_token(token: str) -> Optional[str]:
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+        return payload.get("sub")
+    except JWTError:
+        return None
 
 
 # NOTE: Implement rotating refresh tokens and revocation lists in production.

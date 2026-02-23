@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import transactions
+from .routes import accounts, admin, auth_routes, orders, portfolio, transactions
 
 app = FastAPI(title="FinanceBuy API")
 
@@ -14,7 +14,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(transactions.router, prefix="/transactions", tags=["transactions"])
+app.include_router(auth_routes.router)
+app.include_router(accounts.router)
+app.include_router(transactions.router)
+app.include_router(portfolio.router)
+app.include_router(orders.router)
+app.include_router(admin.router)
 
 
 @app.get("/health")
@@ -25,9 +30,4 @@ async def health():
 @app.get("/docker-compose")
 async def docker_compose():
     # lightweight endpoint used by tests to validate docker-compose setup
-    return {"status": "ok"}
-
-
-@app.get("/docker-compose")
-async def docker_compose_health():
     return {"status": "ok"}

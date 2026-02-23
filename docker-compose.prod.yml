@@ -1,22 +1,24 @@
 services:
   db:
     image: postgres:15
+    restart: always
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: financebuy
     volumes:
       - db_data:/var/lib/postgresql/data
     networks:
       - finance_net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:7-alpine
+    restart: always
     networks:
       - finance_net
     healthcheck:
@@ -29,12 +31,14 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    restart: always
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/financebuy
-      JWT_SECRET: replace-this-secret
-      ALLOWED_ORIGINS: http://localhost:3000
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/financebuy
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://api.yourdomain.com}
+    # Bind to localhost only — nginx handles public traffic
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -42,8 +46,6 @@ services:
         condition: service_healthy
     networks:
       - finance_net
-    volumes:
-      - ./backend/app:/app/app:ro
 
 volumes:
   db_data:
