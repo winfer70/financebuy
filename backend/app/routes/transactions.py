@@ -13,6 +13,7 @@ from .auth_routes import get_current_user
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 
+
 @router.post("/create", response_model=TransactionOut)
 async def create_transaction(
     payload: TransactionCreate,

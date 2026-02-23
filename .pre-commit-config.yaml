@@ -1,0 +1,14 @@
+repos:
+  - repo: https://github.com/psf/black
+    rev: stable
+    hooks:
+      - id: black
+        # allow default_language_version to control interpreter
+        language_version: default
+
+  - repo: https://github.com/charliermarsh/ruff-pre-commit
+    rev: main
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff

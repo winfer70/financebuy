@@ -5,6 +5,4 @@ target-version = ["py311"]
 [tool.ruff]
 line-length = 88
 extend-select = ["E", "F", "W", "C90"]
-
-[tool.ruff.tool]
 exclude = [".git", "__pycache__", "build", "dist", "venv"]

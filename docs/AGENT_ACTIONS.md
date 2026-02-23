@@ -69,6 +69,18 @@ alembic -c backend/alembic.ini upgrade head
 - (Optional) Harden tests: add a matrix job for Python versions, and run tests inside the built image in an isolated runner.
 - (Optional) Add `pre-commit` hooks using `ruff` and `black` to catch issues early.
 
+### Pre-commit setup
+
+To enable local checks that run before each commit, install and enable `pre-commit` and the provided hooks:
+
+```bash
+pip install pre-commit
+pre-commit install
+pre-commit run --all-files
+```
+
+This project provides `.pre-commit-config.yaml` with `black` and `ruff` hooks (the `ruff` hook is configured to attempt automatic fixes).
+
 ## Rollback / branch cleanup
 
 - To delete the feature branch locally and remotely:

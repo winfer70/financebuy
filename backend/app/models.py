@@ -14,43 +14,6 @@ import uuid
 from .db import Base
 
 
-class User(Base):
-    __tablename__ = "users"
-
-    user_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    email = Column(String(255), unique=True, nullable=False)
-    password_hash = Column(String(255), nullable=False)
-    first_name = Column(String(100))
-    last_name = Column(String(100))
-    phone = Column(String(20))
-    kyc_status = Column(String(20), server_default="pending")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
-    is_active = Column(Boolean, server_default="true")
-
-
-class Account(Base):
-    __tablename__ = "accounts"
-
-    account_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("users.user_id"),
-        nullable=False,
-    )
-    account_type = Column(String(50), nullable=False)
-    account_number = Column(String(50), unique=True, nullable=False)
-    balance = Column(Numeric(18, 2), server_default="0.00")
-    currency = Column(String(3), server_default="USD")
-    status = Column(String(20), server_default="active")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
-
-
 class Transaction(Base):
     __tablename__ = "transactions"
 

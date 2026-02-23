@@ -1,3 +1,97 @@
+<!-- Copilot instructions — FinanceBuy -->
+
+Purpose: concise, repo-specific guidance to help AI coding agents be productive quickly.
+
+Big picture
+- FastAPI backend in [backend/app](backend/app) using async SQLAlchemy (AsyncSession). Services: Postgres (`db`) and Redis (`redis`) wired by [docker-compose.yml](docker-compose.yml).
+
+Concrete commands
+- Dev run (from backend): set `DATABASE_URL` then: `uvicorn app.main:app --host 0.0.0.0 --port 8000`
+- Container workflow (canonical):
+  - `docker compose up --build -d`
+  - `docker compose exec app bash -lc "pytest -q"`
+  - `docker compose down`
+- Migrations:
+  - `alembic -c backend/alembic.ini revision --autogenerate -m "msg"`
+  - `alembic -c backend/alembic.ini upgrade head`
+
+Key files & examples
+- [backend/app/main.py](backend/app/main.py) — app init, routers, `/health` and `/docker-compose` endpoints used by tests.
+- [backend/app/db.py](backend/app/db.py) — async engine, `AsyncSessionLocal`, `get_db()` dependency.
+- [backend/app/routes/transactions.py](backend/app/routes/transactions.py) — canonical transaction pattern: `async with db.begin()` and Decimal checks.
+- [backend/app/schemas.py](backend/app/schemas.py) & [backend/app/models.py](backend/app/models.py) — Pydantic (orm_mode) ↔ SQLAlchemy mappings.
+- [backend/tests/test_health.py](backend/tests/test_health.py) — shows test import and expected smoke endpoint.
+
+Project-specific patterns (follow these)
+- Use `AsyncSession` + `async with db.begin()` for multi-step DB transactions; avoid mixing sync DB calls into async handlers.
+- Monetary values use `pydantic.condecimal` / `decimal.Decimal` and `Numeric` in models; validate positivity in endpoints (see transactions example).
+- Tests expect the repo-root layout; prefer running tests inside the `app` container to match CI.
+
+Docker & build notes
+- `backend/Dockerfile` is deliberately two-stage: it builds wheels then installs from `/wheels` for reproducible images. Do not change this pattern without coordination.
+- `docker-compose.yml` mounts `./backend/app`; in-container tests reflect CI behavior and are the canonical way to validate changes.
+
+CI / PR checklist (practical)
+- Run tests: `docker compose exec app bash -lc "pytest -q"` (or mirror this in CI).
+- Lint/format: `ruff check .` and `black --check .` (configured in `pyproject.toml`).
+- Model changes: add Alembic migration under `backend/alembic/versions` and validate `alembic -c backend/alembic.ini upgrade head`.
+
+When editing dependencies
+- Update `backend/requirements.txt`, build the image, and run in-container tests to validate the dependency surface.
+
+If you'd like, I can also:
+- add a compact GitHub Actions workflow that runs the containerized tests and builds the `backend` image, or
+- expand the migrations / PR checklist section with concrete examples.
+<!-- Guidance for AI coding agents working on FinanceBuy -->
+# Copilot instructions — FinanceBuy
+
+Purpose: concise, actionable notes to help an AI code assistant be productive in this repo.
+
+**Big Picture**
+- **What:** FastAPI backend (async SQLAlchemy) + Postgres + Redis. App lives in `backend/app`.
+- **Service boundaries:** `db` (Postgres), `redis`, `app` (FastAPI). See `docker-compose.yml` for wiring.
+
+**Key files & patterns**
+- `backend/app/main.py`: router registration and lightweight health endpoints (`/health`, `/docker-compose`).
+- `backend/app/db.py`: async SQLAlchemy engine, `AsyncSessionLocal`, and `get_db()` dependency.
+- `backend/app/models.py` and `backend/app/schemas.py`: DB models + Pydantic schemas (`orm_mode = True`).
+- `backend/app/routes/transactions.py`: canonical example of monetary logic — uses `async with db.begin()` and decimal checks.
+- Migrations: `backend/alembic/` (use `alembic -c backend/alembic.ini`).
+
+**Developer workflows (concrete commands)**
+- Run locally (dev):
+  - `cd backend`
+  - `DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/financebuy \
+    uvicorn app.main:app --host 0.0.0.0 --port 8000`
+- Docker-compose (build + tests):
+  - `docker compose up --build -d`
+  - `docker compose exec app bash -lc "pytest -q"`
+  - `docker compose down`
+- Tests: `pytest` inside the container mirrors CI; tests add repo root to `PYTHONPATH` so `app` imports work.
+- Lint/format: configured in `pyproject.toml` (`ruff`, `black`). Run `ruff check .` and `black --check .`.
+
+**Project-specific conventions**
+- Async DB everywhere: prefer `AsyncSession` and `async with db.begin()` for transactional work.
+- Money: use `pydantic.condecimal` and `decimal.Decimal` checks server-side (see `transactions.create_transaction`).
+- Tests run against FastAPI `TestClient` and expect `/docker-compose` endpoint for a simple smoke check.
+- Keep `backend` package importable in tests — tests manipulate `sys.path` (see `backend/tests/test_health.py`).
+
+**Integration points & secrets**
+- Postgres: `DATABASE_URL` uses `postgresql+asyncpg://...` in runtime and `docker-compose.yml` for service name `db`.
+- Redis: used for caching/coordination; service name `redis` in compose.
+- Secrets: read from env; `JWT_SECRET` present in compose as a placeholder — do not hardcode secrets in code.
+
+**When editing code**
+- Update models -> create an Alembic autogenerate revision: `alembic -c backend/alembic.ini revision --autogenerate -m "msg"` then `upgrade head`.
+- If adding endpoints, also update `backend/tests` with a minimal TestClient check and, when necessary, update CI.
+
+**Files to inspect for examples**
+- [backend/app/main.py](backend/app/main.py)
+- [backend/app/routes/transactions.py](backend/app/routes/transactions.py)
+- [backend/app/db.py](backend/app/db.py)
+- [backend/tests/test_health.py](backend/tests/test_health.py)
+
+If anything above is unclear or you want more examples (CI, migrations, or common PR checklist), tell me which section to expand.
 # Copilot instructions — FinanceBuy
 
 This repository is a small FastAPI service (backend) with Postgres + Redis and an opinionated container build. The guidance below highlights project-specific patterns, commands, and files an AI coding agent should use to be productive.

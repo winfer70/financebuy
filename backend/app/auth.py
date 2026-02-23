@@ -22,7 +22,10 @@ def verify_password(hash: str, password: str) -> bool:
 
 
 def create_access_token(subject: str, expires_minutes: int = 15) -> str:
-    to_encode = {"sub": subject, "exp": datetime.utcnow() + timedelta(minutes=expires_minutes)}
+    to_encode = {
+        "sub": subject,
+        "exp": datetime.utcnow() + timedelta(minutes=expires_minutes),
+    }
     return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALG)
 
 
