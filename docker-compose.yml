@@ -16,9 +16,14 @@ services:
       retries: 5
 
   redis:
-    image: redis:7
+    image: redis:7-alpine
     networks:
       - finance_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   app:
     build:
@@ -27,16 +32,18 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/financebuy
       JWT_SECRET: replace-this-secret
+      ALLOWED_ORIGINS: http://localhost:3000
     ports:
       - "8000:8000"
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - finance_net
     volumes:
       - ./backend/app:/app/app:ro
-      - ./backend:/app/backend:ro
 
 volumes:
   db_data:
