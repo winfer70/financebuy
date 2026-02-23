@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import accounts, auth_routes, portfolio, transactions
+from .routes import accounts, admin, auth_routes, orders, portfolio, transactions
 
 app = FastAPI(title="FinanceBuy API")
 
@@ -18,6 +18,8 @@ app.include_router(auth_routes.router)
 app.include_router(accounts.router)
 app.include_router(transactions.router)
 app.include_router(portfolio.router)
+app.include_router(orders.router)
+app.include_router(admin.router)
 
 
 @app.get("/health")

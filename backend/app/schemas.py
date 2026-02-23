@@ -1,5 +1,6 @@
+from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Dict, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
@@ -97,3 +98,46 @@ class PortfolioSummary(BaseModel):
     # For now we assume a single primary currency; mixed-currency
     # portfolios can be represented by per-account currencies above.
     currency: str = "USD"
+
+
+class OrderCreate(BaseModel):
+    account_id: UUID
+    security_id: UUID
+    order_type: str  # "market" or "limit"
+    side: str  # "buy" or "sell"
+    quantity: Decimal = Field(max_digits=18, decimal_places=6)
+    # For now, callers must provide the execution price even for
+    # "market" orders until a real pricing feed is integrated.
+    price: Decimal = Field(max_digits=18, decimal_places=2)
+
+
+class OrderOut(BaseModel):
+    order_id: UUID
+    account_id: UUID
+    security_id: UUID
+    order_type: str
+    side: str
+    quantity: Decimal = Field(max_digits=18, decimal_places=6)
+    price: Decimal = Field(max_digits=18, decimal_places=2)
+    status: str
+    filled_quantity: Decimal = Field(max_digits=18, decimal_places=6)
+    filled_price: Decimal | None = Field(default=None, max_digits=18, decimal_places=2)
+
+    class Config:
+        orm_mode = True
+
+
+class AuditLogOut(BaseModel):
+    log_id: int
+    user_id: Optional[UUID]
+    action: str
+    table_name: Optional[str]
+    record_id: Optional[UUID]
+    old_values: Optional[Dict[str, Any]]
+    new_values: Optional[Dict[str, Any]]
+    ip_address: Optional[str]
+    user_agent: Optional[str]
+    created_at: datetime
+
+    class Config:
+        orm_mode = True

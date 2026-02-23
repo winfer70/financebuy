@@ -1,11 +1,11 @@
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..models import Account, Transaction
+from ..models import Account, AuditLog, Transaction
 from ..schemas import TransactionCreate, TransactionOut
 from .auth_routes import get_current_user
 
@@ -16,6 +16,7 @@ router = APIRouter(prefix="/transactions", tags=["transactions"])
 @router.post("/create", response_model=TransactionOut)
 async def create_transaction(
     payload: TransactionCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -42,6 +43,7 @@ async def create_transaction(
             detail="account not found",
         )
 
+    old_balance = account.balance or Decimal("0")
     new_balance = account.balance
     if payload.transaction_type == "deposit":
         new_balance = (new_balance or Decimal("0")) + payload.amount
@@ -69,6 +71,22 @@ async def create_transaction(
         status="completed",
     )
 
+    audit = AuditLog(
+        user_id=current_user.user_id,
+        action="transaction_create",
+        table_name="transactions",
+        record_id=new_txn.transaction_id,
+        old_values={"balance": str(old_balance)},
+        new_values={
+            "balance": str(new_balance),
+            "transaction_type": payload.transaction_type,
+            "amount": str(payload.amount),
+            "currency": payload.currency,
+        },
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
     async with db.begin():
         await db.execute(
             update(Account)
@@ -76,6 +94,7 @@ async def create_transaction(
             .values(balance=new_balance)
         )
         db.add(new_txn)
+        db.add(audit)
 
     await db.refresh(new_txn)
     return new_txn
