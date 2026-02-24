@@ -70,6 +70,10 @@ class TransactionOut(TransactionCreate):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    user_id: Optional[UUID] = None
+    email: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
 
 
 class HoldingPositionOut(BaseModel):

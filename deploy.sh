@@ -1,5 +1,5 @@
 #!/bin/bash
-# deploy.sh — Server setup script for FinanceBuy on a fresh Ubuntu 22.04/24.04 server.
+# deploy.sh — Server setup script for tickerTap on a fresh Ubuntu 22.04/24.04 server.
 # Run this script as a non-root user with sudo access.
 set -e
 
@@ -85,9 +85,9 @@ cat <<'EOF'
    #   openssl rand -hex 64
 
 2. CONFIGURE NGINX
-   # Replace api.yourdomain.com with your actual domain in nginx/financebuy.conf
-   sudo cp nginx/financebuy.conf /etc/nginx/sites-available/financebuy
-   sudo ln -sf /etc/nginx/sites-available/financebuy /etc/nginx/sites-enabled/
+   # Replace api.yourdomain.com with your actual domain in nginx/tickerTap.conf
+   sudo cp nginx/tickerTap.conf /etc/nginx/sites-available/tickerTap
+   sudo ln -sf /etc/nginx/sites-available/tickerTap /etc/nginx/sites-enabled/
    sudo rm -f /etc/nginx/sites-enabled/default
    sudo nginx -t && sudo systemctl reload nginx
 

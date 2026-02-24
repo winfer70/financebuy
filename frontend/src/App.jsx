@@ -3,7 +3,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 /* ═══════════════════════════════════════════════════════════════════════════
    API CLIENT — centralised fetch wrapper with JWT injection + error handling
 ═══════════════════════════════════════════════════════════════════════════ */
-const API_BASE = "http://localhost:8000";
+const API_BASE = "https://ticker-tap.com";
 
 async function apiFetch(path, { method="GET", body, token } = {}) {
   const headers = { "Content-Type": "application/json" };
@@ -120,8 +120,8 @@ const GLOBAL_CSS = `
   --panel:     #111520;
   --border:    #1e2535;
   --border2:   #263045;
-  --amber:     #f5a623;
-  --amber-dim: #7a5112;
+  --amber:     #0f7d40;
+  --amber-dim: #094d27;
   --green:     #00d97e;
   --red:       #f04438;
   --blue:      #3d7ef5;
@@ -135,7 +135,9 @@ const GLOBAL_CSS = `
   --font-disp: 'Bebas Neue', sans-serif;
 }
 
-html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font-sans); }
+html { height: 100%; overflow: hidden; }
+body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font-sans); margin: 0; overflow: hidden; max-width: 100vw; }
+#root { height: 100%; overflow: hidden; }
 
 ::-webkit-scrollbar { width: 3px; height: 3px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
@@ -155,21 +157,21 @@ body::before {
 }
 
 /* ── Layout ── */
-.app-shell { display: flex; height: 100vh; overflow: hidden; }
+.app-shell { display: flex; height: 100vh; max-height: 100vh; overflow: hidden; max-width: 100vw; }
 
 /* ── Sidebar ── */
 .sidebar {
-  width: 56px;
+  width: 180px;
   background: var(--bg2);
   border-right: 1px solid var(--border);
-  display: flex; flex-direction: column; align-items: center;
+  display: flex; flex-direction: column; align-items: stretch;
   padding: 0;
   flex-shrink: 0;
   z-index: 50;
 }
 .sidebar-logo {
-  width: 56px; height: 48px;
-  display: flex; align-items: center; justify-content: center;
+  width: 100%; height: 48px;
+  display: flex; align-items: center; gap: 10px; padding: 0 16px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
 }
@@ -180,16 +182,24 @@ body::before {
   letter-spacing: 0;
   line-height: 1;
 }
-.sidebar-nav { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 0; flex: 1; }
+.logo-name {
+  font-family: var(--font-disp);
+  font-size: 16px;
+  color: var(--bright);
+  letter-spacing: 1px;
+  line-height: 1;
+}
+.sidebar-nav { display: flex; flex-direction: column; gap: 2px; padding: 10px 8px; flex: 1; }
 .nav-btn {
-  width: 40px; height: 40px;
+  width: 100%; height: 36px;
   background: none; border: none; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
+  display: flex; align-items: center; gap: 10px; padding: 0 10px;
   color: var(--muted); border-radius: 4px;
-  transition: all 0.12s; position: relative;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.5px;
+  transition: all 0.12s; position: relative; text-align: left;
 }
 .nav-btn:hover { color: var(--text); background: var(--bg3); }
-.nav-btn.active { color: var(--amber); background: rgba(245,166,35,0.08); }
+.nav-btn.active { color: var(--amber); background: rgba(15,125,64,0.08); }
 .nav-btn.active::before {
   content: '';
   position: absolute; left: 0; top: 50%; transform: translateY(-50%);
@@ -197,18 +207,12 @@ body::before {
   background: var(--amber);
   border-radius: 0 1px 1px 0;
 }
-.nav-tooltip {
-  position: absolute; left: 56px; top: 50%; transform: translateY(-50%);
-  background: var(--panel); border: 1px solid var(--border2);
-  color: var(--bright); font-family: var(--font-mono); font-size: 11px;
-  padding: 4px 8px; white-space: nowrap; pointer-events: none;
-  opacity: 0; transition: opacity 0.1s; z-index: 100;
-}
-.nav-btn:hover .nav-tooltip { opacity: 1; }
-.sidebar-bottom { padding: 8px 0 12px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.nav-label { flex: 1; }
+.nav-tooltip { display: none; }
+.sidebar-bottom { padding: 8px 8px 12px; display: flex; flex-direction: column; gap: 2px; }
 .avatar-btn {
   width: 32px; height: 32px; border-radius: 2px;
-  background: linear-gradient(135deg, var(--amber-dim), #3d2a0a);
+  background: linear-gradient(135deg, var(--amber-dim), #052b16);
   border: 1px solid var(--amber-dim);
   display: flex; align-items: center; justify-content: center;
   font-family: var(--font-mono); font-size: 11px; font-weight: 600;
@@ -216,7 +220,7 @@ body::before {
 }
 
 /* ── Main area ── */
-.main-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.main-area { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 
 /* ── Top bar ── */
 .topbar {
@@ -289,8 +293,8 @@ body::before {
   letter-spacing: 0.5px; text-transform: uppercase;
   transition: all 0.1s; border-radius: 2px;
 }
-.btn-amber { background: var(--amber); color: #0a0600; }
-.btn-amber:hover { background: #ffc040; box-shadow: 0 0 16px rgba(245,166,35,0.4); }
+.btn-amber { background: var(--amber); color: #e8f0fa; }
+.btn-amber:hover { background: #12a050; box-shadow: 0 0 16px rgba(15,125,64,0.4); }
 .btn-outline { background: transparent; color: var(--text); border: 1px solid var(--border2); }
 .btn-outline:hover { border-color: var(--mid); color: var(--bright); }
 .btn-ghost { background: var(--bg3); color: var(--mid); border: 1px solid var(--border); }
@@ -329,7 +333,7 @@ body::before {
 }
 .badge-green { color: var(--green); background: rgba(0,217,126,0.08); border: 1px solid rgba(0,217,126,0.15); }
 .badge-red   { color: var(--red);   background: rgba(240,68,56,0.08);  border: 1px solid rgba(240,68,56,0.15); }
-.badge-amber { color: var(--amber); background: rgba(245,166,35,0.08); border: 1px solid rgba(245,166,35,0.15); }
+.badge-amber { color: var(--amber); background: rgba(15,125,64,0.08); border: 1px solid rgba(15,125,64,0.15); }
 .badge-mid   { color: var(--mid);   background: var(--bg3);            border: 1px solid var(--border); }
 
 /* ── Panel / card ── */
@@ -395,7 +399,7 @@ body::before {
   border-radius: 1px;
 }
 .sp-completed { color: var(--green); background: rgba(0,217,126,0.07); border: 1px solid rgba(0,217,126,0.18); }
-.sp-pending   { color: var(--amber); background: rgba(245,166,35,0.07); border: 1px solid rgba(245,166,35,0.18); }
+.sp-pending   { color: var(--amber); background: rgba(15,125,64,0.07); border: 1px solid rgba(15,125,64,0.18); }
 .sp-cancelled { color: var(--muted); background: var(--bg3);            border: 1px solid var(--border); }
 .sp-filled    { color: var(--blue);  background: rgba(61,126,245,0.07); border: 1px solid rgba(61,126,245,0.18); }
 .sp-open      { color: var(--cyan);  background: rgba(15,192,208,0.07); border: 1px solid rgba(15,192,208,0.18); }
@@ -410,10 +414,10 @@ body::before {
 .tc-buy        { color: var(--green); border: 1px solid rgba(0,217,126,0.25); background: rgba(0,217,126,0.06); }
 .tc-sell       { color: var(--red);   border: 1px solid rgba(240,68,56,0.25); background: rgba(240,68,56,0.06); }
 .tc-deposit    { color: var(--blue);  border: 1px solid rgba(61,126,245,0.25); background: rgba(61,126,245,0.06); }
-.tc-withdrawal { color: var(--amber); border: 1px solid rgba(245,166,35,0.25); background: rgba(245,166,35,0.06); }
+.tc-withdrawal { color: var(--amber); border: 1px solid rgba(15,125,64,0.25); background: rgba(15,125,64,0.06); }
 .tc-market     { color: var(--mid);   border: 1px solid var(--border2); background: var(--bg3); }
 .tc-limit      { color: var(--cyan);  border: 1px solid rgba(15,192,208,0.25); background: rgba(15,192,208,0.06); }
-.tc-stop       { color: var(--amber); border: 1px solid rgba(245,166,35,0.25); background: rgba(245,166,35,0.06); }
+.tc-stop       { color: var(--amber); border: 1px solid rgba(15,125,64,0.25); background: rgba(15,125,64,0.06); }
 
 /* ── Page padding ── */
 .page-inner { padding: 16px 24px; display: flex; flex-direction: column; gap: 16px; }
@@ -532,7 +536,7 @@ select.form-control option { background: var(--bg3); }
 .modal-box {
   background: var(--panel); border: 1px solid var(--border2);
   width: 460px; max-width: 95vw;
-  box-shadow: 0 24px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(245,166,35,0.06);
+  box-shadow: 0 24px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(15,125,64,0.06);
   animation: slideUp 0.18s;
 }
 .modal-top {
@@ -568,15 +572,16 @@ select.form-control option { background: var(--bg3); }
 
 /* ─── LOGIN PAGE ─── */
 .login-wrap {
-  min-height: 100vh; background: var(--bg);
+  height: 100vh; max-height: 100vh; background: var(--bg);
   display: flex; align-items: stretch;
   position: relative; overflow: hidden;
 }
 .login-left {
-  flex: 1; display: flex; flex-direction: column;
+  flex: 1; min-width: 0; display: flex; flex-direction: column;
   justify-content: center; padding: 60px;
   border-right: 1px solid var(--border);
   position: relative; z-index: 1;
+  overflow-y: auto;
 }
 .login-right {
   width: 440px; flex-shrink: 0;
@@ -584,6 +589,7 @@ select.form-control option { background: var(--bg3); }
   padding: 60px 48px;
   background: var(--bg2);
   position: relative; z-index: 1;
+  overflow-y: auto;
 }
 .login-grid-bg {
   position: absolute; inset: 0;
@@ -596,7 +602,7 @@ select.form-control option { background: var(--bg3); }
 .login-glow {
   position: absolute;
   width: 600px; height: 600px; border-radius: 50%;
-  background: radial-gradient(circle, rgba(245,166,35,0.05) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(15,125,64,0.05) 0%, transparent 70%);
   top: 50%; left: 40%; transform: translate(-50%, -50%);
   pointer-events: none;
 }
@@ -787,8 +793,8 @@ function PortfolioChart({ height=160 }) {
         <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none">
           <defs>
             <linearGradient id="ag" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="#f5a623" stopOpacity="0.18"/>
-              <stop offset="100%" stopColor="#f5a623" stopOpacity="0"/>
+              <stop offset="0%" stopColor="#0f7d40" stopOpacity="0.18"/>
+              <stop offset="100%" stopColor="#0f7d40" stopOpacity="0"/>
             </linearGradient>
           </defs>
           {[H*0.1,H*0.5,H*0.9].map((y,i)=>(
@@ -797,8 +803,8 @@ function PortfolioChart({ height=160 }) {
           <path d={fill} fill="url(#ag)" className="chart-fill"/>
           <path d={line} className="chart-line"/>
           {/* last point dot */}
-          <circle cx={pts[pts.length-1].x} cy={pts[pts.length-1].y} r="3" fill="#f5a623"/>
-          <circle cx={pts[pts.length-1].x} cy={pts[pts.length-1].y} r="6" fill="#f5a623" opacity="0.2"/>
+          <circle cx={pts[pts.length-1].x} cy={pts[pts.length-1].y} r="3" fill="#0f7d40"/>
+          <circle cx={pts[pts.length-1].x} cy={pts[pts.length-1].y} r="6" fill="#0f7d40" opacity="0.2"/>
         </svg>
       </div>
       <div className="chart-xaxis">
@@ -809,7 +815,7 @@ function PortfolioChart({ height=160 }) {
 }
 
 /* ─── DONUT CHART ──────────────────────────────────────────────────────────── */
-const PALETTE = ["#f5a623","#3d7ef5","#00d97e","#f04438","#0fc0d0","#a78bfa","#fb923c"];
+const PALETTE = ["#0f7d40","#3d7ef5","#00d97e","#f04438","#0fc0d0","#a78bfa","#fb923c"];
 
 function AllocationDonut() {
   const total = HOLDINGS.reduce((s,h)=>s+h.qty*h.price,0);
@@ -989,7 +995,7 @@ function TxModal({ onClose, onSubmit }) {
 /* ─────────────────────────────────────────────────────────────────────────────
    PAGE: LOGIN
 ───────────────────────────────────────────────────────────────────────────── */
-function LoginPage({ onLogin, backendOk }) {
+function LoginPage({ onLogin, onRegister, backendOk }) {
   const [email, setEmail] = useState("demo@financebuy.com");
   const [pwd, setPwd] = useState("Demo1234!");
   const [show, setShow] = useState(false);
@@ -1086,7 +1092,7 @@ function LoginPage({ onLogin, backendOk }) {
           </button>
           <div className="login-footer-links">
             <span className="login-link">Reset password</span>
-            <span className="login-link">Create account</span>
+            <span className="login-link" onClick={onRegister}>Create account →</span>
           </div>
         </div>
         <div className="login-security">
@@ -1103,6 +1109,125 @@ function LoginPage({ onLogin, backendOk }) {
               animation: backendOk===null ? "lpulse 1s infinite" : "none",
             }}/>
             {backendOk===null ? "Checking API..." : backendOk ? "API Connected" : "Demo Mode (API Offline)"}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   PAGE: REGISTER
+───────────────────────────────────────────────────────────────────────────── */
+function RegisterPage({ onLogin, onBack, backendOk }) {
+  const [firstName, setFirstName] = useState("");
+  const [lastName,  setLastName]  = useState("");
+  const [email,     setEmail]     = useState("");
+  const [pwd,       setPwd]       = useState("");
+  const [pwd2,      setPwd2]      = useState("");
+  const [show,      setShow]      = useState(false);
+  const [loading,   setLoading]   = useState(false);
+  const [err,       setErr]       = useState("");
+
+  const handleRegister = async () => {
+    if (!firstName)       { setErr("FIRST NAME REQUIRED"); return; }
+    if (!email)           { setErr("EMAIL REQUIRED"); return; }
+    if (!pwd)             { setErr("PASSWORD REQUIRED"); return; }
+    if (pwd.length < 8)   { setErr("PASSWORD MIN 8 CHARACTERS"); return; }
+    if (pwd !== pwd2)     { setErr("PASSWORDS DO NOT MATCH"); return; }
+    setErr(""); setLoading(true);
+    try {
+      await api.register({ email, password: pwd, first_name: firstName, last_name: lastName });
+      await onLogin(email, pwd);
+    } catch(e) {
+      setErr(e.message || "REGISTRATION FAILED");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="login-wrap">
+      <div className="login-grid-bg"/>
+      <div className="login-glow"/>
+      <div className="login-left">
+        <div className="login-brand">
+          <div className="login-brand-mark">TICKER-TAP</div>
+          <div className="login-brand-sub">Professional Investment Terminal · v4.2</div>
+        </div>
+        <div className="login-stats stagger">
+          <div className="login-stat-row">
+            {[{val:"$2.4B",lbl:"Assets Under Management"},{val:"147K",lbl:"Active Accounts"}].map((s,i)=>(
+              <div key={i}><div className="login-stat-val">{s.val}</div><div className="login-stat-lbl">{s.lbl}</div></div>
+            ))}
+          </div>
+          <div className="login-stat-row">
+            {[{val:"99.97%",lbl:"System Uptime"},{val:"< 4ms",lbl:"Avg Execution Time"}].map((s,i)=>(
+              <div key={i}><div className="login-stat-val">{s.val}</div><div className="login-stat-lbl">{s.lbl}</div></div>
+            ))}
+          </div>
+        </div>
+        <div className="login-divider"/>
+        <div style={{marginTop:24,display:"flex",flexDirection:"column",gap:8}}>
+          {TICKER_DATA.slice(0,5).map((t,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:12,fontFamily:"var(--font-mono)",fontSize:12}}>
+              <span style={{color:"var(--bright)",minWidth:50,fontWeight:500}}>{t.sym}</span>
+              <span style={{color:"var(--mid)"}}>{t.price}</span>
+              <span style={{color:t.pos?"var(--green)":"var(--red)"}}>{t.chg}</span>
+              <Sparkline positive={t.pos} w={80} h={18}/>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="login-right">
+        <div className="login-head">CREATE ACCOUNT</div>
+        <div className="login-subhead">Open your trading terminal account</div>
+        <div className="login-form">
+          <div style={{display:"flex",gap:12}}>
+            <div className="form-field" style={{flex:1}}>
+              <label className="form-label">First Name</label>
+              <input className="form-control" type="text" value={firstName}
+                onChange={e=>setFirstName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleRegister()} placeholder="First"/>
+            </div>
+            <div className="form-field" style={{flex:1}}>
+              <label className="form-label">Last Name</label>
+              <input className="form-control" type="text" value={lastName}
+                onChange={e=>setLastName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleRegister()} placeholder="Last"/>
+            </div>
+          </div>
+          <div className="form-field">
+            <label className="form-label">Email Address</label>
+            <input className="form-control" type="email" value={email}
+              onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleRegister()} placeholder="you@example.com"/>
+          </div>
+          <div className="form-field">
+            <label className="form-label">Password</label>
+            <div className="pw-wrap">
+              <input className="form-control" type={show?"text":"password"} value={pwd}
+                onChange={e=>setPwd(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleRegister()}
+                placeholder="Min 8 characters" style={{paddingRight:36}}/>
+              <button className="pw-eye" onClick={()=>setShow(v=>!v)}>{show?<Ic.eyeOff/>:<Ic.eye/>}</button>
+            </div>
+          </div>
+          <div className="form-field">
+            <label className="form-label">Confirm Password</label>
+            <input className="form-control" type={show?"text":"password"} value={pwd2}
+              onChange={e=>setPwd2(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleRegister()} placeholder="Repeat password"/>
+          </div>
+          {err && <div style={{fontFamily:"var(--font-mono)",fontSize:11,color:"var(--red)"}}>{err}</div>}
+          <button className="btn btn-amber login-btn-full" onClick={handleRegister} disabled={loading}>
+            {loading ? <span className="loading-pulse">CREATING ACCOUNT...</span> : "CREATE ACCOUNT"}
+          </button>
+          <div className="login-footer-links">
+            <span className="login-link" onClick={onBack}>← Back to sign in</span>
+          </div>
+        </div>
+        <div className="login-security">
+          <div className="security-item"><Ic.lock/> TLS 1.3 Encrypted</div>
+          <div className="security-item"><Ic.shield/> SOC 2 Compliant</div>
+          <div className="security-item" style={{color:backendOk===false?"var(--amber)":"var(--green)",display:"flex",alignItems:"center",gap:4}}>
+            <span style={{width:5,height:5,borderRadius:"50%",background:backendOk===false?"var(--amber)":"var(--green)",display:"inline-block"}}/>
+            {backendOk===null?"Checking API...":backendOk?"API Connected":"Demo Mode (API Offline)"}
           </div>
         </div>
       </div>
@@ -1514,7 +1639,7 @@ function HoldingsPage({ onNewTx, onViewChart, token, accountId }) {
                         <td>
                           <button onClick={e=>{e.stopPropagation();onViewChart&&onViewChart(h.symbol);}}
                             style={{background:"none",border:"1px solid #1e2535",cursor:"pointer",color:"#4a5568",padding:"3px 7px",fontFamily:"IBM Plex Mono",fontSize:9,letterSpacing:"0.5px",display:"flex",alignItems:"center",gap:4,transition:"all 0.1s",borderRadius:2}}
-                            onMouseEnter={e=>{e.currentTarget.style.color="#f5a623";e.currentTarget.style.borderColor="#f5a623";}}
+                            onMouseEnter={e=>{e.currentTarget.style.color="#0f7d40";e.currentTarget.style.borderColor="#0f7d40";}}
                             onMouseLeave={e=>{e.currentTarget.style.color="#4a5568";e.currentTarget.style.borderColor="#1e2535";}}>
                             <Ic.externalLink/> CHART
                           </button>
@@ -1781,7 +1906,7 @@ const CHART_CSS = `
   text-transform: uppercase; letter-spacing: 1px;
   transition: border-color 0.1s;
 }
-.chart-search-input:focus { border-color: #f5a623; }
+.chart-search-input:focus { border-color: #0f7d40; }
 .chart-search-input::placeholder { color: #4a5568; text-transform: none; letter-spacing: 0; }
 .search-suggestions {
   position: absolute; top: calc(100% + 4px); left: 0; right: 0;
@@ -1796,7 +1921,7 @@ const CHART_CSS = `
 }
 .suggestion-item:last-child { border-bottom: none; }
 .suggestion-item:hover { background: #1a1d2e; }
-.sug-sym { color: #f5a623; font-weight: 600; min-width: 56px; }
+.sug-sym { color: #0f7d40; font-weight: 600; min-width: 56px; }
 .sug-name { color: #718096; font-size: 11px; }
 
 /* ── Watchlist chips ── */
@@ -1809,7 +1934,7 @@ const CHART_CSS = `
   display: flex; align-items: center; gap: 6px;
 }
 .watch-chip:hover { border-color: #263045; color: #c8d3e0; }
-.watch-chip.active { color: #f5a623; border-color: #f5a623; background: rgba(245,166,35,0.06); }
+.watch-chip.active { color: #0f7d40; border-color: #0f7d40; background: rgba(15,125,64,0.06); }
 .watch-chip .chip-chg { font-size: 10px; }
 .watch-chip .chip-chg.pos { color: #00d97e; }
 .watch-chip .chip-chg.neg { color: #f04438; }
@@ -1834,7 +1959,7 @@ const CHART_CSS = `
   transition: all 0.1s;
 }
 .ctrl-btn:hover { background: #141820; color: #c8d3e0; }
-.ctrl-btn.active { background: #141820; color: #f5a623; }
+.ctrl-btn.active { background: #141820; color: #0f7d40; }
 
 .overlay-toggles { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .overlay-toggle {
@@ -1871,7 +1996,7 @@ const CHART_CSS = `
 .ss-value { font-family: 'IBM Plex Mono', monospace; font-size: 18px; font-weight: 600; color: #e8f0fa; line-height: 1; letter-spacing: -0.5px; }
 .ss-value.pos { color: #00d97e; }
 .ss-value.neg { color: #f04438; }
-.ss-value.amber { color: #f5a623; }
+.ss-value.amber { color: #0f7d40; }
 .ss-sub { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #4a5568; }
 .ss-badge {
   display: inline-flex; align-items: center; gap: 3px;
@@ -1935,7 +2060,7 @@ const CHART_CSS = `
   height: 100%; gap: 12px;
   font-family: 'IBM Plex Mono', monospace; color: #4a5568;
 }
-.chart-empty-title { font-family: 'Bebas Neue', sans-serif; font-size: 32px; color: #1e2535; letter-spacing: 2px; }
+.chart-empty-title { font-family: 'Bebas Neue', sans-serif; font-size: 32px; color: var(--border2); letter-spacing: 2px; }
 .chart-empty-sub { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
 
 /* ── Legend ── */
@@ -2384,7 +2509,7 @@ function StockChart({ symbol, stockInfo, onClose }) {
     { key: "sma50",     label: "SMA 50",              color: "#3d7ef5" },
     { key: "sma150",    label: "SMA 150",              color: "#0fc0d0" },
     { key: "smaCustom", label: `SMA ${customPeriod}`,  color: "#a78bfa" },
-    { key: "breakouts", label: "BREAKOUTS",            color: "#f5a623" },
+    { key: "breakouts", label: "BREAKOUTS",            color: "#0f7d40" },
     { key: "volume",    label: "VOLUME",               color: "#4a5568" },
   ];
 
@@ -2398,7 +2523,7 @@ function StockChart({ symbol, stockInfo, onClose }) {
       <div className="stock-stats-bar" style={{ padding: "10px 20px" }}>
         {/* Symbol + name */}
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginRight: 18 }}>
-          <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 30, color: "#f5a623", letterSpacing: 2, lineHeight: 1 }}>{symbol}</div>
+          <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 30, color: "#0f7d40", letterSpacing: 2, lineHeight: 1 }}>{symbol}</div>
           <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: "#718096", maxWidth: 160, lineHeight: 1.4 }}>{stockInfo.name}</div>
           {onClose && (
             <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#4a5568", padding: 4 }}>
@@ -2559,8 +2684,8 @@ function StockChart({ symbol, stockInfo, onClose }) {
           <svg ref={svgRef} style={{ display: "block", width: "100%", height: "100%", userSelect: "none" }}>
             <defs>
               <linearGradient id="lgbull" x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%"   stopColor="#f5a623" stopOpacity="0.18" />
-                <stop offset="100%" stopColor="#f5a623" stopOpacity="0" />
+                <stop offset="0%"   stopColor="#0f7d40" stopOpacity="0.18" />
+                <stop offset="100%" stopColor="#0f7d40" stopOpacity="0" />
               </linearGradient>
               <clipPath id="chartClip">
                 <rect x={PAD.left} y={0} width={W + 2} height={dims.h + 10} />
@@ -2593,7 +2718,7 @@ function StockChart({ symbol, stockInfo, onClose }) {
             {chartType === "line" && (
               <g clipPath="url(#chartClip)">
                 <path d={linePath + ` L${xOf(n-1)},${PAD.top+H} L${xOf(0)},${PAD.top+H} Z`} fill="url(#lgbull)" />
-                <path d={linePath} fill="none" stroke="#f5a623" strokeWidth="1.6" strokeLinejoin="round" />
+                <path d={linePath} fill="none" stroke="#0f7d40" strokeWidth="1.6" strokeLinejoin="round" />
               </g>
             )}
 
@@ -2616,7 +2741,7 @@ function StockChart({ symbol, stockInfo, onClose }) {
                         fillOpacity={bull ? 0.85 : 0.7} fill={col}
                         stroke={isHov ? "#fff" : col} strokeWidth={isHov ? 0.6 : 0.3}
                       />
-                      {d.isEarnings && <circle cx={x} cy={bodyTop - 5} r={3} fill="#f5a623" opacity="0.9" />}
+                      {d.isEarnings && <circle cx={x} cy={bodyTop - 5} r={3} fill="#0f7d40" opacity="0.9" />}
                     </g>
                   );
                 })}
@@ -2672,9 +2797,9 @@ function StockChart({ symbol, stockInfo, onClose }) {
                 <line x1={PAD.left} y1={crosshair.y} x2={dims.w - PAD.right} y2={crosshair.y} stroke="#263045" strokeWidth="1" />
                 {crosshair.y >= PAD.top && crosshair.y <= PAD.top + H && (
                   <>
-                    <rect x={dims.w - PAD.right} y={crosshair.y - 9} width={PAD.right - 1} height={18} fill="#f5a623" />
+                    <rect x={dims.w - PAD.right} y={crosshair.y - 9} width={PAD.right - 1} height={18} fill="#0f7d40" />
                     <text x={dims.w - PAD.right + 4} y={crosshair.y + 4}
-                      fontFamily="IBM Plex Mono" fontSize="10" fontWeight="700" fill="#0a0600">
+                      fontFamily="IBM Plex Mono" fontSize="10" fontWeight="700" fill="#e8f0fa">
                       ${crosshair.priceCross?.toFixed(2)}
                     </text>
                   </>
@@ -2745,7 +2870,7 @@ function StockChart({ symbol, stockInfo, onClose }) {
           }}>
             <div className="tt-date">
               {new Date(tooltip.d.date).toLocaleDateString("en-US", { weekday: "short", year: "numeric", month: "short", day: "numeric" })}
-              {tooltip.d.isEarnings && <span style={{ marginLeft: 8, color: "#f5a623", fontSize: 9, background: "rgba(245,166,35,0.1)", padding: "1px 5px", border: "1px solid rgba(245,166,35,0.2)" }}>EARNINGS</span>}
+              {tooltip.d.isEarnings && <span style={{ marginLeft: 8, color: "#0f7d40", fontSize: 9, background: "rgba(15,125,64,0.1)", padding: "1px 5px", border: "1px solid rgba(15,125,64,0.2)" }}>EARNINGS</span>}
             </div>
             <div className="tt-row"><span className="tt-key">OPEN</span>  <span className="tt-val">${tooltip.d.open.toFixed(2)}</span></div>
             <div className="tt-row"><span className="tt-key">HIGH</span>  <span className="tt-val" style={{ color: "#00d97e" }}>${tooltip.d.high.toFixed(2)}</span></div>
@@ -2972,7 +3097,7 @@ const IMPORT_CSS = `
 }
 .broker-card:hover { border-color: var(--border2); }
 .broker-card:hover::before { background: var(--amber); }
-.broker-card.selected { border-color: var(--amber); background: rgba(245,166,35,0.04); }
+.broker-card.selected { border-color: var(--amber); background: rgba(15,125,64,0.04); }
 .broker-card.selected::before { background: var(--amber); }
 .broker-logo-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .broker-logo {
@@ -3005,7 +3130,7 @@ const IMPORT_CSS = `
 }
 .dl-step-num {
   width: 24px; height: 24px; border-radius: 1px;
-  background: rgba(245,166,35,0.1); border: 1px solid rgba(245,166,35,0.25);
+  background: rgba(15,125,64,0.1); border: 1px solid rgba(15,125,64,0.25);
   display: flex; align-items: center; justify-content: center;
   font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--amber);
   flex-shrink: 0; margin-top: 1px;
@@ -3022,7 +3147,7 @@ const IMPORT_CSS = `
   background: var(--bg3);
 }
 .drop-zone:hover, .drop-zone.drag-over {
-  border-color: var(--amber); background: rgba(245,166,35,0.04);
+  border-color: var(--amber); background: rgba(15,125,64,0.04);
 }
 .drop-zone-icon { font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin-top: 8px; }
 .drop-zone-sub { font-family: var(--font-mono); font-size: 10px; color: var(--muted); margin-top: 4px; }
@@ -3088,7 +3213,7 @@ select.entry-form-input option { background: var(--bg3); }
   padding: 2px 7px; border-radius: 1px; text-transform: uppercase; letter-spacing: 0.5px;
 }
 .at-stock   { color: #3d7ef5; background: rgba(61,126,245,0.08); border: 1px solid rgba(61,126,245,0.2); }
-.at-crypto  { color: #f5a623; background: rgba(245,166,35,0.08); border: 1px solid rgba(245,166,35,0.2); }
+.at-crypto  { color: #0f7d40; background: rgba(15,125,64,0.08); border: 1px solid rgba(15,125,64,0.2); }
 .at-metalsphisical  { color: #fbbf24; background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.2); }
 .at-metalsetf { color: #0fc0d0; background: rgba(15,192,208,0.08); border: 1px solid rgba(15,192,208,0.2); }
 .delete-row-btn {
@@ -3119,7 +3244,7 @@ select.entry-form-input option { background: var(--bg3); }
   font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.5px;
 }
 .review-empty-title {
-  font-family: var(--font-disp); font-size: 28px; color: var(--border2);
+  font-family: var(--font-disp); font-size: 28px; color: var(--muted);
   letter-spacing: 2px; margin-bottom: 8px;
 }
 `;
@@ -3804,10 +3929,18 @@ export default function App() {
     { id:"import",       label:"IMPORT",       Icon:Ic.import },
   ];
 
+  if (page === "register") return (
+    <>
+      <style>{GLOBAL_CSS}</style>
+      <RegisterPage onLogin={handleLogin} onBack={()=>setPage("login")} backendOk={backendOk}/>
+      <ToastContainer toasts={toasts}/>
+    </>
+  );
+
   if (page === "login") return (
     <>
       <style>{GLOBAL_CSS}</style>
-      <LoginPage onLogin={handleLogin}/>
+      <LoginPage onLogin={handleLogin} onRegister={()=>setPage("register")} backendOk={backendOk}/>
       <ToastContainer toasts={toasts}/>
     </>
   );
@@ -3819,21 +3952,25 @@ export default function App() {
         {/* Icon sidebar */}
         <aside className="sidebar">
           <div className="sidebar-logo" onClick={()=>setPage("dashboard")}>
-            <div className="logo-glyph">FB</div>
+            <div className="logo-glyph">TT</div>
+            <div className="logo-name">TICKER-TAP</div>
           </div>
           <nav className="sidebar-nav">
             {NAV.map(n=>(
               <button key={n.id} className={`nav-btn${page===n.id?" active":""}`} onClick={()=>setPage(n.id)}>
                 <n.Icon/>
-                <div className="nav-tooltip">{n.label}</div>
+                <span className="nav-label">{n.label}</span>
               </button>
             ))}
           </nav>
           <div className="sidebar-bottom">
-            <div className="avatar-btn">AM</div>
+            <div className="avatar-btn" style={{width:"100%",borderRadius:4,padding:"0 10px",gap:10,display:"flex",alignItems:"center",height:36}}>
+              <span>{authUser ? (authUser.first_name?.[0]||"") + (authUser.last_name?.[0]||"") : "??"}</span>
+              <span style={{fontFamily:"var(--font-mono)",fontSize:11,color:"var(--amber)",letterSpacing:"0.5px"}}>{authUser ? `${(authUser.first_name||"").toUpperCase()} ${(authUser.last_name?.[0]||"").toUpperCase()}.` : "USER"}</span>
+            </div>
             <button className="nav-btn" onClick={handleLogout}>
               <Ic.logout/>
-              <div className="nav-tooltip">SIGN OUT</div>
+              <span className="nav-label">SIGN OUT</span>
             </button>
           </div>
         </aside>

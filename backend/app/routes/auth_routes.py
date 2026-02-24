@@ -97,7 +97,13 @@ async def login(
     db.add(audit)
     await db.commit()
 
-    return TokenResponse(access_token=token)
+    return TokenResponse(
+        access_token=token,
+        user_id=user.user_id,
+        email=user.email,
+        first_name=user.first_name,
+        last_name=user.last_name,
+    )
 
 
 async def get_current_user(

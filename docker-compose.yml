@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: financebuy
+      POSTGRES_DB: tickerTap
     volumes:
       - db_data:/var/lib/postgresql/data
     networks:
@@ -30,7 +30,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/financebuy
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/tickerTap
       JWT_SECRET: replace-this-secret
       ALLOWED_ORIGINS: http://localhost:3000
     ports:
