@@ -35,7 +35,7 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: financebuy
+          POSTGRES_DB: tickerTap
         options: >-
           --health-cmd "pg_isready -U postgres" --health-interval 10s
           --health-timeout 5s --health-retries 5
@@ -46,7 +46,7 @@ jobs:
         ports:
           - 6379:6379
     env:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/financebuy
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/tickerTap
       JWT_SECRET: replace-this-secret
     steps:
       - uses: actions/checkout@v4
@@ -79,7 +79,7 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: financebuy
+          POSTGRES_DB: tickerTap
         options: >-
           --health-cmd "pg_isready -U postgres" --health-interval 10s
           --health-timeout 5s --health-retries 5
@@ -90,7 +90,7 @@ jobs:
         ports:
           - 6379:6379
     env:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/financebuy
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/tickerTap
       JWT_SECRET: replace-this-secret
     steps:
       - uses: actions/checkout@v4
@@ -120,7 +120,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
       - name: Build backend image (no-cache)
         run: |
-          docker build --no-cache -f backend/Dockerfile -t financebuy-backend:ci .
+          docker build --no-cache -f backend/Dockerfile -t tickerTap-backend:ci .
 
   tests-in-image:
     name: Run tests inside built image (docker compose)

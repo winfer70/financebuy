@@ -1,6 +1,6 @@
-## FinanceBuy Backend API
+## tickerTap Backend API
 
-This document describes the current FinanceBuy backend API. All authenticated
+This document describes the current tickerTap backend API. All authenticated
 endpoints use bearer tokens returned from `POST /auth/login`:
 
 ```http

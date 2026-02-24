@@ -2,13 +2,13 @@
 ## Finance Investment Application
 
 **Date:** January 8, 2026  
-**Project:** FinanceBuy Investment Platform
+**Project:** tickerTap Investment Platform
 
 ---
 
 ## Executive Summary
 
-This document provides a comprehensive evaluation of database solutions for the FinanceBuy investment platform. We analyze both self-hosted and cloud-managed options, considering performance, reliability, security, scalability, and cost implications specific to financial applications.
+This document provides a comprehensive evaluation of database solutions for the tickerTap investment platform. We analyze both self-hosted and cloud-managed options, considering performance, reliability, security, scalability, and cost implications specific to financial applications.
 
 ---
 
@@ -584,20 +584,20 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY portfolio_summary;
 
 -- Application role (read/write on specific tables)
 CREATE ROLE app_user WITH LOGIN PASSWORD 'strong_password';
-GRANT CONNECT ON DATABASE financebuy TO app_user;
+GRANT CONNECT ON DATABASE tickerTap TO app_user;
 GRANT USAGE ON SCHEMA public TO app_user;
 GRANT SELECT, INSERT, UPDATE ON users, accounts, transactions, holdings, orders TO app_user;
 GRANT SELECT ON securities TO app_user;
 
 -- Readonly role for analytics
 CREATE ROLE analytics_user WITH LOGIN PASSWORD 'analytics_password';
-GRANT CONNECT ON DATABASE financebuy TO analytics_user;
+GRANT CONNECT ON DATABASE tickerTap TO analytics_user;
 GRANT USAGE ON SCHEMA public TO analytics_user;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO analytics_user;
 
 -- Admin role
 CREATE ROLE db_admin WITH LOGIN PASSWORD 'admin_password' CREATEDB;
-GRANT ALL PRIVILEGES ON DATABASE financebuy TO db_admin;
+GRANT ALL PRIVILEGES ON DATABASE tickerTap TO db_admin;
 
 -- Row-level security
 ALTER TABLE accounts ENABLE ROW LEVEL SECURITY;
@@ -864,7 +864,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.pool import QueuePool
 
 # Production configuration
-DATABASE_URL = "postgresql://app_user:password@db-primary.region.rds.amazonaws.com:5432/financebuy"
+DATABASE_URL = "postgresql://app_user:password@db-primary.region.rds.amazonaws.com:5432/tickerTap"
 
 engine = create_engine(
     DATABASE_URL,
@@ -881,7 +881,7 @@ engine = create_engine(
 )
 
 # Read replica configuration
-READ_REPLICA_URL = "postgresql://app_user:password@db-replica.region.rds.amazonaws.com:5432/financebuy"
+READ_REPLICA_URL = "postgresql://app_user:password@db-replica.region.rds.amazonaws.com:5432/tickerTap"
 
 read_engine = create_engine(
     READ_REPLICA_URL,
@@ -1262,7 +1262,7 @@ Target KPIs:
 
 ## 13. Conclusion
 
-For the FinanceBuy investment platform, we recommend:
+For the tickerTap investment platform, we recommend:
 
 ### Primary Recommendation: **Cloud-Managed PostgreSQL (AWS RDS)**
 
@@ -1302,4 +1302,4 @@ This appREDACTED balances immediate needs with long-term flexibility, allowing t
 **Document Version**: 1.0  
 **Last Updated**: January 8, 2026  
 **Next Review**: April 8, 2026  
-**Owner**: FinanceBuy Engineering Team
+**Owner**: tickerTap Engineering Team

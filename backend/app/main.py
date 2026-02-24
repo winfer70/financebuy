@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .routes import accounts, admin, auth_routes, orders, portfolio, transactions
 
-app = FastAPI(title="FinanceBuy API")
+app = FastAPI(title="tickerTap API")
 
 # Minimal CORS - adjust origins in production
 app.add_middleware(

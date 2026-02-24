@@ -56,7 +56,7 @@ jobs:
           context: .
           file: backend/Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository }}/financebuy:latest
+          tags: ghcr.io/${{ github.repository }}/tickerTap:latest
 
       - name: Sign image (cosign)
         env:

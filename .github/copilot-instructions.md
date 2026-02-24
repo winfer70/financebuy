@@ -1,4 +1,4 @@
-<!-- Copilot instructions — FinanceBuy -->
+<!-- Copilot instructions — tickerTap -->
 
 Purpose: concise, repo-specific guidance to help AI coding agents be productive quickly.
 
@@ -42,8 +42,8 @@ When editing dependencies
 If you'd like, I can also:
 - add a compact GitHub Actions workflow that runs the containerized tests and builds the `backend` image, or
 - expand the migrations / PR checklist section with concrete examples.
-<!-- Guidance for AI coding agents working on FinanceBuy -->
-# Copilot instructions — FinanceBuy
+<!-- Guidance for AI coding agents working on tickerTap -->
+# Copilot instructions — tickerTap
 
 Purpose: concise, actionable notes to help an AI code assistant be productive in this repo.
 
@@ -61,7 +61,7 @@ Purpose: concise, actionable notes to help an AI code assistant be productive in
 **Developer workflows (concrete commands)**
 - Run locally (dev):
   - `cd backend`
-  - `DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/financebuy \
+  - `DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/tickerTap \
     uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - Docker-compose (build + tests):
   - `docker compose up --build -d`
@@ -92,7 +92,7 @@ Purpose: concise, actionable notes to help an AI code assistant be productive in
 - [backend/tests/test_health.py](backend/tests/test_health.py)
 
 If anything above is unclear or you want more examples (CI, migrations, or common PR checklist), tell me which section to expand.
-# Copilot instructions — FinanceBuy
+# Copilot instructions — tickerTap
 
 This repository is a small FastAPI service (backend) with Postgres + Redis and an opinionated container build. The guidance below highlights project-specific patterns, commands, and files an AI coding agent should use to be productive.
 

@@ -1,4 +1,4 @@
-# Agent Actions — FinanceBuy
+# Agent Actions — tickerTap
 
 Date: 2026-01-09
 
@@ -30,7 +30,7 @@ This document lists the edits and CI/agent work performed by the AI assistant du
 
 ```bash
 cd backend
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/financebuy \
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/tickerTap \
   uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 

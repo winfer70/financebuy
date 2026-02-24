@@ -1,4 +1,4 @@
-# FastAPI Starter — FinanceBuy
+# FastAPI Starter — tickerTap
 
 Minimal starter demonstrating secure patterns: async DB, explicit transactions, Argon2 password hashing, and container build.
 

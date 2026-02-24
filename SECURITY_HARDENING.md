@@ -1,4 +1,4 @@
-# Security Hardening Plan — FinanceBuy
+# Security Hardening Plan — tickerTap
 
 **Date:** January 8, 2026
 **Purpose:** Ensure the application and databases follow industry best practices so the network is not exposed and sensitive information is protected.
@@ -158,4 +158,4 @@
 
 ---
 
-*File created by FinanceBuy engineering assistant.*
+*File created by tickerTap engineering assistant.*
