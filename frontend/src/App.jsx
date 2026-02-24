@@ -3,7 +3,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 /* ═══════════════════════════════════════════════════════════════════════════
    API CLIENT — centralised fetch wrapper with JWT injection + error handling
 ═══════════════════════════════════════════════════════════════════════════ */
-const API_BASE = "https://ticker-tap.com";
+const API_BASE = import.meta.env.VITE_API_URL || "https://ticker-tap.com";
 
 async function apiFetch(path, { method="GET", body, token } = {}) {
   const headers = { "Content-Type": "application/json" };
@@ -38,10 +38,24 @@ const api = {
 
   // Orders
   listOrders:       (accountId, token)   => apiFetch(`/orders/?account_id=${accountId}`, { token }),
-  cancelOrder:      (orderId, token)     => apiFetch(`/orders/${orderId}/cancel`, { method:"PATCH", token }),
+  cancelOrder:      (orderId, token)     => apiFetch(`/orders/${orderId}/cancel`, { method:"POST", token }),
 
   // Health check
   health:           ()                   => apiFetch("/health"),
+
+  // Password recovery
+  forgotPassword:   (email)              => apiFetch("/auth/forgot-password", { method:"POST", body:{ email } }),
+  resetPassword:    (token, new_password)=> apiFetch("/auth/reset-password",  { method:"POST", body:{ token, new_password } }),
+
+  // Market data
+  getQuote:         (symbol, token)      => apiFetch(`/market/quote/${symbol}`, { token }),
+  getSymbols:       (token)              => apiFetch("/market/symbols", { token }),
+  getOhlcv:         (symbol, token, years=5) => apiFetch(`/market/ohlcv/${symbol}?years=${years}`, { token }),
+  searchSymbols:    (query, token)       => apiFetch(`/market/search?q=${encodeURIComponent(query)}`, { token }),
+
+  // Portfolio
+  getPositions:     (token)              => apiFetch("/portfolio/positions", { token }),
+  getPortfolioSummary: (token)           => apiFetch("/portfolio/summary", { token }),
 };
 
 /* ── useApi hook: fetch with loading/error/data states ── */
@@ -741,6 +755,7 @@ const Ic = {
   file:         ()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>,
   trash:        ()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>,
   externalLink: ()=><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></svg>,
+  back:         ()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>,
 };
 
 /* ─── MINI SPARKLINE SVG ────────────────────────────────────────────────────── */
@@ -770,12 +785,17 @@ function Sparkline({ positive, w=80, h=24 }) {
 }
 
 /* ─── AREA CHART (portfolio) ─────────────────────────────────────────────────── */
-function PortfolioChart({ height=160 }) {
-  const raw = useRef(Array.from({length:60},(_,i)=>
-    42000 + i*380 + (Math.sin(i*0.4)*800) + (Math.random()-0.35)*1200
-  )).current;
+function PortfolioChart({ height=160, data=null, period="3M" }) {
+  const raw = useMemo(() => {
+    if (data && data.length > 0) return data.map(d => typeof d === "number" ? d : d.close || d);
+    return Array.from({length:60},(_,i)=>
+      42000 + i*380 + (Math.sin(i*0.4)*800) + ((Math.sin(i*1.7+3)*0.5+0.15))*1200
+    );
+  }, [data]);
+  const [hover, setHover] = useState(null);
+  const svgRef = useRef(null);
   const W=600, H=height;
-  const mn=Math.min(...raw), mx=Math.max(...raw), rng=mx-mn;
+  const mn=Math.min(...raw), mx=Math.max(...raw), rng=mx-mn||1;
   const pts = raw.map((v,i)=>({
     x:(i/(raw.length-1))*W,
     y:H-((v-mn)/rng)*(H-16)-8
@@ -784,13 +804,24 @@ function PortfolioChart({ height=160 }) {
   const fill = line+` L${W},${H} L0,${H} Z`;
   const yVals = [mx, (mx+mn)/2, mn].map(v=>"$"+(v/1000).toFixed(1)+"K");
   const xLabels = ["DEC '25","JAN '26","FEB '26"];
+
+  const handleMouseMove = useCallback((e) => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const relX = (e.clientX - rect.left) / rect.width * W;
+    const idx = Math.min(Math.max(Math.round((relX / W) * (raw.length - 1)), 0), raw.length - 1);
+    setHover({ idx, x: pts[idx].x, y: pts[idx].y, value: raw[idx] });
+  }, [raw, pts]);
+
   return (
-    <div className="chart-area">
+    <div className="chart-area" style={{position:"relative"}}>
       <div className="chart-yaxis">
         {yVals.map((v,i)=><div key={i} className="chart-yval">{v}</div>)}
       </div>
       <div className="chart-svg-wrap">
-        <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none">
+        <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none"
+             onMouseMove={handleMouseMove} onMouseLeave={()=>setHover(null)} style={{cursor:"crosshair"}}>
           <defs>
             <linearGradient id="ag" x1="0" x2="0" y1="0" y2="1">
               <stop offset="0%" stopColor="#0f7d40" stopOpacity="0.18"/>
@@ -802,10 +833,30 @@ function PortfolioChart({ height=160 }) {
           ))}
           <path d={fill} fill="url(#ag)" className="chart-fill"/>
           <path d={line} className="chart-line"/>
-          {/* last point dot */}
-          <circle cx={pts[pts.length-1].x} cy={pts[pts.length-1].y} r="3" fill="#0f7d40"/>
-          <circle cx={pts[pts.length-1].x} cy={pts[pts.length-1].y} r="6" fill="#0f7d40" opacity="0.2"/>
+          {hover && (
+            <>
+              <line x1={hover.x} y1={0} x2={hover.x} y2={H} stroke="var(--muted)" strokeWidth="0.5" strokeDasharray="2,2"/>
+              <circle cx={hover.x} cy={hover.y} r="4" fill="#0f7d40" stroke="var(--panel)" strokeWidth="2"/>
+            </>
+          )}
+          {!hover && (
+            <>
+              <circle cx={pts[pts.length-1].x} cy={pts[pts.length-1].y} r="3" fill="#0f7d40"/>
+              <circle cx={pts[pts.length-1].x} cy={pts[pts.length-1].y} r="6" fill="#0f7d40" opacity="0.2"/>
+            </>
+          )}
         </svg>
+        {hover && (
+          <div style={{
+            position:"absolute", left:`${(hover.x/W)*100}%`, top:hover.y-36,
+            transform:"translateX(-50%)", background:"var(--bg2)", border:"1px solid var(--border)",
+            padding:"4px 8px", borderRadius:2, pointerEvents:"none",
+            fontFamily:"var(--font-mono)", fontSize:10, color:"var(--amber)",
+            whiteSpace:"nowrap", zIndex:5,
+          }}>
+            ${(hover.value/1000).toFixed(2)}K
+          </div>
+        )}
       </div>
       <div className="chart-xaxis">
         {xLabels.map((l,i)=><div key={i} className="chart-xlabel">{l}</div>)}
@@ -817,13 +868,22 @@ function PortfolioChart({ height=160 }) {
 /* ─── DONUT CHART ──────────────────────────────────────────────────────────── */
 const PALETTE = ["#0f7d40","#3d7ef5","#00d97e","#f04438","#0fc0d0","#a78bfa","#fb923c"];
 
-function AllocationDonut() {
-  const total = HOLDINGS.reduce((s,h)=>s+h.qty*h.price,0);
-  const slices = HOLDINGS.map((h,i)=>({
+function AllocationDonut({ holdings: holdingsProp = null }) {
+  const [hoverIdx, setHoverIdx] = useState(null);
+  const data = holdingsProp || [];
+  const total = data.reduce((s,h)=>s+(h.quantity||h.qty||0)*(h.current_price||h.price||0),0);
+  if (total === 0) return (
+    <div style={{fontFamily:"var(--font-mono)",fontSize:11,color:"var(--muted)",padding:"24px 0",textAlign:"center"}}>
+      NO ALLOCATION DATA
+    </div>
+  );
+  const slices = data.map((h,i)=>({
     symbol: h.symbol,
-    val: h.qty*h.price,
-    pct: (h.qty*h.price/total)*100,
-    color: PALETTE[i],
+    name: h.name || h.symbol,
+    qty: h.quantity||h.qty||0,
+    val: (h.quantity||h.qty||0)*(h.current_price||h.price||0),
+    pct: ((h.quantity||h.qty||0)*(h.current_price||h.price||0)/total)*100,
+    color: PALETTE[i % PALETTE.length],
   }));
   const R=52, cx=60, cy=60, gap=0.03;
   let angle = -Math.PI/2;
@@ -840,17 +900,41 @@ function AllocationDonut() {
     <div style={{display:"flex",gap:16,alignItems:"flex-start"}}>
       <svg viewBox="0 0 120 120" width={110} height={110} style={{flexShrink:0}}>
         {paths.map((p,i)=>(
-          <path key={i} d={p.d} fill={p.color} opacity={0.88} stroke="var(--panel)" strokeWidth="1"/>
+          <path key={i} d={p.d} fill={p.color}
+            opacity={hoverIdx === null ? 0.88 : hoverIdx === i ? 1 : 0.4}
+            stroke="var(--panel)" strokeWidth="1"
+            style={{cursor:"pointer",transition:"opacity 0.15s"}}
+            onMouseEnter={()=>setHoverIdx(i)} onMouseLeave={()=>setHoverIdx(null)}
+          />
         ))}
         <circle cx={cx} cy={cy} r={32} fill="var(--panel)"/>
-        <text x={cx} y={cy-5} textAnchor="middle" fill="var(--muted)" fontSize="8" fontFamily="IBM Plex Mono" letterSpacing="1">TOTAL</text>
-        <text x={cx} y={cy+10} textAnchor="middle" fill="var(--amber)" fontSize="11" fontFamily="IBM Plex Mono" fontWeight="600">
-          ${(total/1000).toFixed(1)}K
-        </text>
+        {hoverIdx !== null ? (
+          <>
+            <text x={cx} y={cy-10} textAnchor="middle" fill={slices[hoverIdx].color} fontSize="8" fontFamily="IBM Plex Mono" fontWeight="600">
+              {slices[hoverIdx].symbol}
+            </text>
+            <text x={cx} y={cy+2} textAnchor="middle" fill="var(--text)" fontSize="9" fontFamily="IBM Plex Mono">
+              {slices[hoverIdx].pct.toFixed(1)}%
+            </text>
+            <text x={cx} y={cy+14} textAnchor="middle" fill="var(--amber)" fontSize="9" fontFamily="IBM Plex Mono">
+              ${(slices[hoverIdx].val/1000).toFixed(2)}K
+            </text>
+          </>
+        ) : (
+          <>
+            <text x={cx} y={cy-5} textAnchor="middle" fill="var(--muted)" fontSize="8" fontFamily="IBM Plex Mono" letterSpacing="1">TOTAL</text>
+            <text x={cx} y={cy+10} textAnchor="middle" fill="var(--amber)" fontSize="11" fontFamily="IBM Plex Mono" fontWeight="600">
+              ${(total/1000).toFixed(1)}K
+            </text>
+          </>
+        )}
       </svg>
       <div className="donut-legend">
         {slices.map((s,i)=>(
-          <div key={i} className="donut-row">
+          <div key={i} className="donut-row"
+            style={{opacity: hoverIdx === null ? 1 : hoverIdx === i ? 1 : 0.4, transition:"opacity 0.15s", cursor:"pointer"}}
+            onMouseEnter={()=>setHoverIdx(i)} onMouseLeave={()=>setHoverIdx(null)}
+          >
             <div className="donut-swatch" style={{background:s.color}}/>
             <span className="donut-sym">{s.symbol}</span>
             <span style={{color:"var(--mid)",fontSize:10,fontFamily:"var(--font-mono)"}}>
@@ -872,9 +956,79 @@ function Clock() {
   return <span className="clock">{fmt(time)} EST</span>;
 }
 
+/* ─── NYSE MARKET STATUS ──────────────────────────────────────────────────── */
+function useMarketStatus() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30000);
+    return () => clearInterval(id);
+  }, []);
+
+  const etStr = now.toLocaleString("en-US", { timeZone: "America/New_York" });
+  const et = new Date(etStr);
+  const day = et.getDay();
+  const totalMin = et.getHours() * 60 + et.getMinutes();
+
+  const openMin = 9 * 60 + 30;   // 9:30 AM ET
+  const closeMin = 16 * 60;      // 4:00 PM ET
+  const isWeekday = day >= 1 && day <= 5;
+  const isOpen = isWeekday && totalMin >= openMin && totalMin < closeMin;
+
+  let countdown = "";
+  if (!isOpen) {
+    const nextOpen = new Date(et);
+    if (isWeekday && totalMin < openMin) {
+      nextOpen.setHours(9, 30, 0, 0);
+    } else {
+      nextOpen.setDate(nextOpen.getDate() + 1);
+      while (nextOpen.getDay() === 0 || nextOpen.getDay() === 6) {
+        nextOpen.setDate(nextOpen.getDate() + 1);
+      }
+      nextOpen.setHours(9, 30, 0, 0);
+    }
+    const diffMs = nextOpen - et;
+    const diffH = Math.floor(diffMs / 3600000);
+    const diffM = Math.floor((diffMs % 3600000) / 60000);
+    countdown = `${diffH}H ${diffM}M`;
+  }
+
+  const dateStr = now.toLocaleDateString("en-US", {
+    weekday: "short", day: "2-digit", month: "short", year: "numeric",
+    timeZone: "America/New_York"
+  }).toUpperCase();
+
+  return { isOpen, countdown, dateStr };
+}
+
 /* ─── TICKER STRIP ─────────────────────────────────────────────────────────── */
-function TickerStrip() {
-  const doubled = [...TICKER_DATA,...TICKER_DATA];
+function TickerStrip({ token }) {
+  const SYMBOLS = ["AAPL","MSFT","NVDA","TSLA","AMZN","GOOGL","META","SPY","QQQ","AMD"];
+  const [quotes, setQuotes] = useState(TICKER_DATA);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    const fetchQuotes = () => {
+      Promise.allSettled(SYMBOLS.map(s => api.getQuote(s, token)))
+        .then(results => {
+          if (cancelled) return;
+          const live = results
+            .filter(r => r.status === "fulfilled")
+            .map(r => ({
+              sym: r.value.symbol,
+              price: Number(r.value.price).toFixed(2),
+              chg: `${r.value.change_pct >= 0 ? "+" : ""}${Number(r.value.change_pct).toFixed(2)}%`,
+              pos: r.value.change_pct >= 0,
+            }));
+          if (live.length > 0) setQuotes(live);
+        });
+    };
+    fetchQuotes();
+    const id = setInterval(fetchQuotes, 60000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [token]);
+
+  const doubled = [...quotes,...quotes];
   return (
     <div className="ticker-strip">
       <div className="ticker-inner">
@@ -993,11 +1147,233 @@ function TxModal({ onClose, onSubmit }) {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
+   PAGE: FORGOT PASSWORD
+───────────────────────────────────────────────────────────────────────────── */
+function ForgotPasswordPage({ onBack, backendOk }) {
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [err, setErr] = useState("");
+
+  const handleSubmit = async () => {
+    if (!email) { setErr("EMAIL REQUIRED"); return; }
+    setErr(""); setLoading(true);
+    try {
+      await api.forgotPassword(email);
+      setSent(true);
+    } catch(e) {
+      setErr(e.message || "REQUEST FAILED");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="login-wrap">
+      <div className="login-grid-bg"/>
+      <div className="login-glow"/>
+      <div className="login-left">
+        <div className="login-brand">
+          <div className="login-brand-mark">TICKER-TAP</div>
+          <div className="login-brand-sub">Professional Investment Terminal · v4.2</div>
+        </div>
+        <div className="login-stats stagger">
+          <div className="login-stat-row">
+            {[{val:"$2.4B",lbl:"Assets Under Management"},{val:"147K",lbl:"Active Accounts"}].map((s,i)=>(
+              <div key={i}><div className="login-stat-val">{s.val}</div><div className="login-stat-lbl">{s.lbl}</div></div>
+            ))}
+          </div>
+          <div className="login-stat-row">
+            {[{val:"99.97%",lbl:"System Uptime"},{val:"< 4ms",lbl:"Avg Execution Time"}].map((s,i)=>(
+              <div key={i}><div className="login-stat-val">{s.val}</div><div className="login-stat-lbl">{s.lbl}</div></div>
+            ))}
+          </div>
+        </div>
+        <div className="login-divider"/>
+        <div style={{marginTop:24,display:"flex",flexDirection:"column",gap:8}}>
+          {TICKER_DATA.slice(0,5).map((t,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:12,fontFamily:"var(--font-mono)",fontSize:12}}>
+              <span style={{color:"var(--bright)",minWidth:50,fontWeight:500}}>{t.sym}</span>
+              <span style={{color:"var(--mid)"}}>{t.price}</span>
+              <span style={{color:t.pos?"var(--green)":"var(--red)"}}>{t.chg}</span>
+              <Sparkline positive={t.pos} w={80} h={18}/>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="login-right">
+        <div className="login-head">RESET PASSWORD</div>
+        <div className="login-subhead">Enter your account email to receive a reset link</div>
+        <div className="login-form">
+          {sent ? (
+            <div style={{display:"flex",flexDirection:"column",gap:16}}>
+              <div style={{
+                fontFamily:"var(--font-mono)",fontSize:12,color:"var(--green)",
+                border:"1px solid var(--green)",borderRadius:2,padding:"14px 16px",lineHeight:1.6
+              }}>
+                CHECK YOUR EMAIL<br/>
+                <span style={{color:"var(--mid)",fontSize:11}}>A reset link has been sent to <strong style={{color:"var(--bright)"}}>{email}</strong>. It expires in 1 hour.</span>
+              </div>
+              <div className="login-footer-links">
+                <span className="login-link" onClick={onBack}>← Back to sign in</span>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="form-field">
+                <label className="form-label">Email Address</label>
+                <input className="form-control" type="email" value={email}
+                  onChange={e=>setEmail(e.target.value)}
+                  onKeyDown={e=>e.key==="Enter"&&handleSubmit()}
+                  placeholder="you@example.com"/>
+              </div>
+              {err && <div style={{fontFamily:"var(--font-mono)",fontSize:11,color:"var(--red)"}}>{err}</div>}
+              <button className="btn btn-amber login-btn-full" onClick={handleSubmit} disabled={loading||!backendOk}>
+                {loading ? <span className="loading-pulse">SENDING...</span> : "SEND RESET LINK"}
+              </button>
+              {backendOk===false && (
+                <div style={{fontFamily:"var(--font-mono)",fontSize:11,color:"var(--amber)"}}>
+                  BACKEND OFFLINE — PASSWORD RESET UNAVAILABLE IN DEMO MODE
+                </div>
+              )}
+              <div className="login-footer-links">
+                <span className="login-link" onClick={onBack}>← Back to sign in</span>
+              </div>
+            </>
+          )}
+        </div>
+        <div className="login-security">
+          <div className="security-item"><Ic.lock/> TLS 1.3 Encrypted</div>
+          <div className="security-item"><Ic.shield/> SOC 2 Compliant</div>
+          <div className="security-item" style={{color:backendOk===false?"var(--amber)":"var(--green)",display:"flex",alignItems:"center",gap:4}}>
+            <span style={{width:5,height:5,borderRadius:"50%",background:backendOk===false?"var(--amber)":"var(--green)",display:"inline-block"}}/>
+            {backendOk===null?"Checking API...":backendOk?"API Connected":"Demo Mode (API Offline)"}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   PAGE: RESET PASSWORD (token from email link)
+───────────────────────────────────────────────────────────────────────────── */
+function ResetPasswordPage({ resetToken, onBack, onSuccess }) {
+  const [pwd, setPwd]   = useState("");
+  const [pwd2, setPwd2] = useState("");
+  const [show, setShow] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [done, setDone]   = useState(false);
+  const [err, setErr]     = useState("");
+
+  const handleSubmit = async () => {
+    if (!pwd)             { setErr("PASSWORD REQUIRED"); return; }
+    if (pwd.length < 8)   { setErr("PASSWORD MIN 8 CHARACTERS"); return; }
+    if (pwd !== pwd2)     { setErr("PASSWORDS DO NOT MATCH"); return; }
+    setErr(""); setLoading(true);
+    try {
+      await api.resetPassword(resetToken, pwd);
+      setDone(true);
+      setTimeout(onSuccess, 2500);
+    } catch(e) {
+      setErr(e.message || "RESET FAILED — LINK MAY HAVE EXPIRED");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="login-wrap">
+      <div className="login-grid-bg"/>
+      <div className="login-glow"/>
+      <div className="login-left">
+        <div className="login-brand">
+          <div className="login-brand-mark">TICKER-TAP</div>
+          <div className="login-brand-sub">Professional Investment Terminal · v4.2</div>
+        </div>
+        <div className="login-stats stagger">
+          <div className="login-stat-row">
+            {[{val:"$2.4B",lbl:"Assets Under Management"},{val:"147K",lbl:"Active Accounts"}].map((s,i)=>(
+              <div key={i}><div className="login-stat-val">{s.val}</div><div className="login-stat-lbl">{s.lbl}</div></div>
+            ))}
+          </div>
+          <div className="login-stat-row">
+            {[{val:"99.97%",lbl:"System Uptime"},{val:"< 4ms",lbl:"Avg Execution Time"}].map((s,i)=>(
+              <div key={i}><div className="login-stat-val">{s.val}</div><div className="login-stat-lbl">{s.lbl}</div></div>
+            ))}
+          </div>
+        </div>
+        <div className="login-divider"/>
+        <div style={{marginTop:24,display:"flex",flexDirection:"column",gap:8}}>
+          {TICKER_DATA.slice(0,5).map((t,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:12,fontFamily:"var(--font-mono)",fontSize:12}}>
+              <span style={{color:"var(--bright)",minWidth:50,fontWeight:500}}>{t.sym}</span>
+              <span style={{color:"var(--mid)"}}>{t.price}</span>
+              <span style={{color:t.pos?"var(--green)":"var(--red)"}}>{t.chg}</span>
+              <Sparkline positive={t.pos} w={80} h={18}/>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="login-right">
+        <div className="login-head">SET NEW PASSWORD</div>
+        <div className="login-subhead">Choose a new password for your account</div>
+        <div className="login-form">
+          {done ? (
+            <div style={{
+              fontFamily:"var(--font-mono)",fontSize:12,color:"var(--green)",
+              border:"1px solid var(--green)",borderRadius:2,padding:"14px 16px",lineHeight:1.6
+            }}>
+              PASSWORD UPDATED<br/>
+              <span style={{color:"var(--mid)",fontSize:11}}>Redirecting to sign in...</span>
+            </div>
+          ) : (
+            <>
+              <div className="form-field">
+                <label className="form-label">New Password</label>
+                <div className="pw-wrap">
+                  <input className="form-control" type={show?"text":"password"} value={pwd}
+                    onChange={e=>setPwd(e.target.value)}
+                    onKeyDown={e=>e.key==="Enter"&&handleSubmit()}
+                    placeholder="Min 8 characters" style={{paddingRight:36}}/>
+                  <button className="pw-eye" onClick={()=>setShow(v=>!v)}>{show?<Ic.eyeOff/>:<Ic.eye/>}</button>
+                </div>
+              </div>
+              <div className="form-field">
+                <label className="form-label">Confirm Password</label>
+                <input className="form-control" type={show?"text":"password"} value={pwd2}
+                  onChange={e=>setPwd2(e.target.value)}
+                  onKeyDown={e=>e.key==="Enter"&&handleSubmit()}
+                  placeholder="Repeat password"/>
+              </div>
+              {err && <div style={{fontFamily:"var(--font-mono)",fontSize:11,color:"var(--red)"}}>{err}</div>}
+              <button className="btn btn-amber login-btn-full" onClick={handleSubmit} disabled={loading}>
+                {loading ? <span className="loading-pulse">UPDATING...</span> : "SET NEW PASSWORD"}
+              </button>
+              <div className="login-footer-links">
+                <span className="login-link" onClick={onBack}>← Back to sign in</span>
+              </div>
+            </>
+          )}
+        </div>
+        <div className="login-security">
+          <div className="security-item"><Ic.lock/> TLS 1.3 Encrypted</div>
+          <div className="security-item"><Ic.shield/> SOC 2 Compliant</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
    PAGE: LOGIN
 ───────────────────────────────────────────────────────────────────────────── */
-function LoginPage({ onLogin, onRegister, backendOk }) {
-  const [email, setEmail] = useState("demo@financebuy.com");
-  const [pwd, setPwd] = useState("Demo1234!");
+const DEMO_EMAIL = "demo@fticker-tap.com";
+const DEMO_PWD   = "Demo1234!";
+
+function LoginPage({ onLogin, onRegister, onForgotPassword, backendOk }) {
+  const [email, setEmail] = useState(DEMO_EMAIL);
+  const [pwd, setPwd] = useState(DEMO_PWD);
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -1023,7 +1399,7 @@ function LoginPage({ onLogin, onRegister, backendOk }) {
       {/* Left panel — brand + market snapshot */}
       <div className="login-left">
         <div className="login-brand">
-          <div className="login-brand-mark">FINANCEBUY</div>
+          <div className="login-brand-mark">TICKER-TAP</div>
           <div className="login-brand-sub">Professional Investment Terminal · v4.2</div>
         </div>
         <div className="login-stats stagger">
@@ -1072,6 +1448,7 @@ function LoginPage({ onLogin, onRegister, backendOk }) {
             <label className="form-label">Email Address</label>
             <input className="form-control" type="email" value={email}
               onChange={e=>setEmail(e.target.value)}
+              onFocus={()=>{ if (email===DEMO_EMAIL) setEmail(""); }}
               onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
           </div>
           <div className="form-field">
@@ -1079,6 +1456,7 @@ function LoginPage({ onLogin, onRegister, backendOk }) {
             <div className="pw-wrap">
               <input className="form-control" type={show?"text":"password"}
                 value={pwd} onChange={e=>setPwd(e.target.value)}
+                onFocus={()=>{ if (pwd===DEMO_PWD) setPwd(""); }}
                 onKeyDown={e=>e.key==="Enter"&&handleLogin()}
                 style={{paddingRight:36}}/>
               <button className="pw-eye" onClick={()=>setShow(v=>!v)}>
@@ -1091,7 +1469,7 @@ function LoginPage({ onLogin, onRegister, backendOk }) {
             {loading ? <span className="loading-pulse">AUTHENTICATING...</span> : "SIGN IN TO TERMINAL"}
           </button>
           <div className="login-footer-links">
-            <span className="login-link">Reset password</span>
+            <span className="login-link" onClick={onForgotPassword}>Reset password</span>
             <span className="login-link" onClick={onRegister}>Create account →</span>
           </div>
         </div>
@@ -1238,35 +1616,108 @@ function RegisterPage({ onLogin, onBack, backendOk }) {
 /* ─────────────────────────────────────────────────────────────────────────────
    PAGE: DASHBOARD
 ───────────────────────────────────────────────────────────────────────────── */
-function DashboardPage({ onNewTx, token, accountId }) {
-  // Fetch live data; fall back to mock when backend offline
-  const { data: apiHoldings, loading: hLoading, error: hError, refetch: hRefetch } =
-    useApi(() => (token && accountId) ? api.listHoldings(accountId, token) : Promise.resolve(null), [token, accountId]);
-  const { data: apiTxns, loading: tLoading, error: tError, refetch: tRefetch } =
+function DashboardPage({ onNewTx, token, accountId, setPage }) {
+  const mktStatus = useMarketStatus();
+  const [chartPeriod, setChartPeriod] = useState("3M");
+  const [showFilter, setShowFilter] = useState(false);
+  const [dashFilter, setDashFilter] = useState("all");
+  const [quotesMap, setQuotesMap] = useState({});
+
+  // Fetch portfolio positions (includes symbol + name)
+  const { data: apiPositions, loading: hLoading } =
+    useApi(() => token ? api.getPositions(token) : Promise.resolve(null), [token]);
+  const { data: apiTxns, loading: tLoading } =
     useApi(() => (token && accountId) ? api.listTransactions(accountId, token) : Promise.resolve(null), [token, accountId]);
+  const { data: apiSummary } =
+    useApi(() => token ? api.getPortfolioSummary(token) : Promise.resolve(null), [token]);
+  const { data: apiOrders } =
+    useApi(() => (token && accountId) ? api.listOrders(accountId, token) : Promise.resolve(null), [token, accountId]);
 
-  // Merge API data with mock fallback
-  const holdings = apiHoldings || HOLDINGS.map(h => ({
-    ...h, quantity: h.qty, average_cost: h.avg, current_price: h.price,
-    chgPct: h.chgPct,
+  // Fetch live quotes for each held symbol
+  useEffect(() => {
+    if (!token || !apiPositions || apiPositions.length === 0) return;
+    let cancelled = false;
+    const symbols = [...new Set(apiPositions.map(p => p.symbol))];
+    Promise.allSettled(symbols.map(s => api.getQuote(s, token)))
+      .then(results => {
+        if (cancelled) return;
+        const map = {};
+        results.forEach((r, i) => {
+          if (r.status === "fulfilled") {
+            map[symbols[i]] = { price: Number(r.value.price), change: Number(r.value.change), change_pct: Number(r.value.change_pct) };
+          }
+        });
+        setQuotesMap(map);
+      });
+    return () => { cancelled = true; };
+  }, [token, apiPositions]);
+
+  // Merge API data — no mock fallback
+  const holdings = (apiPositions || []).map(p => {
+      const q = quotesMap[p.symbol];
+      return {
+        symbol: p.symbol, name: p.name,
+        quantity: +p.quantity, average_cost: +(p.average_cost||0),
+        current_price: q ? q.price : +(p.current_price||0),
+        market_value: +(p.market_value||0),
+        chg: q ? q.change : 0, chgPct: q ? q.change_pct : 0,
+      };
+  });
+  // Unify transactions + orders into one activity feed
+  const txItems = (apiTxns || []).map(t => ({
+    id: t.transaction_id, transaction_type: t.transaction_type,
+    symbol: null, amount: +t.amount, status: t.status,
+    created_at: t.created_at, reference_number: t.reference_number,
   }));
-  const txns = apiTxns || TRANSACTIONS;
+  const orderItems = (apiOrders || []).map(o => ({
+    id: o.order_id, transaction_type: o.side,
+    symbol: o.symbol || null, amount: +(o.quantity||0) * +(o.price||0),
+    status: o.status, created_at: o.placed_at || null,
+    reference_number: null,
+  }));
+  const txns = [...txItems, ...orderItems]
+    .sort((a,b) => (b.created_at||"").localeCompare(a.created_at||""));
 
-  const total   = holdings.reduce((s,h)=>s+(h.quantity||h.qty||0)*(h.current_price||h.price||0),0);
-  const cost    = holdings.reduce((s,h)=>s+(h.quantity||h.qty||0)*(h.average_cost||h.avg||0),0);
+  const total   = holdings.reduce((s,h)=>s+(h.quantity||0)*(h.current_price||0),0);
+  const cost    = holdings.reduce((s,h)=>s+(h.quantity||0)*(h.average_cost||0),0);
   const pnl     = total - cost;
   const pnlPct  = cost > 0 ? (pnl/cost)*100 : 0;
-  const dayChg  = holdings.reduce((s,h)=>s+(h.chg||0)*(h.quantity||h.qty||0),0);
+  const dayChg  = holdings.reduce((s,h)=>s+(h.chg||0)*(h.quantity||0),0);
+
+  const cashBalance = apiSummary && apiSummary.accounts && apiSummary.accounts.length > 0
+    ? apiSummary.accounts.reduce((s,a) => s + Number(a.cash_balance||0), 0) : null;
+  const pendingOrders = apiOrders ? apiOrders.filter(o => o.status === "pending").length : null;
+
+  const filteredTxns = dashFilter === "all" ? txns : txns.filter(t => (t.transaction_type||t.type) === dashFilter);
 
   return (
     <div className="page-scroll">
       <div className="page-header">
         <div>
           <div className="page-title">DASHBOARD</div>
-          <div className="page-sub">MON 23 FEB 2026 · MARKET OPEN · NYSE · NASDAQ</div>
+          <div className="page-sub">{mktStatus.dateStr} · {mktStatus.isOpen ? "MARKET OPEN" : "MARKET CLOSED"} · NYSE · NASDAQ</div>
         </div>
         <div className="page-actions">
-          <button className="btn btn-outline"><Ic.filter/> FILTER</button>
+          <div style={{position:"relative"}}>
+            <button className="btn btn-outline" onClick={()=>setShowFilter(f=>!f)}>
+              <Ic.filter/> FILTER{dashFilter !== "all" ? ` (${dashFilter.toUpperCase()})` : ""}
+            </button>
+            {showFilter && (
+              <div style={{
+                position:"absolute",top:"100%",right:0,marginTop:4,zIndex:10,
+                background:"var(--panel)",border:"1px solid var(--border)",
+                padding:8,display:"flex",flexDirection:"column",gap:4,
+                minWidth:160,boxShadow:"0 4px 12px rgba(0,0,0,0.4)",
+              }}>
+                {["all","buy","sell","deposit","withdrawal"].map(f=>(
+                  <button key={f} className={`filter-btn${dashFilter===f?" active":""}`}
+                    style={{textAlign:"left",width:"100%"}}
+                    onClick={()=>{setDashFilter(f);setShowFilter(false);}}
+                  >{f.toUpperCase()}</button>
+                ))}
+              </div>
+            )}
+          </div>
           <button className="btn btn-amber" onClick={onNewTx}><Ic.plus/> NEW TRANSACTION</button>
         </div>
       </div>
@@ -1274,11 +1725,11 @@ function DashboardPage({ onNewTx, token, accountId }) {
       {/* Stats row */}
       <div className="grid-stats stagger">
         {[
-          {lbl:"Portfolio Value",   val:`$${(total/1000).toFixed(2)}K`, cls:"amber", loading: hLoading},
+          {lbl:"Portfolio Value",   val:`$${(total/1000).toFixed(2)}K`, cls:"amber"},
           {lbl:"Unrealized P&L",    val:`${pnl>=0?"+":""}$${(Math.abs(pnl)/1000).toFixed(2)}K`, cls:pnl>=0?"green":"red"},
           {lbl:"Day Change",        val:`${dayChg>=0?"+":""}$${Math.abs(dayChg).toFixed(2)}`,    cls:dayChg>=0?"green":"red"},
-          {lbl:"Cash Balance",      val:"$14,320.50", cls:""},
-          {lbl:"Open Orders",       val: apiHoldings ? "—" : "3", cls:""},
+          {lbl:"Cash Balance",      val: cashBalance !== null ? `$${cashBalance.toLocaleString("en-US",{minimumFractionDigits:2})}` : "$14,320.50", cls:""},
+          {lbl:"Open Orders",       val: pendingOrders !== null ? String(pendingOrders) : "—", cls:""},
         ].map((s,i)=>(
           <div key={i} className="stat-block">
             <div className="stat-lbl">{s.lbl}</div>
@@ -1287,10 +1738,10 @@ function DashboardPage({ onNewTx, token, accountId }) {
               {pnl>=0?<Ic.up/>:<Ic.down/>} {Math.abs(pnlPct).toFixed(2)}% ALL TIME
             </div>}
             {i===2&&<div className={`stat-badge ${dayChg>=0?"badge-green":"badge-red"}`}>
-              {dayChg>=0?<Ic.up/>:<Ic.down/>} {Math.abs(dayChg/total*100).toFixed(2)}% TODAY
+              {dayChg>=0?<Ic.up/>:<Ic.down/>} {total>0?Math.abs(dayChg/total*100).toFixed(2):"0.00"}% TODAY
             </div>}
             {i===3&&<div className="stat-badge badge-mid">AVAILABLE MARGIN</div>}
-            {i===4&&<div className="stat-badge badge-amber">2 PENDING</div>}
+            {i===4&&pendingOrders>0&&<div className="stat-badge badge-amber">{pendingOrders} PENDING</div>}
           </div>
         ))}
       </div>
@@ -1300,17 +1751,18 @@ function DashboardPage({ onNewTx, token, accountId }) {
         <div className="grid-main">
           <div className="panel">
             <div className="panel-header">
-              <span className="panel-title">PORTFOLIO PERFORMANCE · 90D</span>
+              <span className="panel-title">PORTFOLIO PERFORMANCE · {chartPeriod}</span>
               <div style={{display:"flex",gap:1}}>
                 {["1W","1M","3M","YTD","1Y","ALL"].map(p=>(
-                  <button key={p} className={`filter-btn${p==="3M"?" active":""}`} style={{padding:"4px 10px",fontSize:9}}>
-                    {p}
-                  </button>
+                  <button key={p} className={`filter-btn${p===chartPeriod?" active":""}`}
+                    style={{padding:"4px 10px",fontSize:9}}
+                    onClick={()=>setChartPeriod(p)}
+                  >{p}</button>
                 ))}
               </div>
             </div>
             <div className="panel-body" style={{paddingBottom:8}}>
-              <PortfolioChart height={160}/>
+              <PortfolioChart height={160} period={chartPeriod}/>
             </div>
           </div>
           <div className="panel">
@@ -1319,7 +1771,7 @@ function DashboardPage({ onNewTx, token, accountId }) {
               <span style={{fontFamily:"var(--font-mono)",fontSize:10,color:"var(--muted)"}}>{holdings.length} POSITIONS</span>
             </div>
             <div className="panel-body">
-              <AllocationDonut/>
+              <AllocationDonut holdings={holdings}/>
             </div>
           </div>
         </div>
@@ -1328,7 +1780,7 @@ function DashboardPage({ onNewTx, token, accountId }) {
         <div className="panel">
           <div className="panel-header">
             <span className="panel-title">TOP POSITIONS</span>
-            <button className="btn btn-ghost" style={{fontSize:9,padding:"3px 10px"}}>VIEW ALL →</button>
+            <button className="btn btn-ghost" style={{fontSize:9,padding:"3px 10px"}} onClick={()=>setPage("holdings")}>VIEW ALL →</button>
           </div>
           <div style={{overflowX:"auto"}}>
             <table className="data-table">
@@ -1345,8 +1797,14 @@ function DashboardPage({ onNewTx, token, accountId }) {
                 </tr>
               </thead>
               <tbody>
-                {holdings.slice(0,5).map(h=>{
-                  const qty = h.quantity||h.qty||0, price = h.current_price||h.price||0, avg = h.average_cost||h.avg||0;
+                {hLoading ? (
+                  Array.from({length:3}).map((_,i)=><SkeletonRow key={i} cols={8}/>)
+                ) : holdings.length === 0 ? (
+                  <tr><td colSpan={8} style={{textAlign:"center",padding:"32px 0",fontFamily:"var(--font-mono)",fontSize:12,color:"var(--muted)"}}>
+                    No assets in portfolio
+                  </td></tr>
+                ) : holdings.slice(0,5).map(h=>{
+                  const qty = h.quantity||0, price = h.current_price||0, avg = h.average_cost||0;
                   const val=qty*price, pl=(price-avg)*qty, ret=avg>0?((price-avg)/avg)*100:0;
                   return (
                     <tr key={h.symbol}>
@@ -1356,11 +1814,11 @@ function DashboardPage({ onNewTx, token, accountId }) {
                           <div><div className="cell-main">{h.symbol}</div><div className="sym-name">{h.name}</div></div>
                         </div>
                       </td>
-                      <td className="right">${(h.current_price||h.price||0).toFixed(2)}</td>
+                      <td className="right">${price.toFixed(2)}</td>
                       <td className={`right ${(h.chgPct||0)>=0?"pnl-pos":"pnl-neg"}`}>
                         {(h.chgPct||0)>=0?"+":""}{(h.chgPct||0).toFixed(2)}%
                       </td>
-                      <td className="right">{h.quantity||h.qty||0}</td>
+                      <td className="right">{qty}</td>
                       <td className="right cell-main">${val.toFixed(2)}</td>
                       <td className={`right ${pl>=0?"pnl-pos":"pnl-neg"}`}>
                         {pl>=0?"+":""}${pl.toFixed(2)}
@@ -1379,7 +1837,7 @@ function DashboardPage({ onNewTx, token, accountId }) {
         <div className="panel">
           <div className="panel-header">
             <span className="panel-title">RECENT TRANSACTIONS</span>
-            <button className="btn btn-ghost" style={{fontSize:9,padding:"3px 10px"}}>VIEW ALL →</button>
+            <button className="btn btn-ghost" style={{fontSize:9,padding:"3px 10px"}} onClick={()=>setPage("transactions")}>VIEW ALL →</button>
           </div>
           <div style={{overflowX:"auto"}}>
             <table className="data-table">
@@ -1387,11 +1845,17 @@ function DashboardPage({ onNewTx, token, accountId }) {
                 <tr><th>TXN ID</th><th>TYPE</th><th>SYMBOL</th><th className="right">AMOUNT</th><th>STATUS</th><th>DATE</th></tr>
               </thead>
               <tbody>
-                {txns.slice(0,5).map(tx=>(
+                {tLoading ? (
+                  Array.from({length:3}).map((_,i)=><SkeletonRow key={i} cols={6}/>)
+                ) : filteredTxns.length === 0 ? (
+                  <tr><td colSpan={6} style={{textAlign:"center",padding:"32px 0",fontFamily:"var(--font-mono)",fontSize:12,color:"var(--muted)"}}>
+                    No transactions
+                  </td></tr>
+                ) : filteredTxns.slice(0,5).map(tx=>(
                   <tr key={tx.transaction_id||tx.id}>
                     <td style={{color:"var(--muted)",fontSize:11}}>{tx.reference_number||tx.id||String(tx.transaction_id||"").slice(0,8)}</td>
                     <td><span className={`type-chip tc-${tx.transaction_type||tx.type}`}>{tx.transaction_type||tx.type}</span></td>
-                    <td><span style={{color:"var(--muted)"}}>—</span></td>
+                    <td>{tx.symbol ? <span style={{color:"var(--bright)"}}>{tx.symbol}</span> : <span style={{color:"var(--muted)"}}>—</span>}</td>
                     <td className="right cell-main">${(+tx.amount||0).toLocaleString("en-US",{minimumFractionDigits:2})}</td>
                     <td><span className={`status-pill sp-${tx.status}`}>{tx.status}</span></td>
                     <td style={{color:"var(--muted)"}}>{tx.created_at?tx.created_at.slice(0,10):tx.date||""}</td>
@@ -1409,14 +1873,14 @@ function DashboardPage({ onNewTx, token, accountId }) {
 /* ─────────────────────────────────────────────────────────────────────────────
    PAGE: TRANSACTIONS
 ───────────────────────────────────────────────────────────────────────────── */
-function TransactionsPage({ onNewTx, token, accountId }) {
+function TransactionsPage({ onNewTx, token, accountId, goBack }) {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
 
   const { data: apiTxns, loading, error, refetch } =
     useApi(() => (token && accountId) ? api.listTransactions(accountId, token) : Promise.resolve(null), [token, accountId]);
 
-  const allTxns = apiTxns || TRANSACTIONS;
+  const allTxns = apiTxns || [];
 
   const filtered = useMemo(()=>{
     let r = allTxns;
@@ -1439,7 +1903,7 @@ function TransactionsPage({ onNewTx, token, accountId }) {
     <div className="page-scroll">
       <div className="page-header">
         <div>
-          <div className="page-title">TRANSACTIONS</div>
+          <div className="page-title"><button className="btn btn-ghost" onClick={goBack} style={{padding:"4px 6px",marginRight:8,verticalAlign:"middle"}}><Ic.back/></button>TRANSACTIONS</div>
           <div className="page-sub">{allTxns.length} RECORDS · {accountId ? accountId.toString().slice(0,18) : "ACC-4821"}</div>
         </div>
         <div className="page-actions">
@@ -1532,15 +1996,11 @@ function TransactionsPage({ onNewTx, token, accountId }) {
 /* ─────────────────────────────────────────────────────────────────────────────
    PAGE: HOLDINGS
 ───────────────────────────────────────────────────────────────────────────── */
-function HoldingsPage({ onNewTx, onViewChart, token, accountId }) {
+function HoldingsPage({ onNewTx, onViewChart, token, accountId, goBack }) {
   const { data: apiHoldings, loading, error, refetch } =
-    useApi(() => (token && accountId) ? api.listHoldings(accountId, token) : Promise.resolve(null), [token, accountId]);
+    useApi(() => token ? api.getPositions(token) : Promise.resolve(null), [token]);
 
-  const rawHoldings = apiHoldings || HOLDINGS.map(h => ({
-    holding_id: h.symbol, security_id: h.symbol, account_id: accountId,
-    quantity: h.qty, average_cost: h.avg, current_price: h.price,
-    symbol: h.symbol, name: h.name, chgPct: h.chgPct, chg: h.chg,
-  }));
+  const rawHoldings = apiHoldings || [];
   // Normalise field names — API uses snake_case, mock uses short names
   const holdings = rawHoldings.map(h => ({
     ...h,
@@ -1559,7 +2019,7 @@ function HoldingsPage({ onNewTx, onViewChart, token, accountId }) {
     <div className="page-scroll">
       <div className="page-header">
         <div>
-          <div className="page-title">HOLDINGS</div>
+          <div className="page-title"><button className="btn btn-ghost" onClick={goBack} style={{padding:"4px 6px",marginRight:8,verticalAlign:"middle"}}><Ic.back/></button>HOLDINGS</div>
           <div className="page-sub">{holdings.length} POSITIONS · {accountId ? `ACCOUNT ${String(accountId).slice(0,8).toUpperCase()}` : "DEMO"}</div>
         </div>
         <div className="page-actions">
@@ -1572,8 +2032,8 @@ function HoldingsPage({ onNewTx, onViewChart, token, accountId }) {
         {[
           {lbl:"Total Market Value", val:`$${(total/1000).toFixed(3)}K`,                    cls:"amber"},
           {lbl:"Total Cost Basis",   val:`$${(cost/1000).toFixed(3)}K`,                     cls:""},
-          {lbl:"Unrealized Gain",    val:`+$${((total-cost)/1000).toFixed(3)}K`,             cls:"green"},
-          {lbl:"Total Return",       val:`+${(((total-cost)/cost)*100).toFixed(2)}%`,        cls:"green"},
+          {lbl:"Unrealized Gain",    val:`${total>=cost?"+":""}$${((total-cost)/1000).toFixed(3)}K`,             cls:total>=cost?"green":"red"},
+          {lbl:"Total Return",       val:`${total>=cost?"+":""}${cost>0?(((total-cost)/cost)*100).toFixed(2):"0.00"}%`,        cls:total>=cost?"green":"red"},
           {lbl:"Positions",          val:holdings.length,                                    cls:""},
         ].map((s,i)=>(
           <div key={i} className="stat-block">
@@ -1607,6 +2067,11 @@ function HoldingsPage({ onNewTx, onViewChart, token, accountId }) {
                 <tbody>
                   {loading && [0,1,2,3].map(i=><SkeletonRow key={i} cols={10}/>)}
                   {error   && <tr><td colSpan={10}><ApiError message={error} onRetry={refetch}/></td></tr>}
+                  {!loading && !error && holdings.length === 0 && (
+                    <tr><td colSpan={10} style={{textAlign:"center",padding:"32px 0",fontFamily:"var(--font-mono)",fontSize:12,color:"var(--muted)"}}>
+                      No assets in portfolio
+                    </td></tr>
+                  )}
                   {holdings.map(h=>{
                     const val=(h.qty*h.price), pl=(h.price-h.avg)*h.qty, ret=((h.price-h.avg)/h.avg)*100;
                     const weight=(val/total)*100;
@@ -1656,7 +2121,7 @@ function HoldingsPage({ onNewTx, onViewChart, token, accountId }) {
           <div style={{display:"flex",flexDirection:"column",gap:16}}>
             <div className="panel">
               <div className="panel-header"><span className="panel-title">ALLOCATION</span></div>
-              <div className="panel-body"><AllocationDonut/></div>
+              <div className="panel-body"><AllocationDonut holdings={holdings}/></div>
             </div>
             <div className="panel">
               <div className="panel-header"><span className="panel-title">PERFORMANCE</span></div>
@@ -1689,14 +2154,24 @@ function HoldingsPage({ onNewTx, onViewChart, token, accountId }) {
 /* ─────────────────────────────────────────────────────────────────────────────
    PAGE: ORDERS
 ───────────────────────────────────────────────────────────────────────────── */
-function OrdersPage({ onNewTx, token, accountId }) {
+function OrdersPage({ onNewTx, token, accountId, goBack }) {
   const [statusFilter, setStatusFilter] = useState("all");
   const { data: apiOrders, loading, error, refetch } =
     useApi(() => (token && accountId) ? api.listOrders(accountId, token) : Promise.resolve(null), [token, accountId]);
 
-  const allOrders = apiOrders || ORDERS;
+  const allOrders = (apiOrders || []).map(o => ({
+    id: o.order_id || o.id,
+    symbol: o.symbol || "—",
+    side: o.side,
+    type: o.order_type || o.type,
+    qty: +(o.quantity || o.qty || 0),
+    price: o.price != null ? +o.price : null,
+    filled: +(o.filled_quantity || o.filled || 0),
+    status: o.status,
+    placed: o.placed_at || o.placed || "",
+  }));
   const filtered    = statusFilter==="all" ? allOrders : allOrders.filter(o=>o.status===statusFilter);
-  const openCount   = allOrders.filter(o=>o.status==="open").length;
+  const openCount   = allOrders.filter(o=>o.status==="open"||o.status==="pending").length;
   const filledCount = allOrders.filter(o=>o.status==="filled").length;
 
   const handleCancel = async (orderId) => {
@@ -1709,7 +2184,7 @@ function OrdersPage({ onNewTx, token, accountId }) {
     <div className="page-scroll">
       <div className="page-header">
         <div>
-          <div className="page-title">ORDERS</div>
+          <div className="page-title"><button className="btn btn-ghost" onClick={goBack} style={{padding:"4px 6px",marginRight:8,verticalAlign:"middle"}}><Ic.back/></button>ORDERS</div>
           <div className="page-sub">{allOrders.length} ORDERS · {openCount} OPEN · {filledCount} FILLED</div>
         </div>
         <div className="page-actions">
@@ -1724,7 +2199,7 @@ function OrdersPage({ onNewTx, token, accountId }) {
           {lbl:"Open Orders",      val:openCount,          cls:"cyan"},
           {lbl:"Filled Orders",    val:filledCount,        cls:"green"},
           {lbl:"Cancelled",        val:allOrders.filter(o=>o.status==="cancelled").length, cls:""},
-          {lbl:"Open Notional",    val:"$4,350.00",     cls:"amber"},
+          {lbl:"Open Notional",    val:`$${allOrders.filter(o=>o.status==="open"||o.status==="pending").reduce((s,o)=>s+(o.qty||0)*(o.price||0),0).toLocaleString("en-US",{minimumFractionDigits:2})}`,     cls:"amber"},
         ].map((s,i)=>(
           <div key={i} className="stat-block">
             <div className="stat-lbl">{s.lbl}</div>
@@ -1737,9 +2212,9 @@ function OrdersPage({ onNewTx, token, accountId }) {
         {/* Filter */}
         <div style={{display:"flex",gap:12,alignItems:"center"}}>
           <div className="filter-bar">
-            {["all","open","filled","cancelled"].map(f=>(
+            {["all","pending","filled","cancelled"].map(f=>(
               <button key={f} className={`filter-btn${statusFilter===f?" active":""}`} onClick={()=>setStatusFilter(f)}>
-                {f}
+                {f === "pending" ? "OPEN" : f.toUpperCase()}
               </button>
             ))}
           </div>
@@ -1793,10 +2268,10 @@ function OrdersPage({ onNewTx, token, accountId }) {
                     </td>
                     <td>
                       <span className={`status-pill ${
-                        o.status==="open"?"sp-open":
+                        o.status==="open"||o.status==="pending"?"sp-open":
                         o.status==="filled"?"sp-filled":
                         "sp-cancelled"
-                      }`}>{o.status}</span>
+                      }`}>{o.status==="pending"?"open":o.status}</span>
                     </td>
                     <td style={{color:"var(--muted)",fontSize:11}}>{o.placed}</td>
                   </tr>
@@ -1807,13 +2282,13 @@ function OrdersPage({ onNewTx, token, accountId }) {
         </div>
 
         {/* Open orders detail cards */}
-        {statusFilter==="all"||statusFilter==="open" ? (
+        {statusFilter==="all"||statusFilter==="pending" ? (
           <div>
             <div style={{fontFamily:"var(--font-mono)",fontSize:10,color:"var(--muted)",letterSpacing:"1px",marginBottom:10}}>
               OPEN ORDER DETAIL
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:1}}>
-              {ORDERS.filter(o=>o.status==="open").map(o=>(
+              {allOrders.filter(o=>o.status==="open"||o.status==="pending").map(o=>(
                 <div key={o.id} style={{
                   background:"var(--panel)", border:"1px solid var(--border)",
                   borderLeft:`2px solid ${o.side==="buy"?"var(--green)":"var(--red)"}`,
@@ -2091,20 +2566,6 @@ const CHART_CSS = `
 }
 `;
 
-/* ─── STOCK UNIVERSE ────────────────────────────────────────────────────────── */
-const STOCK_UNIVERSE = [
-  { sym:"AAPL",  name:"Apple Inc.",         price:189.45, chg:+2.34, chgPct:+1.25, open:187.20, close:189.45, vol:"82.4M",  high:190.10, low:186.90 },
-  { sym:"MSFT",  name:"Microsoft Corp.",    price:378.90, chg:+4.22, chgPct:+1.12, open:374.50, close:378.90, vol:"21.1M",  high:380.20, low:373.10 },
-  { sym:"NVDA",  name:"NVIDIA Corp.",       price:721.28, chg:+34.6, chgPct:+4.87, open:688.00, close:721.28, vol:"48.7M",  high:728.40, low:684.50 },
-  { sym:"TSLA",  name:"Tesla Inc.",         price:213.65, chg:-4.12, chgPct:-1.90, open:217.90, close:213.65, vol:"119.2M", high:219.40, low:212.30 },
-  { sym:"AMZN",  name:"Amazon.com Inc.",    price:196.40, chg:+1.43, chgPct:+0.73, open:195.10, close:196.40, vol:"33.8M",  high:197.60, low:194.20 },
-  { sym:"GOOGL", name:"Alphabet Inc.",      price:172.30, chg:+0.87, chgPct:+0.51, open:171.40, close:172.30, vol:"18.9M",  high:173.80, low:170.50 },
-  { sym:"META",  name:"Meta Platforms",     price:492.80, chg:+8.32, chgPct:+1.72, open:484.30, close:492.80, vol:"14.2M",  high:495.10, low:483.00 },
-  { sym:"SPY",   name:"SPDR S&P 500 ETF",  price:583.12, chg:+4.87, chgPct:+0.84, open:578.30, close:583.12, vol:"67.3M",  high:584.90, low:577.40 },
-  { sym:"QQQ",   name:"Invesco QQQ Trust", price:505.44, chg:+5.17, chgPct:+1.03, open:500.20, close:505.44, vol:"41.1M",  high:507.30, low:499.80 },
-  { sym:"AMD",   name:"Advanced Micro Dev.", price:178.50, chg:+3.20, chgPct:+1.83, open:175.50, close:178.50, vol:"55.0M", high:179.80, low:174.90 },
-];
-
 /* ─── GENERATE REALISTIC OHLCV DATA (5 years = ~1260 trading days) ──────────── */
 function generateOHLCV(basePrice, years = 5) {
   const days = years * 365;
@@ -2251,7 +2712,7 @@ function detectBreakouts(data, sma50) {
 }
 
 /* ─── CHART COMPONENT ───────────────────────────────────────────────────────── */
-function StockChart({ symbol, stockInfo, onClose }) {
+function StockChart({ symbol, stockInfo, onClose, token }) {
   const svgRef = useRef(null);
   const containerRef = useRef(null);
   const wrapRef = useRef(null);
@@ -2274,16 +2735,12 @@ function StockChart({ symbol, stockInfo, onClose }) {
   useEffect(() => {
     let cancelled = false;
     setDataLoading(true);
-    const token = sessionStorage.getItem("fb_token");
     if (!token) {
       setAllData(generateOHLCV(stockInfo.price, 5));
       setDataLoading(false);
       return;
     }
-    fetch(`${API_BASE}/market/ohlcv/${symbol}?years=5`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    api.getOhlcv(symbol, token)
       .then(bars => {
         if (!cancelled) {
           setAllData(bars.map(b => ({
@@ -2297,7 +2754,7 @@ function StockChart({ symbol, stockInfo, onClose }) {
       })
       .finally(() => { if (!cancelled) setDataLoading(false); });
     return () => { cancelled = true; };
-  }, [symbol]);
+  }, [symbol, token]);
 
   const PERIODS = { "1M": 21, "3M": 63, "6M": 126, "1Y": 252, "2Y": 504, "5Y": 1260, "ALL": 9999 };
 
@@ -2902,16 +3359,44 @@ function StockChart({ symbol, stockInfo, onClose }) {
 }
 
 /* ─── SEARCH BAR ────────────────────────────────────────────────────────────── */
-function ChartSearchBar({ watchlist, onAdd, onSelect, onRemove, activeSymbol }) {
+function ChartSearchBar({ watchlist, onAdd, onSelect, onRemove, activeSymbol, token }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
+  const [searching, setSearching] = useState(false);
   const ref = useRef(null);
+  const debounceRef = useRef(null);
 
-  const suggestions = query.length >= 1
-    ? STOCK_UNIVERSE.filter(s =>
-        s.sym.startsWith(query.toUpperCase()) || s.name.toLowerCase().includes(query.toLowerCase())
-      ).slice(0, 6)
-    : [];
+  // Live search via /market/search API with debounce
+  useEffect(() => {
+    if (!token || query.length < 1) { setSuggestions([]); return; }
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setSearching(true);
+      api.searchSymbols(query, token)
+        .then(results => {
+          setSuggestions(results.map(r => ({
+            sym: r.symbol, name: r.name, exchange: r.exchange || "", type: r.type || ""
+          })).slice(0, 8));
+        })
+        .catch(() => setSuggestions([]))
+        .finally(() => setSearching(false));
+    }, 250);
+    return () => clearTimeout(debounceRef.current);
+  }, [query, token]);
+
+  // Fetch live quotes for watchlist chips
+  const [chipQuotes, setChipQuotes] = useState({});
+  useEffect(() => {
+    if (!token) return;
+    watchlist.forEach(sym => {
+      if (!chipQuotes[sym]) {
+        api.getQuote(sym, token).then(q => {
+          setChipQuotes(prev => ({ ...prev, [sym]: q }));
+        }).catch(() => {});
+      }
+    });
+  }, [watchlist, token]);
 
   useEffect(() => {
     const fn = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
@@ -2933,20 +3418,23 @@ function ChartSearchBar({ watchlist, onAdd, onSelect, onRemove, activeSymbol }) 
         <span className="chart-search-icon">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
         </span>
-        <input className="chart-search-input" placeholder="Search symbol or name..."
+        <input className="chart-search-input" placeholder="Search any ticker or company name..."
           value={query}
           onChange={e => { setQuery(e.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
           onKeyDown={e => { if (e.key === "Escape") { setQuery(""); setOpen(false); } if (e.key === "Enter" && suggestions[0]) handleSelect(suggestions[0]); }}
         />
-        {open && suggestions.length > 0 && (
+        {open && (suggestions.length > 0 || searching) && (
           <div className="search-suggestions">
+            {searching && suggestions.length === 0 && (
+              <div className="suggestion-item" style={{color:"#4a5568",justifyContent:"center"}}>Searching...</div>
+            )}
             {suggestions.map(s => (
               <div key={s.sym} className="suggestion-item" onClick={() => handleSelect(s)}>
                 <span className="sug-sym">{s.sym}</span>
                 <span className="sug-name">{s.name}</span>
-                <span style={{ marginLeft: "auto", fontFamily: "'IBM Plex Mono'", fontSize: 11, color: s.chgPct >= 0 ? "#00d97e" : "#f04438" }}>
-                  {s.chgPct >= 0 ? "+" : ""}{s.chgPct.toFixed(2)}%
+                <span style={{ marginLeft: "auto", fontFamily: "'IBM Plex Mono'", fontSize: 10, color: "#4a5568" }}>
+                  {s.exchange}{s.type ? ` · ${s.type}` : ""}
                 </span>
               </div>
             ))}
@@ -2957,14 +3445,14 @@ function ChartSearchBar({ watchlist, onAdd, onSelect, onRemove, activeSymbol }) 
       {/* Watchlist chips */}
       <div className="watchlist">
         {watchlist.map(sym => {
-          const info = STOCK_UNIVERSE.find(s => s.sym === sym);
+          const info = chipQuotes[sym];
           return (
             <div key={sym} className={`watch-chip${activeSymbol === sym ? " active" : ""}`}
               onClick={() => onSelect(sym)}>
               {sym}
               {info && (
-                <span className={`chip-chg ${info.chgPct >= 0 ? "pos" : "neg"}`}>
-                  {info.chgPct >= 0 ? "▲" : "▼"}{Math.abs(info.chgPct).toFixed(2)}%
+                <span className={`chip-chg ${info.change_pct >= 0 ? "pos" : "neg"}`}>
+                  {info.change_pct >= 0 ? "▲" : "▼"}{Math.abs(info.change_pct).toFixed(2)}%
                 </span>
               )}
               <button className="watch-chip-close" onClick={e => { e.stopPropagation(); onRemove(sym); }}>×</button>
@@ -2982,10 +3470,10 @@ function ChartSearchBar({ watchlist, onAdd, onSelect, onRemove, activeSymbol }) 
 }
 
 /* ─── MAIN CHARTS PAGE ──────────────────────────────────────────────────────── */
-function ChartsPage({ initialSymbol }) {
+function ChartsPage({ initialSymbol, goBack, token }) {
   const [watchlist, setWatchlist] = useState(["AAPL", "NVDA", "TSLA"]);
   const [activeSymbol, setActiveSymbol] = useState(initialSymbol || "AAPL");
-  
+
   // When initialSymbol changes (nav from holdings), add and select it
   useEffect(() => {
     if (initialSymbol && !watchlist.includes(initialSymbol)) {
@@ -2994,7 +3482,17 @@ function ChartsPage({ initialSymbol }) {
     if (initialSymbol) setActiveSymbol(initialSymbol);
   }, [initialSymbol]);
 
-  const stockInfo = STOCK_UNIVERSE.find(s => s.sym === activeSymbol) || STOCK_UNIVERSE[0];
+  // Fetch live quote for the active symbol
+  const { data: quoteData } = useApi(
+    () => (token && activeSymbol) ? api.getQuote(activeSymbol, token) : Promise.resolve(null),
+    [activeSymbol, token]
+  );
+  const stockInfo = quoteData
+    ? { sym: quoteData.symbol, name: quoteData.name, price: quoteData.price,
+        chg: quoteData.change, chgPct: quoteData.change_pct, open: quoteData.open,
+        close: quoteData.price, vol: quoteData.volume, high: quoteData.high, low: quoteData.low }
+    : { sym: activeSymbol, name: activeSymbol, price: 100, chg: 0, chgPct: 0,
+        open: 100, close: 100, vol: 0, high: 100, low: 100 };
 
   const addSymbol = sym => {
     if (!watchlist.includes(sym)) setWatchlist(w => [...w, sym]);
@@ -3014,7 +3512,8 @@ function ChartsPage({ initialSymbol }) {
         padding: "14px 24px", display: "flex", alignItems: "flex-end", justifyContent: "space-between"
       }}>
         <div>
-          <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 28, color: "#e8f0fa", letterSpacing: 1, lineHeight: 1 }}>
+          <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 28, color: "#e8f0fa", letterSpacing: 1, lineHeight: 1, display:"flex", alignItems:"center" }}>
+            <button className="btn btn-ghost" onClick={goBack} style={{padding:"4px 6px",marginRight:8}}><Ic.back/></button>
             CHARTS
           </div>
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: "#4a5568", marginTop: 4 }}>
@@ -3037,6 +3536,7 @@ function ChartsPage({ initialSymbol }) {
         onSelect={setActiveSymbol}
         onRemove={removeSymbol}
         activeSymbol={activeSymbol}
+        token={token}
       />
 
       {/* Chart */}
@@ -3046,6 +3546,7 @@ function ChartsPage({ initialSymbol }) {
             key={activeSymbol}
             symbol={activeSymbol}
             stockInfo={stockInfo}
+            token={token}
           />
         ) : (
           <div className="chart-empty">
@@ -3369,7 +3870,7 @@ function AssetTypeBadge({ type }) {
   return <span className={`asset-type-badge ${def.cls}`}>{def.label}</span>;
 }
 
-function ImportPage({ addToast }) {
+function ImportPage({ addToast, goBack }) {
   const [subpage, setSubpage] = useState("brokers");
   const [selectedBroker, setSelectedBroker] = useState(null);
   const [dragOver, setDragOver] = useState(false);
@@ -3454,7 +3955,7 @@ function ImportPage({ addToast }) {
       {/* Page header */}
       <div className="page-header">
         <div>
-          <div className="page-title">IMPORT PORTFOLIO</div>
+          <div className="page-title"><button className="btn btn-ghost" onClick={goBack} style={{padding:"4px 6px",marginRight:8,verticalAlign:"middle"}}><Ic.back/></button>IMPORT PORTFOLIO</div>
           <div className="page-sub">DOWNLOAD BROKER STATEMENTS · MANUAL ENTRY · PORTFOLIO REVIEW</div>
         </div>
         <div className="page-actions">
@@ -3830,7 +4331,26 @@ function ReviewTable({ entries, onDelete }) {
 
 
 export default function App() {
-  const [page, setPage] = useState("login");
+  const [page, setPageRaw] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("reset_token") ? "reset-password" : "login";
+  });
+  const [pageHistory, setPageHistory] = useState([]);
+  const setPage = useCallback((next) => {
+    setPageRaw(prev => { setPageHistory(h => [...h.slice(-9), prev]); return next; });
+  }, []);
+  const goBack = useCallback(() => {
+    setPageHistory(h => {
+      const copy = [...h];
+      const prev = copy.pop() || "dashboard";
+      setPageRaw(prev);
+      return copy;
+    });
+  }, []);
+  const [resetToken, setResetToken] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("reset_token") || null;
+  });
   const [showTxModal, setShowTxModal] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [chartSymbol, setChartSymbol] = useState(null);
@@ -3848,6 +4368,7 @@ export default function App() {
   });
   const [accountId,   setAccountId]   = useState(() => sessionStorage.getItem("fb_account") || null);
   const [backendOk,   setBackendOk]   = useState(null);   // null=unknown, true, false
+  const marketStatus = useMarketStatus();
 
   // Probe backend health once on mount
   useEffect(() => {
@@ -3929,6 +4450,26 @@ export default function App() {
     { id:"import",       label:"IMPORT",       Icon:Ic.import },
   ];
 
+  if (page === "forgot-password") return (
+    <>
+      <style>{GLOBAL_CSS}</style>
+      <ForgotPasswordPage onBack={()=>setPage("login")} backendOk={backendOk}/>
+      <ToastContainer toasts={toasts}/>
+    </>
+  );
+
+  if (page === "reset-password") return (
+    <>
+      <style>{GLOBAL_CSS}</style>
+      <ResetPasswordPage
+        resetToken={resetToken}
+        onBack={()=>{ window.history.replaceState({}, "", "/"); setPage("login"); }}
+        onSuccess={()=>{ window.history.replaceState({}, "", "/"); setPage("login"); addToast("PASSWORD UPDATED · PLEASE SIGN IN"); }}
+      />
+      <ToastContainer toasts={toasts}/>
+    </>
+  );
+
   if (page === "register") return (
     <>
       <style>{GLOBAL_CSS}</style>
@@ -3940,7 +4481,7 @@ export default function App() {
   if (page === "login") return (
     <>
       <style>{GLOBAL_CSS}</style>
-      <LoginPage onLogin={handleLogin} onRegister={()=>setPage("register")} backendOk={backendOk}/>
+      <LoginPage onLogin={handleLogin} onRegister={()=>setPage("register")} onForgotPassword={()=>setPage("forgot-password")} backendOk={backendOk}/>
       <ToastContainer toasts={toasts}/>
     </>
   );
@@ -3980,24 +4521,26 @@ export default function App() {
           {/* Topbar */}
           <div className="topbar">
             <div className="topbar-breadcrumb">
-              <span>FINANCEBUY</span>
+              <span>TICKER-TAP</span>
               <span className="topbar-sep">/</span>
               <span className="current">{page.toUpperCase()}</span>
             </div>
-            <TickerStrip/>
+            <TickerStrip token={authToken}/>
             <div className="topbar-right">
-              <div className="market-status"><div className="market-dot"/> NYSE OPEN</div>
+              <div className="market-status" style={marketStatus.isOpen ? {} : {color:"var(--red)"}}>
+                <div className="market-dot" style={marketStatus.isOpen ? {} : {background:"var(--red)"}}/> {marketStatus.isOpen ? "NYSE OPEN" : `CLOSED \u00B7 OPENS IN ${marketStatus.countdown}`}
+              </div>
               <Clock/>
             </div>
           </div>
 
           {/* Pages */}
-          {page==="dashboard"    && <DashboardPage    onNewTx={()=>setShowTxModal(true)} token={authToken} accountId={accountId}/>}
-          {page==="transactions" && <TransactionsPage onNewTx={()=>setShowTxModal(true)} token={authToken} accountId={accountId}/>}
-          {page==="holdings"     && <HoldingsPage     onNewTx={()=>setShowTxModal(true)} onViewChart={navigateToChart} token={authToken} accountId={accountId}/>}
-          {page==="orders"       && <OrdersPage       onNewTx={()=>setShowTxModal(true)} token={authToken} accountId={accountId}/>}
-          {page==="charts"       && <ChartsPage initialSymbol={chartSymbol} token={authToken}/>}
-          {page==="import"       && <ImportPage addToast={addToast} token={authToken} accountId={accountId}/>}
+          {page==="dashboard"    && <DashboardPage    onNewTx={()=>setShowTxModal(true)} token={authToken} accountId={accountId} setPage={setPage}/>}
+          {page==="transactions" && <TransactionsPage onNewTx={()=>setShowTxModal(true)} token={authToken} accountId={accountId} goBack={goBack}/>}
+          {page==="holdings"     && <HoldingsPage     onNewTx={()=>setShowTxModal(true)} onViewChart={navigateToChart} token={authToken} accountId={accountId} goBack={goBack}/>}
+          {page==="orders"       && <OrdersPage       onNewTx={()=>setShowTxModal(true)} token={authToken} accountId={accountId} goBack={goBack}/>}
+          {page==="charts"       && <ChartsPage initialSymbol={chartSymbol} token={authToken} goBack={goBack}/>}
+          {page==="import"       && <ImportPage addToast={addToast} token={authToken} accountId={accountId} goBack={goBack}/>}
         </div>
       </div>
 

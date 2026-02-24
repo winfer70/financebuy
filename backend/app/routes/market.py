@@ -1,8 +1,12 @@
-from fastapi import APIRouter, Depends, Query, HTTPException
+import asyncio
+import json
+import time
+import urllib.request
+from typing import Dict, List, Optional, Tuple
+
+import yfinance as yf
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from typing import List
-from datetime import date, timedelta
-import hashlib
 
 from ..dependencies import get_current_user
 
@@ -32,84 +36,210 @@ class QuoteOut(BaseModel):
     change_pct: float
 
 
-_UNIVERSE = {
-    "AAPL":  {"name": "Apple Inc.",            "base": 189.45},
-    "MSFT":  {"name": "Microsoft Corp.",        "base": 378.90},
-    "NVDA":  {"name": "NVIDIA Corp.",           "base": 721.28},
-    "TSLA":  {"name": "Tesla Inc.",             "base": 213.65},
-    "AMZN":  {"name": "Amazon.com Inc.",        "base": 196.40},
-    "GOOGL": {"name": "Alphabet Inc.",          "base": 172.30},
-    "META":  {"name": "Meta Platforms Inc.",    "base": 492.80},
-    "SPY":   {"name": "SPDR S&P 500 ETF",       "base": 583.12},
-    "QQQ":   {"name": "Invesco QQQ Trust",      "base": 505.44},
-    "AMD":   {"name": "Advanced Micro Devices", "base": 178.50},
-}
+# ── In-memory cache ──────────────────────────────────────────────────────────
+_cache: Dict[str, Tuple[float, object]] = {}
+
+_QUOTE_TTL = 60        # seconds
+_OHLCV_TTL = 300       # 5 minutes
+_SYMBOLS_TTL = 3600    # 1 hour
+
+# Default watchlist symbols shown in /symbols endpoint
+_DEFAULT_SYMBOLS = [
+    "AAPL", "MSFT", "NVDA", "TSLA", "AMZN",
+    "GOOGL", "META", "SPY", "QQQ", "AMD",
+]
 
 
-def _r(seed: int, lo: float = 0.0, hi: float = 1.0) -> float:
-    h = int(hashlib.md5(str(seed).encode()).hexdigest(), 16)
-    return lo + (h % 1_000_000) / 1_000_000 * (hi - lo)
+def _get_cached(key: str, ttl: float) -> Optional[object]:
+    entry = _cache.get(key)
+    if entry and (time.time() - entry[0]) < ttl:
+        return entry[1]
+    return None
 
 
-def _generate_ohlcv(symbol: str, base_price: float, years: int = 5) -> List[OHLCVBar]:
-    anchor = date(2026, 2, 23)
-    start = anchor - timedelta(days=years * 365)
-    sym_seed = int(hashlib.md5(symbol.encode()).hexdigest(), 16) % 100_000
-    price = base_price * (0.30 + _r(sym_seed, 0.0, 0.15))
+def _set_cached(key: str, value: object) -> None:
+    _cache[key] = (time.time(), value)
+
+
+# ── yfinance helpers (synchronous — called via asyncio.to_thread) ────────────
+
+def _fetch_quote(sym: str) -> QuoteOut:
+    ticker = yf.Ticker(sym)
+    info = ticker.fast_info
+    hist = ticker.history(period="2d")
+    if hist.empty or len(hist) < 1:
+        raise ValueError(f"No data for {sym}")
+
+    last_row = hist.iloc[-1]
+    prev_close = hist.iloc[-2]["Close"] if len(hist) >= 2 else last_row["Close"]
+    price = float(last_row["Close"])
+    chg = round(price - float(prev_close), 2)
+    chg_pct = round(chg / float(prev_close) * 100, 2) if prev_close else 0.0
+
+    name = getattr(info, "long_name", None) or sym
+    # fast_info may not have long_name; fall back to the ticker info dict
+    if name == sym:
+        try:
+            full_info = ticker.info
+            name = full_info.get("longName") or full_info.get("shortName") or sym
+        except Exception:
+            pass
+
+    return QuoteOut(
+        symbol=sym,
+        name=name,
+        price=price,
+        open=float(last_row["Open"]),
+        high=float(last_row["High"]),
+        low=float(last_row["Low"]),
+        prev_close=round(float(prev_close), 2),
+        volume=int(last_row["Volume"]),
+        change=chg,
+        change_pct=chg_pct,
+    )
+
+
+def _fetch_ohlcv(sym: str, years: int) -> List[OHLCVBar]:
+    ticker = yf.Ticker(sym)
+    period = f"{years}y" if years <= 5 else "max"
+    hist = ticker.history(period=period, auto_adjust=True)
+    if hist.empty:
+        raise ValueError(f"No OHLCV data for {sym}")
+
     bars: List[OHLCVBar] = []
-    earnings_offset = 0
-    for i in range(years * 365):
-        d = start + timedelta(days=i)
-        if d.weekday() >= 5:
-            continue
-        r1 = _r(sym_seed + i * 7 + 1, -1, 1)
-        r2 = _r(sym_seed + i * 7 + 2, 0, 1)
-        r3 = _r(sym_seed + i * 7 + 3, 0, 1)
-        shock = 0.0
-        if i - earnings_offset > 62 and r3 < 0.03:
-            shock = (1 if _r(sym_seed + i, 0, 1) < 0.6 else -1) * (0.03 + r2 * 0.06)
-            earnings_offset = i
-        price = max(1.0, price * (1 + 0.0006 + r1 * (0.013 + r2 * 0.009) + shock))
-        spread = price * (0.006 + r2 * 0.018)
-        op = price * (1 + _r(sym_seed + i * 7 + 4, -1, 1) * 0.005)
-        hi = max(op, price) + r2 * spread * 0.7
-        lo = min(op, price) - r3 * spread * 0.7
-        vol = int((4e7 if base_price < 300 else 1.5e7) * (0.4 + r2 * 1.2))
-        bars.append(OHLCVBar(date=d.isoformat(), open=round(op, 2), high=round(hi, 2),
-                             low=round(max(0.01, lo), 2), close=round(price, 2),
-                             volume=vol, is_earnings=abs(shock) > 0))
-    if not bars:
-        return bars
-    scale = base_price / bars[-1].close
-    return [OHLCVBar(date=b.date, open=round(b.open*scale,2), high=round(b.high*scale,2),
-                     low=round(b.low*scale,2), close=round(b.close*scale,2),
-                     volume=b.volume, is_earnings=b.is_earnings) for b in bars]
+    for dt, row in hist.iterrows():
+        bars.append(OHLCVBar(
+            date=dt.strftime("%Y-%m-%d"),
+            open=round(float(row["Open"]), 2),
+            high=round(float(row["High"]), 2),
+            low=round(float(row["Low"]), 2),
+            close=round(float(row["Close"]), 2),
+            volume=int(row["Volume"]),
+            is_earnings=False,
+        ))
+    return bars
 
+
+def _fetch_symbols_info() -> List[dict]:
+    results = []
+    for sym in _DEFAULT_SYMBOLS:
+        try:
+            ticker = yf.Ticker(sym)
+            hist = ticker.history(period="1d")
+            if hist.empty:
+                continue
+            price = float(hist.iloc[-1]["Close"])
+            name = sym
+            try:
+                fi = ticker.fast_info
+                name = getattr(fi, "long_name", None) or sym
+                if name == sym:
+                    full_info = ticker.info
+                    name = full_info.get("longName") or full_info.get("shortName") or sym
+            except Exception:
+                pass
+            results.append({"symbol": sym, "name": name, "price": round(price, 2)})
+        except Exception:
+            continue
+    return results
+
+
+# ── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.get("/quote/{symbol}", response_model=QuoteOut)
 async def get_quote(symbol: str, current_user: str = Depends(get_current_user)):
     sym = symbol.upper()
-    info = _UNIVERSE.get(sym)
-    if not info:
-        raise HTTPException(status_code=404, detail=f"Symbol '{sym}' not found")
-    bars = _generate_ohlcv(sym, info["base"], years=1)
-    last, prev = bars[-1], bars[-2]
-    chg = last.close - prev.close
-    return QuoteOut(symbol=sym, name=info["name"], price=last.close, open=last.open,
-                    high=last.high, low=last.low, prev_close=prev.close, volume=last.volume,
-                    change=round(chg, 2), change_pct=round(chg / prev.close * 100, 2))
+    cache_key = f"quote:{sym}"
+    cached = _get_cached(cache_key, _QUOTE_TTL)
+    if cached:
+        return cached
+
+    try:
+        quote = await asyncio.to_thread(_fetch_quote, sym)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=f"Could not fetch quote for '{sym}': {exc}")
+
+    _set_cached(cache_key, quote)
+    return quote
 
 
 @router.get("/ohlcv/{symbol}", response_model=List[OHLCVBar])
 async def get_ohlcv(symbol: str, years: int = Query(default=5, ge=1, le=10),
                     current_user: str = Depends(get_current_user)):
     sym = symbol.upper()
-    info = _UNIVERSE.get(sym)
-    if not info:
-        raise HTTPException(status_code=404, detail=f"Symbol '{sym}' not found")
-    return _generate_ohlcv(sym, info["base"], years=years)
+    cache_key = f"ohlcv:{sym}:{years}"
+    cached = _get_cached(cache_key, _OHLCV_TTL)
+    if cached:
+        return cached
+
+    try:
+        bars = await asyncio.to_thread(_fetch_ohlcv, sym, years)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=f"Could not fetch OHLCV for '{sym}': {exc}")
+
+    _set_cached(cache_key, bars)
+    return bars
 
 
 @router.get("/symbols", response_model=List[dict])
 async def list_symbols(current_user: str = Depends(get_current_user)):
-    return [{"symbol": s, "name": i["name"], "price": i["base"]} for s, i in _UNIVERSE.items()]
+    cache_key = "symbols_list"
+    cached = _get_cached(cache_key, _SYMBOLS_TTL)
+    if cached:
+        return cached
+
+    try:
+        symbols = await asyncio.to_thread(_fetch_symbols_info)
+    except Exception:
+        # Fallback to basic list without prices if Yahoo is unreachable
+        symbols = [{"symbol": s, "name": s, "price": 0} for s in _DEFAULT_SYMBOLS]
+
+    _set_cached(cache_key, symbols)
+    return symbols
+
+
+_SEARCH_TTL = 300  # 5 minutes
+
+
+def _search_symbols(query: str, max_results: int = 8) -> List[dict]:
+    """Search Yahoo Finance for symbols matching a query string."""
+    url = (
+        f"https://query2.finance.yahoo.com/v1/finance/search"
+        f"?q={urllib.request.quote(query)}"
+        f"&quotesCount={max_results}&newsCount=0&listsCount=0"
+    )
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read())
+
+    results = []
+    for q in data.get("quotes", []):
+        # Only include equities and ETFs traded on major US exchanges
+        if not q.get("isYahooFinance"):
+            continue
+        results.append({
+            "symbol": q.get("symbol", ""),
+            "name": q.get("longname") or q.get("shortname") or q.get("symbol", ""),
+            "exchange": q.get("exchDisp", ""),
+            "type": q.get("typeDisp", ""),
+        })
+    return results
+
+
+@router.get("/search", response_model=List[dict])
+async def search_symbols(
+    q: str = Query(..., min_length=1, description="Search query (ticker or company name)"),
+    current_user: str = Depends(get_current_user),
+):
+    cache_key = f"search:{q.lower()}"
+    cached = _get_cached(cache_key, _SEARCH_TTL)
+    if cached:
+        return cached
+
+    try:
+        results = await asyncio.to_thread(_search_symbols, q)
+    except Exception:
+        results = []
+
+    _set_cached(cache_key, results)
+    return results

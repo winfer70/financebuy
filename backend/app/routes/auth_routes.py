@@ -1,4 +1,6 @@
 import os
+import secrets
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
@@ -8,8 +10,16 @@ from uuid import UUID
 
 from ..auth import hash_password, verify_password, create_access_token, decode_access_token
 from ..db import get_db
-from ..models import AuditLog, User
-from ..schemas import UserCreate, UserOut, UserLogin, TokenResponse
+from ..email import send_password_reset_email
+from ..models import AuditLog, PasswordResetToken, User
+from ..schemas import (
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
+    UserCreate,
+    UserOut,
+    UserLogin,
+    TokenResponse,
+)
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -104,6 +114,71 @@ async def login(
         first_name=user.first_name,
         last_name=user.last_name,
     )
+
+
+@router.post("/forgot-password", status_code=status.HTTP_200_OK)
+async def forgot_password(
+    payload: ForgotPasswordRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(User).where(User.email == payload.email))
+    user = result.scalar_one_or_none()
+
+    # Always return 200 to avoid leaking whether an email exists
+    if not user or not user.is_active:
+        return {"detail": "If that email is registered you will receive a reset link shortly."}
+
+    raw_token = secrets.token_urlsafe(48)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+
+    reset_record = PasswordResetToken(
+        user_id=user.user_id,
+        token=raw_token,
+        expires_at=expires_at,
+    )
+    db.add(reset_record)
+    await db.commit()
+
+    app_url = os.getenv("APP_URL", "https://ticker-tap.com")
+    reset_url = f"{app_url}?reset_token={raw_token}"
+
+    try:
+        await send_password_reset_email(user.email, reset_url)
+    except Exception:
+        # Don't expose SMTP errors to the client
+        pass
+
+    return {"detail": "If that email is registered you will receive a reset link shortly."}
+
+
+@router.post("/reset-password", status_code=status.HTTP_200_OK)
+async def reset_password(
+    payload: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(PasswordResetToken).where(PasswordResetToken.token == payload.token)
+    )
+    record = result.scalar_one_or_none()
+
+    if not record:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token.")
+
+    now = datetime.now(timezone.utc)
+    if record.used or record.expires_at < now:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token.")
+
+    user_result = await db.execute(select(User).where(User.user_id == record.user_id))
+    user = user_result.scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token.")
+
+    user.password_hash = hash_password(payload.new_password)
+    record.used = True
+    await db.commit()
+
+    return {"detail": "Password updated successfully."}
 
 
 async def get_current_user(

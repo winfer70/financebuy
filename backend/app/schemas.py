@@ -127,9 +127,20 @@ class OrderOut(BaseModel):
     status: str
     filled_quantity: Decimal = Field(max_digits=18, decimal_places=6)
     filled_price: Decimal | None = Field(default=None, max_digits=18, decimal_places=2)
+    symbol: str | None = None
+    placed_at: Optional[str] = None
 
     class Config:
         orm_mode = True
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8, max_length=128)
 
 
 class AuditLogOut(BaseModel):

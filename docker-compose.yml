@@ -7,8 +7,8 @@ services:
       POSTGRES_DB: tickerTap
     volumes:
       - db_data:/var/lib/postgresql/data
-    networks:
-      - finance_net
+    ports:
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
@@ -17,8 +17,8 @@ services:
 
   redis:
     image: redis:7-alpine
-    networks:
-      - finance_net
+    ports:
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -29,25 +29,20 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    env_file:
+      - ./backend/.env
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/tickerTap
-      JWT_SECRET: replace-this-secret
-      ALLOWED_ORIGINS: http://localhost:3000
-    ports:
-      - "8000:8000"
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/tickerTap
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:5173,http://localhost:5174,https://ticker-tap.com
+      SMTP_HOST: "127.0.0.1"
+    network_mode: host
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
-    networks:
-      - finance_net
     volumes:
       - ./backend/app:/app/app:ro
 
 volumes:
   db_data:
-
-networks:
-  finance_net:
-    driver: bridge

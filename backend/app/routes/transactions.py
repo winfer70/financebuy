@@ -1,6 +1,8 @@
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -99,3 +101,24 @@ async def create_transaction(
 
     await db.refresh(new_txn)
     return new_txn
+
+
+@router.get("/", response_model=list[TransactionOut])
+async def list_transactions(
+    account_id: Optional[str] = Query(
+        default=None,
+        description="Filter by account_id; must belong to current user.",
+    ),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    query = (
+        select(Transaction)
+        .join(Account, Transaction.account_id == Account.account_id)
+        .where(Account.user_id == current_user.user_id)
+    )
+    if account_id is not None:
+        query = query.where(Transaction.account_id == account_id)
+    query = query.order_by(Transaction.created_at.desc())
+    result = await db.execute(query)
+    return result.scalars().all()

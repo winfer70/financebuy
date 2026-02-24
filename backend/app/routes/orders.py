@@ -8,7 +8,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..models import Account, Holding, Order
+from ..models import Account, Holding, Order, Security
 from ..schemas import OrderCreate, OrderOut
 from .auth_routes import get_current_user
 
@@ -336,12 +336,23 @@ async def list_orders(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    query = select(Order).join(Account, Order.account_id == Account.account_id).where(
-        Account.user_id == current_user.user_id
+    query = (
+        select(Order, Security.symbol)
+        .join(Account, Order.account_id == Account.account_id)
+        .outerjoin(Security, Order.security_id == Security.security_id)
+        .where(Account.user_id == current_user.user_id)
     )
 
     if account_id is not None:
         query = query.where(Order.account_id == account_id)
 
+    query = query.order_by(Order.placed_at.desc())
     result = await db.execute(query)
-    return result.scalars().all()
+
+    orders = []
+    for order, symbol in result.all():
+        out = OrderOut.from_orm(order)
+        out.symbol = symbol
+        out.placed_at = order.placed_at.isoformat() if order.placed_at else None
+        orders.append(out)
+    return orders
