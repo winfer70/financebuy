@@ -21,7 +21,7 @@ def verify_password(hash: str, password: str) -> bool:
         return False
 
 
-def create_access_token(subject: str, expires_minutes: int = 15) -> str:
+def create_access_token(subject: str, expires_minutes: int = 1440) -> str:
     to_encode = {
         "sub": subject,
         "exp": datetime.utcnow() + timedelta(minutes=expires_minutes),

@@ -13,6 +13,11 @@ async function apiFetch(path, { method="GET", body, token } = {}) {
     headers,
     body: body ? JSON.stringify(body) : undefined,
   });
+  if (res.status === 401 && token) {
+    // Token expired — dispatch event so App component triggers logout via React state
+    window.dispatchEvent(new Event("session-expired"));
+    throw new Error("Session expired");
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail || `HTTP ${res.status}`);
@@ -683,6 +688,16 @@ select.form-control option { background: var(--bg3); }
   animation: lpulse 0.8s ease-in-out infinite;
 }
 @keyframes lpulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+/* ── Footer ── */
+.app-footer {
+  background: var(--bg2); border-top: 1px solid var(--border);
+  padding: 8px 24px; display: flex; align-items: center; justify-content: space-between;
+  font-family: var(--font-mono); font-size: 10px; color: var(--muted);
+  letter-spacing: 0.4px; flex-shrink: 0; gap: 16px;
+}
+.app-footer a { color: var(--amber); text-decoration: none; }
+.app-footer a:hover { text-decoration: underline; }
 `;
 
 /* ─── MOCK DATA ─────────────────────────────────────────────────────────────── */
@@ -953,7 +968,8 @@ function Clock() {
   const [time, setTime] = useState(() => new Date());
   useEffect(()=>{ const id = setInterval(()=>setTime(new Date()),1000); return ()=>clearInterval(id); },[]);
   const fmt = t => t.toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false});
-  return <span className="clock">{fmt(time)} EST</span>;
+  const tzAbbr = time.toLocaleTimeString("en-US", { timeZoneName: "short" }).split(" ").pop();
+  return <span className="clock">{fmt(time)} {tzAbbr}</span>;
 }
 
 /* ─── NYSE MARKET STATUS ──────────────────────────────────────────────────── */
@@ -994,16 +1010,31 @@ function useMarketStatus() {
 
   const dateStr = now.toLocaleDateString("en-US", {
     weekday: "short", day: "2-digit", month: "short", year: "numeric",
-    timeZone: "America/New_York"
   }).toUpperCase();
+  const timeStr = now.toLocaleTimeString("en-US", {
+    hour: "2-digit", minute: "2-digit", hour12: false, timeZoneName: "short",
+  });
 
-  return { isOpen, countdown, dateStr };
+  return { isOpen, countdown, dateStr, timeStr };
+}
+
+/* ─── FOOTER ───────────────────────────────────────────────────────────────── */
+function Footer() {
+  const year = new Date().getFullYear();
+  return (
+    <footer className="app-footer">
+      <span>&copy; {year} Ticker-Tap. All rights reserved.</span>
+      <span>Market data provided by Yahoo Finance. Not financial advice.</span>
+    </footer>
+  );
 }
 
 /* ─── TICKER STRIP ─────────────────────────────────────────────────────────── */
 function TickerStrip({ token }) {
   const SYMBOLS = ["AAPL","MSFT","NVDA","TSLA","AMZN","GOOGL","META","SPY","QQQ","AMD"];
   const [quotes, setQuotes] = useState(TICKER_DATA);
+  const mktStatus = useMarketStatus();
+  const pollMs = mktStatus.isOpen ? 3000 : 300000;
 
   useEffect(() => {
     if (!token) return;
@@ -1024,9 +1055,9 @@ function TickerStrip({ token }) {
         });
     };
     fetchQuotes();
-    const id = setInterval(fetchQuotes, 60000);
+    const id = setInterval(fetchQuotes, pollMs);
     return () => { cancelled = true; clearInterval(id); };
-  }, [token]);
+  }, [token, pollMs]);
 
   const doubled = [...quotes,...quotes];
   return (
@@ -1634,23 +1665,28 @@ function DashboardPage({ onNewTx, token, accountId, setPage }) {
     useApi(() => (token && accountId) ? api.listOrders(accountId, token) : Promise.resolve(null), [token, accountId]);
 
   // Fetch live quotes for each held symbol
+  const dashPollMs = mktStatus.isOpen ? 3000 : 300000;
   useEffect(() => {
     if (!token || !apiPositions || apiPositions.length === 0) return;
     let cancelled = false;
     const symbols = [...new Set(apiPositions.map(p => p.symbol))];
-    Promise.allSettled(symbols.map(s => api.getQuote(s, token)))
-      .then(results => {
-        if (cancelled) return;
-        const map = {};
-        results.forEach((r, i) => {
-          if (r.status === "fulfilled") {
-            map[symbols[i]] = { price: Number(r.value.price), change: Number(r.value.change), change_pct: Number(r.value.change_pct) };
-          }
+    const fetchQuotes = () => {
+      Promise.allSettled(symbols.map(s => api.getQuote(s, token)))
+        .then(results => {
+          if (cancelled) return;
+          const map = {};
+          results.forEach((r, i) => {
+            if (r.status === "fulfilled") {
+              map[symbols[i]] = { price: Number(r.value.price), change: Number(r.value.change), change_pct: Number(r.value.change_pct) };
+            }
+          });
+          setQuotesMap(map);
         });
-        setQuotesMap(map);
-      });
-    return () => { cancelled = true; };
-  }, [token, apiPositions]);
+    };
+    fetchQuotes();
+    const id = setInterval(fetchQuotes, dashPollMs);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [token, apiPositions, dashPollMs]);
 
   // Merge API data — no mock fallback
   const holdings = (apiPositions || []).map(p => {
@@ -2357,7 +2393,7 @@ function OrdersPage({ onNewTx, token, accountId, goBack }) {
 const CHART_CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
 
-.charts-page { display: flex; flex-direction: column; height: 100%; background: #090b0f; }
+.charts-page { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; background: #090b0f; }
 
 /* ── Search bar ── */
 .chart-search-bar {
@@ -2366,6 +2402,7 @@ const CHART_CSS = `
   padding: 14px 24px;
   display: flex; align-items: center; gap: 16px;
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 .chart-search-wrap {
   position: relative; display: flex; align-items: center;
@@ -2424,6 +2461,7 @@ const CHART_CSS = `
 .chart-controls {
   background: #0e1117; border-bottom: 1px solid #1e2535;
   padding: 8px 24px; display: flex; align-items: center; gap: 16px;
+  flex-shrink: 0;
   flex-wrap: wrap;
 }
 .ctrl-group { display: flex; gap: 1px; background: #1e2535; }
@@ -2464,6 +2502,7 @@ const CHART_CSS = `
 .stock-stats-bar {
   background: #0e1117; border-bottom: 1px solid #1e2535;
   padding: 12px 24px; display: flex; gap: 0; align-items: stretch;
+  flex-shrink: 0; overflow-x: auto;
 }
 .stat-sep { width: 1px; background: #1e2535; margin: 0 20px; flex-shrink: 0; }
 .stock-stat { display: flex; flex-direction: column; gap: 3px; min-width: 100px; }
@@ -2731,18 +2770,23 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
   // Fetch OHLCV from backend; fall back to local generation if backend offline
   const [allData, setAllData] = useState(() => generateOHLCV(stockInfo.price, 5));
   const [dataLoading, setDataLoading] = useState(false);
+  const [volumeSource, setVolumeSource] = useState(null); // e.g. "GLD" when ETF volume is used
 
   useEffect(() => {
     let cancelled = false;
     setDataLoading(true);
+    setVolumeSource(null);
     if (!token) {
       setAllData(generateOHLCV(stockInfo.price, 5));
       setDataLoading(false);
       return;
     }
     api.getOhlcv(symbol, token)
-      .then(bars => {
+      .then(resp => {
         if (!cancelled) {
+          // New response format: { bars: [...], volume_source: "GLD" | null }
+          const bars = resp.bars || resp;
+          setVolumeSource(resp.volume_source || null);
           setAllData(bars.map(b => ({
             date: b.date, open: b.open, high: b.high, low: b.low,
             close: b.close, volume: b.volume, isEarnings: b.is_earnings,
@@ -2793,7 +2837,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
       .map(b => ({ ...b, index: b.index - visibleStart }));
   }, [allData, allSma50, visibleStart, visibleData.length]);
 
-  // Measure the price container div (containerRef) — volume SVG is a separate fixed-height element below
+  // Measure the chart container div (containerRef)
   useEffect(() => {
     const obs = new ResizeObserver(entries => {
       for (const e of entries) {
@@ -2806,10 +2850,14 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
     return () => obs.disconnect();
   }, []);
 
-  // Chart geometry — simple: price chart fills the price SVG, volume is handled separately
+  // Chart geometry — price uses top portion, volume in bottom 15% of same SVG
   const PAD    = { top: 20, right: 72, bottom: 22, left: 8 };
-  const H      = Math.max(50, dims.h - PAD.top - PAD.bottom);
+  const totalH = Math.max(50, dims.h - PAD.top - PAD.bottom);
+  const VOL_H  = overlays.volume ? Math.max(40, Math.round(totalH * 0.15)) : 0;
+  const VOL_GAP = overlays.volume ? 8 : 0;
+  const H      = totalH - VOL_H - VOL_GAP; // price chart height
   const W      = Math.max(10, dims.w - PAD.left - PAD.right);
+  const volTop = PAD.top + H + VOL_GAP; // y position where volume section starts
 
   const n = visibleData.length;
   const candleGap = n > 0 ? W / n : 1;
@@ -2974,7 +3022,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
   const [hoveredBreakout, setHoveredBreakout] = useState(null);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+    <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
       {/* ── STATS BAR ── */}
       <div className="stock-stats-bar" style={{ padding: "10px 20px" }}>
@@ -3116,15 +3164,15 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
         )}
       </div>
 
-      {/* ── CHART BODY — two separate SVGs: price (flex:1) + volume (fixed 90px) ── */}
-      <div ref={wrapRef} style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0, position: "relative" }}
+      {/* ── CHART BODY — single SVG with price + volume ── */}
+      <div ref={wrapRef} style={{ flex: 1, overflow: "hidden", minHeight: 0, position: "relative" }}
         onMouseMove={handleMouseMove}
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
       >
-        {/* ── PRICE SVG (takes all remaining space) ── */}
-        <div ref={containerRef} style={{ flex: 1, position: "relative", minHeight: 0, background: "#090b0f", cursor: "crosshair" }}>
+        {/* ── CHART SVG (price + volume) ── */}
+        <div ref={containerRef} style={{ width: "100%", height: "100%", position: "relative", background: "#090b0f", cursor: "crosshair" }}>
           {/* Legend overlay */}
           <div className="chart-legend">
             {overlays.sma50     && <div className="legend-item"><div className="legend-line" style={{ background: "#3d7ef5" }}/>SMA50</div>}
@@ -3247,10 +3295,38 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
               );
             })}
 
+            {/* ── VOLUME BARS (inside same SVG) ── */}
+            {overlays.volume && (
+              <g>
+                <line x1={PAD.left} y1={volTop - VOL_GAP / 2} x2={dims.w - PAD.right} y2={volTop - VOL_GAP / 2}
+                  stroke="#1e2535" strokeWidth="1" />
+                <text x={PAD.left + 4} y={volTop + 10}
+                  fontFamily="IBM Plex Mono" fontSize="9" fontWeight="600" fill="#4a5568" letterSpacing="1">
+                  {volumeSource ? `VOLUME (via ${volumeSource})` : "VOLUME"}
+                </text>
+                <text x={dims.w - PAD.right + 5} y={volTop + 12}
+                  fontFamily="IBM Plex Mono" fontSize="9" fill="#4a5568">{fmtVol(volMax)}</text>
+                {visibleData.map((d, i) => {
+                  const bull  = d.close >= d.open;
+                  const x     = xOf(i);
+                  const bw    = Math.max(1, candleW);
+                  const barH  = Math.max(1, (d.volume / volMax) * (VOL_H - 14));
+                  const isHov = crosshair?.idx === i;
+                  return (
+                    <rect key={`v${i}`}
+                      x={x - bw/2} y={volTop + VOL_H - barH} width={bw} height={barH}
+                      fill={bull ? "#00d97e" : "#f04438"}
+                      opacity={isHov ? 0.9 : 0.35}
+                    />
+                  );
+                })}
+              </g>
+            )}
+
             {/* ── CROSSHAIR ── */}
             {crosshair && (
               <g>
-                <line x1={crosshair.x} y1={PAD.top} x2={crosshair.x} y2={PAD.top + H} stroke="#263045" strokeWidth="1" />
+                <line x1={crosshair.x} y1={PAD.top} x2={crosshair.x} y2={PAD.top + H + (overlays.volume ? VOL_GAP + VOL_H : 0)} stroke="#263045" strokeWidth="1" />
                 <line x1={PAD.left} y1={crosshair.y} x2={dims.w - PAD.right} y2={crosshair.y} stroke="#263045" strokeWidth="1" />
                 {crosshair.y >= PAD.top && crosshair.y <= PAD.top + H && (
                   <>
@@ -3283,38 +3359,6 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
             })()}
           </svg>
         </div>
-
-        {/* ── VOLUME SVG (fixed 90px, always visible) ── */}
-        {overlays.volume && (
-          <div style={{ height: 90, flexShrink: 0, background: "#090b0f", borderTop: "1px solid #1e2535", position: "relative" }}>
-            <div style={{ position: "absolute", top: 5, left: PAD.left + 4, fontFamily: "IBM Plex Mono, monospace", fontSize: 9, fontWeight: 600, color: "#4a5568", letterSpacing: 1, pointerEvents: "none", zIndex: 2 }}>
-              VOLUME
-            </div>
-            <svg style={{ display: "block", width: "100%", height: "100%" }}>
-              {visibleData.map((d, i) => {
-                const bull  = d.close >= d.open;
-                const x     = xOf(i);
-                const bw    = Math.max(1, candleW);
-                const barH  = Math.max(1, (d.volume / volMax) * 68); // 90px total, ~68px usable
-                const isHov = crosshair?.idx === i;
-                return (
-                  <rect key={i}
-                    x={x - bw/2} y={90 - barH} width={bw} height={barH}
-                    fill={bull ? "#00d97e" : "#f04438"}
-                    opacity={isHov ? 0.9 : 0.35}
-                  />
-                );
-              })}
-              {/* Crosshair sync line */}
-              {crosshair && (
-                <line x1={crosshair.x} y1={0} x2={crosshair.x} y2={90} stroke="#263045" strokeWidth="1" />
-              )}
-              {/* Max vol label */}
-              <text x={dims.w - PAD.right + 5} y={16}
-                fontFamily="IBM Plex Mono" fontSize="9" fill="#4a5568">{fmtVol(volMax)}</text>
-            </svg>
-          </div>
-        )}
 
         {/* ── TOOLTIP ── */}
         {tooltip && !dragRef.current && (
@@ -3473,6 +3517,7 @@ function ChartSearchBar({ watchlist, onAdd, onSelect, onRemove, activeSymbol, to
 function ChartsPage({ initialSymbol, goBack, token }) {
   const [watchlist, setWatchlist] = useState(["AAPL", "NVDA", "TSLA"]);
   const [activeSymbol, setActiveSymbol] = useState(initialSymbol || "AAPL");
+  const mktStatus = useMarketStatus();
 
   // When initialSymbol changes (nav from holdings), add and select it
   useEffect(() => {
@@ -3483,10 +3528,20 @@ function ChartsPage({ initialSymbol, goBack, token }) {
   }, [initialSymbol]);
 
   // Fetch live quote for the active symbol
-  const { data: quoteData } = useApi(
-    () => (token && activeSymbol) ? api.getQuote(activeSymbol, token) : Promise.resolve(null),
-    [activeSymbol, token]
-  );
+  const [quoteData, setQuoteData] = useState(null);
+  const chartPollMs = mktStatus.isOpen ? 3000 : 300000;
+  useEffect(() => {
+    if (!token || !activeSymbol) return;
+    let cancelled = false;
+    const fetchQuote = () => {
+      api.getQuote(activeSymbol, token)
+        .then(q => { if (!cancelled) setQuoteData(q); })
+        .catch(() => {});
+    };
+    fetchQuote();
+    const id = setInterval(fetchQuote, chartPollMs);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [activeSymbol, token, chartPollMs]);
   const stockInfo = quoteData
     ? { sym: quoteData.symbol, name: quoteData.name, price: quoteData.price,
         chg: quoteData.change, chgPct: quoteData.change_pct, open: quoteData.open,
@@ -3503,13 +3558,14 @@ function ChartsPage({ initialSymbol, goBack, token }) {
   };
 
   return (
-    <div className="charts-page" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+    <div className="charts-page" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <style>{CHART_CSS}</style>
 
       {/* Page header */}
       <div style={{
         background: "#0e1117", borderBottom: "1px solid #1e2535",
-        padding: "14px 24px", display: "flex", alignItems: "flex-end", justifyContent: "space-between"
+        padding: "14px 24px", display: "flex", alignItems: "flex-end", justifyContent: "space-between",
+        flexShrink: 0
       }}>
         <div>
           <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 28, color: "#e8f0fa", letterSpacing: 1, lineHeight: 1, display:"flex", alignItems:"center" }}>
@@ -3521,11 +3577,11 @@ function ChartsPage({ initialSymbol, goBack, token }) {
           </div>
         </div>
         <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4a5568", textAlign: "right" }}>
-          <div style={{ color: "#00d97e", display: "flex", alignItems: "center", gap: 5 }}>
-            <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#00d97e", display: "inline-block", animation: "blink 2s infinite" }} />
-            NYSE OPEN
+          <div style={{ color: mktStatus.isOpen ? "#00d97e" : "var(--red)", display: "flex", alignItems: "center", gap: 5, justifyContent: "flex-end" }}>
+            <span style={{ width: 5, height: 5, borderRadius: "50%", background: mktStatus.isOpen ? "#00d97e" : "var(--red)", display: "inline-block", animation: "blink 2s infinite" }} />
+            {mktStatus.isOpen ? "NYSE OPEN" : `CLOSED · OPENS IN ${mktStatus.countdown}`}
           </div>
-          <div style={{ marginTop: 2 }}>MON 23 FEB 2026 · 14:32 EST</div>
+          <div style={{ marginTop: 2 }}>{mktStatus.dateStr} · {mktStatus.timeStr}</div>
         </div>
       </div>
 
@@ -3540,7 +3596,7 @@ function ChartsPage({ initialSymbol, goBack, token }) {
       />
 
       {/* Chart */}
-      <div style={{ flex: 1, overflow: "hidden", minHeight: 0 }}>
+      <div style={{ flex: 1, overflow: "hidden", minHeight: 0, position: "relative" }}>
         {activeSymbol ? (
           <StockChart
             key={activeSymbol}
@@ -4333,7 +4389,8 @@ function ReviewTable({ entries, onDelete }) {
 export default function App() {
   const [page, setPageRaw] = useState(() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get("reset_token") ? "reset-password" : "login";
+    if (params.get("reset_token")) return "reset-password";
+    return sessionStorage.getItem("fb_token") ? "dashboard" : "login";
   });
   const [pageHistory, setPageHistory] = useState([]);
   const setPage = useCallback((next) => {
@@ -4416,6 +4473,32 @@ export default function App() {
     setPage("login");
     addToast("SESSION TERMINATED");
   };
+
+  // ── Listen for expired-token events from apiFetch ──────────────────────
+  useEffect(() => {
+    const onExpired = () => handleLogout();
+    window.addEventListener("session-expired", onExpired);
+    return () => window.removeEventListener("session-expired", onExpired);
+  });
+
+  // ── Inactivity auto-logout (5 minutes) ─────────────────────────────────
+  useEffect(() => {
+    if (!authToken) return;
+    const IDLE_MS = 5 * 60 * 1000;
+    const KEY = "fb_last_activity";
+    const touch = () => localStorage.setItem(KEY, Date.now().toString());
+    const check = () => {
+      const last = parseInt(localStorage.getItem(KEY) || "0", 10);
+      if (Date.now() - last >= IDLE_MS) handleLogout();
+    };
+    // Seed on mount so a fresh login / reload doesn't start stale
+    touch();
+    const interval = setInterval(check, 10000);
+    const reset = () => touch();
+    const events = ["mousemove", "mousedown", "keydown", "touchstart", "scroll"];
+    events.forEach(e => window.addEventListener(e, reset, { passive: true }));
+    return () => { clearInterval(interval); events.forEach(e => window.removeEventListener(e, reset)); };
+  }, [authToken]);
 
   const handleTxSubmit = async (form) => {
     if (!backendOk || !authToken) {
@@ -4541,6 +4624,7 @@ export default function App() {
           {page==="orders"       && <OrdersPage       onNewTx={()=>setShowTxModal(true)} token={authToken} accountId={accountId} goBack={goBack}/>}
           {page==="charts"       && <ChartsPage initialSymbol={chartSymbol} token={authToken} goBack={goBack}/>}
           {page==="import"       && <ImportPage addToast={addToast} token={authToken} accountId={accountId} goBack={goBack}/>}
+          <Footer/>
         </div>
       </div>
 
