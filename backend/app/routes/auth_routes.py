@@ -1,3 +1,12 @@
+"""
+auth_routes.py — Authentication endpoints and user dependency for TickerTap.
+
+Provides /auth/register, /auth/login, /auth/forgot-password, /auth/reset-password
+as well as the canonical get_current_user and get_current_admin dependencies that
+all other route modules should use (via dependencies.py re-export).
+"""
+
+import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -20,6 +29,8 @@ from ..schemas import (
     UserLogin,
     TokenResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -145,9 +156,9 @@ async def forgot_password(
 
     try:
         await send_password_reset_email(user.email, reset_url)
-    except Exception:
-        # Don't expose SMTP errors to the client
-        pass
+    except Exception as exc:
+        # Don't expose SMTP errors to the client, but log for debugging
+        logger.error("Failed to send password reset email to %s: %s", user.email, exc)
 
     return {"detail": "If that email is registered you will receive a reset link shortly."}
 

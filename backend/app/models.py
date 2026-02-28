@@ -1,8 +1,20 @@
+"""
+models.py — SQLAlchemy ORM models for TickerTap.
+
+Defines all database tables: users, accounts, transactions, securities,
+holdings, orders, password_reset_tokens, and audit_log.
+
+All foreign keys specify ondelete behaviour and nullable=False where
+a parent reference is required, ensuring referential integrity.
+"""
+
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Numeric,
     String,
     Text,
@@ -15,6 +27,8 @@ from .db import Base
 
 
 class User(Base):
+    """Registered platform user."""
+
     __tablename__ = "users"
 
     user_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -30,10 +44,19 @@ class User(Base):
 
 
 class Account(Base):
+    """Brokerage account owned by a user."""
+
     __tablename__ = "accounts"
+    __table_args__ = (
+        CheckConstraint("balance >= 0", name="ck_accounts_balance_positive"),
+    )
 
     account_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id"))
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
     account_type = Column(String(50), nullable=False)
     account_number = Column(String(50), unique=True, nullable=False)
     balance = Column(Numeric(18, 2), server_default="0.00")
@@ -44,14 +67,20 @@ class Account(Base):
 
 
 class Transaction(Base):
+    """Monetary transaction (deposit/withdrawal) on an account."""
+
     __tablename__ = "transactions"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_transactions_amount_positive"),
+        Index("idx_transactions_account_created", "account_id", "created_at"),
+    )
 
     transaction_id = Column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     account_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("accounts.account_id"),
+        ForeignKey("accounts.account_id", ondelete="CASCADE"),
         nullable=False,
     )
     transaction_type = Column(String(20), nullable=False)
@@ -65,6 +94,8 @@ class Transaction(Base):
 
 
 class Security(Base):
+    """Tradeable security (stock, ETF, etc.)."""
+
     __tablename__ = "securities"
 
     security_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -78,17 +109,22 @@ class Security(Base):
 
 
 class Holding(Base):
+    """Position in a security held within an account."""
+
     __tablename__ = "holdings"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_holdings_quantity_positive"),
+    )
 
     holding_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     account_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("accounts.account_id"),
+        ForeignKey("accounts.account_id", ondelete="CASCADE"),
         nullable=False,
     )
     security_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("securities.security_id"),
+        ForeignKey("securities.security_id", ondelete="RESTRICT"),
         nullable=False,
     )
     quantity = Column(Numeric(18, 6), nullable=False)
@@ -98,17 +134,23 @@ class Holding(Base):
 
 
 class Order(Base):
+    """Buy/sell order placed against an account."""
+
     __tablename__ = "orders"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_orders_quantity_positive"),
+        Index("idx_orders_account_status", "account_id", "status"),
+    )
 
     order_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     account_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("accounts.account_id"),
+        ForeignKey("accounts.account_id", ondelete="CASCADE"),
         nullable=False,
     )
     security_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("securities.security_id"),
+        ForeignKey("securities.security_id", ondelete="RESTRICT"),
         nullable=False,
     )
     order_type = Column(String(20), nullable=False)
@@ -124,10 +166,16 @@ class Order(Base):
 
 
 class PasswordResetToken(Base):
+    """One-time password reset token linked to a user."""
+
     __tablename__ = "password_reset_tokens"
 
     token_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
     token = Column(String(128), unique=True, nullable=False, index=True)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     used = Column(Boolean, server_default="false")
@@ -135,6 +183,8 @@ class PasswordResetToken(Base):
 
 
 class AuditLog(Base):
+    """Immutable audit trail for all user-initiated actions."""
+
     __tablename__ = "audit_log"
 
     log_id = Column(
@@ -142,7 +192,7 @@ class AuditLog(Base):
     )
     user_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("users.user_id"),
+        ForeignKey("users.user_id", ondelete="SET NULL"),
     )
     action = Column(String(100), nullable=False)
     table_name = Column(String(100))

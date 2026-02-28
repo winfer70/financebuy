@@ -10,7 +10,8 @@ import yfinance as yf
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from ..dependencies import get_current_user
+# Canonical auth dependency — returns a User ORM object (not a string)
+from .auth_routes import get_current_user
 
 router = APIRouter()
 
@@ -204,7 +205,7 @@ def _fetch_symbols_info() -> List[dict]:
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.get("/quote/{symbol}", response_model=QuoteOut)
-async def get_quote(symbol: str, current_user: str = Depends(get_current_user)):
+async def get_quote(symbol: str, current_user=Depends(get_current_user)):
     sym = symbol.upper()
     cache_key = f"quote:{sym}"
     cached = _get_cached(cache_key, _quote_ttl())
@@ -222,7 +223,7 @@ async def get_quote(symbol: str, current_user: str = Depends(get_current_user)):
 
 @router.get("/ohlcv/{symbol}", response_model=OHLCVResponse)
 async def get_ohlcv(symbol: str, years: int = Query(default=5, ge=1, le=10),
-                    current_user: str = Depends(get_current_user)):
+                    current_user=Depends(get_current_user)):
     sym = symbol.upper()
     cache_key = f"ohlcv:{sym}:{years}"
     cached = _get_cached(cache_key, _OHLCV_TTL)
@@ -239,7 +240,7 @@ async def get_ohlcv(symbol: str, years: int = Query(default=5, ge=1, le=10),
 
 
 @router.get("/symbols", response_model=List[dict])
-async def list_symbols(current_user: str = Depends(get_current_user)):
+async def list_symbols(current_user=Depends(get_current_user)):
     cache_key = "symbols_list"
     cached = _get_cached(cache_key, _SYMBOLS_TTL)
     if cached:
@@ -286,7 +287,7 @@ def _search_symbols(query: str, max_results: int = 8) -> List[dict]:
 @router.get("/search", response_model=List[dict])
 async def search_symbols(
     q: str = Query(..., min_length=1, description="Search query (ticker or company name)"),
-    current_user: str = Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
     cache_key = f"search:{q.lower()}"
     cached = _get_cached(cache_key, _SEARCH_TTL)

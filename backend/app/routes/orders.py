@@ -1,4 +1,11 @@
-from datetime import datetime
+"""
+orders.py — Order placement, cancellation, and execution routes for TickerTap.
+
+Handles market orders (immediate execution) and limit orders (pending until
+manually executed via /orders/{id}/execute).
+"""
+
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -207,7 +214,7 @@ async def cancel_order(
         )
 
     order.status = "cancelled"
-    order.cancelled_at = datetime.utcnow()
+    order.cancelled_at = datetime.now(timezone.utc)
 
     async with db.begin():
         db.add(order)
@@ -318,7 +325,7 @@ async def execute_order(
     order.status = "filled"
     order.filled_quantity = qty
     order.filled_price = price
-    order.executed_at = datetime.utcnow()
+    order.executed_at = datetime.now(timezone.utc)
 
     async with db.begin():
         db.add(order)
