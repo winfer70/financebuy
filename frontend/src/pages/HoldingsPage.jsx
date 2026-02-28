@@ -5,10 +5,10 @@
  */
 
 import { useState, useMemo } from "react";
-import { useApi } from "../api/client";
+import api, { useApi } from "../api/client";
 import { Ic } from "../components/common/Icons";
 import { SkeletonRow, ApiError } from "../components/common";
-import { Sparkline } from "../components/charts";
+import { Sparkline, AllocationDonut } from "../components/charts";
 import { HOLDINGS } from "../styles/globals";
 
 export function HoldingsPage({ onNewTx, onViewChart, token, accountId, goBack }) {
@@ -38,7 +38,7 @@ export function HoldingsPage({ onNewTx, onViewChart, token, accountId, goBack })
           <div className="page-sub">{holdings.length} POSITIONS · {accountId ? `ACCOUNT ${String(accountId).slice(0,8).toUpperCase()}` : "DEMO"}</div>
         </div>
         <div className="page-actions">
-          <button className="btn btn-outline" onClick={()=>setSubpage && setSubpage("statements")}><Ic.file/> STATEMENTS</button>
+          <button className="btn btn-outline"><Ic.file/> STATEMENTS</button>
           <button className="btn btn-amber" onClick={onNewTx}><Ic.plus/> NEW TRANSACTION</button>
         </div>
       </div>

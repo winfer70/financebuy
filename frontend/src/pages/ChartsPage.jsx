@@ -7,6 +7,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import api from "../api/client";
 import { Ic } from "../components/common/Icons";
+import { useMarketStatus } from "../components/common";
 
 export function generateOHLCV(basePrice, years = 5) {
   const days = years * 365;
@@ -916,7 +917,7 @@ function ChartSearchBar({ watchlist, onAdd, onSelect, onRemove, activeSymbol, to
 }
 
 /* ─── MAIN CHARTS PAGE ──────────────────────────────────────────────────────── */
-function ChartsPage({ initialSymbol, goBack, token }) {
+export function ChartsPage({ initialSymbol, goBack, token }) {
   const [watchlist, setWatchlist] = useState(["AAPL", "NVDA", "TSLA"]);
   const [activeSymbol, setActiveSymbol] = useState(initialSymbol || "AAPL");
   const mktStatus = useMarketStatus();
@@ -1018,298 +1019,218 @@ function ChartsPage({ initialSymbol, goBack, token }) {
 }
 
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   IMPORT PAGE — Broker statement download + Manual portfolio entry
-   Subpages: Broker Downloads | Manual Import | Portfolio Review
-═══════════════════════════════════════════════════════════════════════════ */
+const CHART_CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
 
-const IMPORT_CSS = `
-/* ── Import page layout ── */
-.import-page { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
-.import-subnav {
-  background: var(--bg2); border-bottom: 1px solid var(--border);
-  padding: 0 24px; display: flex; gap: 0;
-}
-.import-tab {
-  padding: 12px 20px; font-family: var(--font-mono); font-size: 11px;
-  font-weight: 500; color: var(--muted); cursor: pointer; border: none;
-  background: none; letter-spacing: 0.8px; text-transform: uppercase;
-  border-bottom: 2px solid transparent; margin-bottom: -1px;
-  transition: all 0.12s;
-}
-.import-tab:hover { color: var(--text); }
-.import-tab.active { color: var(--amber); border-bottom-color: var(--amber); }
+.charts-page { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; background: #090b0f; }
 
-/* ── Broker cards ── */
-.broker-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 12px; padding: 24px;
+/* ── Search bar ── */
+.chart-search-bar {
+  background: #0e1117;
+  border-bottom: 1px solid #1e2535;
+  padding: 14px 24px;
+  display: flex; align-items: center; gap: 16px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
 }
-.broker-card {
-  background: var(--panel); border: 1px solid var(--border);
-  padding: 20px; cursor: pointer;
-  transition: all 0.15s; position: relative; overflow: hidden;
+.chart-search-wrap {
+  position: relative; display: flex; align-items: center;
 }
-.broker-card::before {
-  content: ''; position: absolute; left: 0; top: 0; bottom: 0;
-  width: 2px; background: var(--border); transition: background 0.15s;
+.chart-search-icon {
+  position: absolute; left: 10px; color: #4a5568; pointer-events: none;
 }
-.broker-card:hover { border-color: var(--border2); }
-.broker-card:hover::before { background: var(--amber); }
-.broker-card.selected { border-color: var(--amber); background: rgba(15,125,64,0.04); }
-.broker-card.selected::before { background: var(--amber); }
-.broker-logo-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-.broker-logo {
-  width: 40px; height: 40px; border-radius: 2px;
-  display: flex; align-items: center; justify-content: center;
-  font-family: var(--font-disp); font-size: 14px; font-weight: 700;
-  flex-shrink: 0; letter-spacing: 0.5px;
-}
-.broker-name { font-family: var(--font-sans); font-size: 15px; font-weight: 600; color: var(--bright); }
-.broker-type { font-family: var(--font-mono); font-size: 10px; color: var(--muted); margin-top: 2px; letter-spacing: 0.5px; }
-.broker-desc { font-family: var(--font-mono); font-size: 11px; color: var(--mid); line-height: 1.5; margin-bottom: 12px; }
-.broker-formats { display: flex; gap: 6px; flex-wrap: wrap; }
-.format-chip {
-  font-family: var(--font-mono); font-size: 9px; font-weight: 600;
-  padding: 2px 7px; letter-spacing: 0.8px; text-transform: uppercase;
-  border: 1px solid var(--border2); color: var(--mid); border-radius: 1px;
-}
-.broker-download-area {
-  background: var(--bg2); border: 1px solid var(--border);
-  margin: 0 24px 24px;
-}
-.broker-dl-header {
-  padding: 14px 18px; border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; justify-content: space-between;
-}
-.broker-dl-title { font-family: var(--font-disp); font-size: 20px; color: var(--amber); letter-spacing: 1px; }
-.broker-dl-body { padding: 20px 18px; display: flex; flex-direction: column; gap: 16px; }
-.dl-step {
-  display: flex; gap: 14px; align-items: flex-start;
-}
-.dl-step-num {
-  width: 24px; height: 24px; border-radius: 1px;
-  background: rgba(15,125,64,0.1); border: 1px solid rgba(15,125,64,0.25);
-  display: flex; align-items: center; justify-content: center;
-  font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--amber);
-  flex-shrink: 0; margin-top: 1px;
-}
-.dl-step-text { font-family: var(--font-mono); font-size: 12px; color: var(--text); line-height: 1.6; }
-.dl-step-text a { color: var(--amber); text-decoration: none; }
-.dl-step-text code {
-  background: var(--bg3); border: 1px solid var(--border);
-  padding: 1px 5px; font-size: 11px; color: var(--cyan);
-}
-.drop-zone {
-  border: 1px dashed var(--border2); padding: 28px;
-  text-align: center; cursor: pointer; transition: all 0.15s;
-  background: var(--bg3);
-}
-.drop-zone:hover, .drop-zone.drag-over {
-  border-color: var(--amber); background: rgba(15,125,64,0.04);
-}
-.drop-zone-icon { font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin-top: 8px; }
-.drop-zone-sub { font-family: var(--font-mono); font-size: 10px; color: var(--muted); margin-top: 4px; }
-.upload-progress { height: 2px; background: var(--border); margin-top: 8px; overflow: hidden; }
-.upload-progress-bar { height: 100%; background: var(--amber); transition: width 0.3s; }
-.file-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 12px; background: var(--bg3); border: 1px solid var(--border);
-  font-family: var(--font-mono); font-size: 11px;
-}
-.file-name { flex: 1; color: var(--text); }
-.file-size { color: var(--muted); }
-.file-status-ok { color: var(--green); display: flex; align-items: center; gap: 4px; }
-.file-status-err { color: var(--red); }
-
-/* ── Manual import form ── */
-.manual-form-wrap { padding: 24px; display: flex; flex-direction: column; gap: 20px; max-width: 900px; }
-.manual-entries-table {
-  background: var(--panel); border: 1px solid var(--border);
-}
-.manual-entries-header {
-  padding: 10px 16px; border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; justify-content: space-between;
-}
-.entry-row-form {
-  display: grid;
-  grid-template-columns: 140px 1fr 80px 120px 120px 140px 40px;
-  gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border);
-  align-items: center;
-}
-.entry-row-form:last-child { border-bottom: none; }
-.entry-data-row {
-  display: grid;
-  grid-template-columns: 140px 1fr 80px 120px 120px 140px 40px;
-  gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border);
-  align-items: center; font-family: var(--font-mono); font-size: 12px;
-  transition: background 0.08s;
-}
-.entry-data-row:hover { background: rgba(255,255,255,0.02); }
-.entry-data-row:last-child { border-bottom: none; }
-.entry-th {
-  font-family: var(--font-mono); font-size: 9px; font-weight: 500;
-  color: var(--muted); letter-spacing: 1px; text-transform: uppercase;
-}
-.entry-form-input {
-  background: var(--bg3); border: 1px solid var(--border);
-  padding: 6px 8px; font-family: var(--font-mono); font-size: 11px;
-  color: var(--bright); outline: none; width: 100%; border-radius: 2px;
+.chart-search-input {
+  background: #141820; border: 1px solid #1e2535;
+  padding: 8px 12px 8px 32px;
+  font-family: 'IBM Plex Mono', monospace; font-size: 13px;
+  color: #e8f0fa; outline: none; width: 220px; border-radius: 2px;
+  text-transform: uppercase; letter-spacing: 1px;
   transition: border-color 0.1s;
 }
-.entry-form-input:focus { border-color: var(--amber); }
-.entry-form-input::placeholder { color: var(--muted); }
-select.entry-form-input {
-  appearance: none; cursor: pointer;
-  background-image: url("data:image/svg+xml,%3Csvg width='8' height='5' viewBox='0 0 8 5' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l3 3 3-3' stroke='%234a5568' strokeWidth='1.2'/%3E%3C/svg%3E");
-  background-repeat: no-repeat; background-position: right 7px center;
-  padding-right: 20px;
+.chart-search-input:focus { border-color: #0f7d40; }
+.chart-search-input::placeholder { color: #4a5568; text-transform: none; letter-spacing: 0; }
+.search-suggestions {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+  background: #141820; border: 1px solid #1e2535;
+  z-index: 50; max-height: 200px; overflow-y: auto;
 }
-select.entry-form-input option { background: var(--bg3); }
-.asset-type-badge {
-  display: inline-flex; align-items: center; gap: 4px;
-  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
-  padding: 2px 7px; border-radius: 1px; text-transform: uppercase; letter-spacing: 0.5px;
+.suggestion-item {
+  padding: 8px 12px; cursor: pointer;
+  font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+  display: flex; gap: 12px; align-items: center;
+  border-bottom: 1px solid #1e2535; transition: background 0.08s;
 }
-.at-stock   { color: #3d7ef5; background: rgba(61,126,245,0.08); border: 1px solid rgba(61,126,245,0.2); }
-.at-crypto  { color: #0f7d40; background: rgba(15,125,64,0.08); border: 1px solid rgba(15,125,64,0.2); }
-.at-metalsphisical  { color: #fbbf24; background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.2); }
-.at-metalsetf { color: #0fc0d0; background: rgba(15,192,208,0.08); border: 1px solid rgba(15,192,208,0.2); }
-.delete-row-btn {
-  background: none; border: none; cursor: pointer; color: var(--muted);
-  display: flex; align-items: center; justify-content: center;
-  transition: color 0.1s; width: 28px; height: 28px;
-  border-radius: 2px;
-}
-.delete-row-btn:hover { color: var(--red); background: rgba(240,68,56,0.08); }
-.import-summary-bar {
-  background: var(--bg2); border: 1px solid var(--border);
-  padding: 16px 18px; display: flex; gap: 24px; align-items: center;
-}
-.summary-stat { display: flex; flex-direction: column; gap: 3px; }
-.summary-lbl { font-family: var(--font-mono); font-size: 9px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
-.summary-val { font-family: var(--font-mono); font-size: 16px; font-weight: 600; color: var(--bright); }
-.confirm-actions { display: flex; gap: 10px; margin-left: auto; align-items: center; }
+.suggestion-item:last-child { border-bottom: none; }
+.suggestion-item:hover { background: #1a1d2e; }
+.sug-sym { color: #0f7d40; font-weight: 600; min-width: 56px; }
+.sug-name { color: #718096; font-size: 11px; }
 
-/* ── Portfolio review ── */
-.review-wrap { padding: 24px; display: flex; flex-direction: column; gap: 16px; }
-.review-section-title {
-  font-family: var(--font-mono); font-size: 10px; font-weight: 500;
-  color: var(--muted); letter-spacing: 1.5px; text-transform: uppercase;
-  padding-bottom: 8px; border-bottom: 1px solid var(--border);
+/* ── Watchlist chips ── */
+.watchlist { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.watch-chip {
+  padding: 5px 12px; background: #141820; border: 1px solid #1e2535;
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 600;
+  color: #718096; cursor: pointer; border-radius: 2px;
+  transition: all 0.1s; letter-spacing: 0.5px;
+  display: flex; align-items: center; gap: 6px;
 }
-.review-empty {
-  text-align: center; padding: 48px; color: var(--muted);
-  font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.5px;
+.watch-chip:hover { border-color: #263045; color: #c8d3e0; }
+.watch-chip.active { color: #0f7d40; border-color: #0f7d40; background: rgba(15,125,64,0.06); }
+.watch-chip .chip-chg { font-size: 10px; }
+.watch-chip .chip-chg.pos { color: #00d97e; }
+.watch-chip .chip-chg.neg { color: #f04438; }
+.watch-chip-close {
+  color: #4a5568; background: none; border: none; cursor: pointer;
+  padding: 0; display: flex; align-items: center; font-size: 11px;
+  transition: color 0.1s; line-height: 1;
 }
-.review-empty-title {
-  font-family: var(--font-disp); font-size: 28px; color: var(--muted);
-  letter-spacing: 2px; margin-bottom: 8px;
+.watch-chip-close:hover { color: #f04438; }
+
+/* ── Controls row ── */
+.chart-controls {
+  background: #0e1117; border-bottom: 1px solid #1e2535;
+  padding: 8px 24px; display: flex; align-items: center; gap: 16px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.ctrl-group { display: flex; gap: 1px; background: #1e2535; }
+.ctrl-btn {
+  padding: 5px 12px; background: #0e1117; border: none; cursor: pointer;
+  font-family: 'IBM Plex Mono', monospace; font-size: 10px; font-weight: 500;
+  color: #4a5568; letter-spacing: 0.8px; text-transform: uppercase;
+  transition: all 0.1s;
+}
+.ctrl-btn:hover { background: #141820; color: #c8d3e0; }
+.ctrl-btn.active { background: #141820; color: #0f7d40; }
+
+.overlay-toggles { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.overlay-toggle {
+  display: flex; align-items: center; gap: 5px; cursor: pointer;
+  font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+  padding: 4px 10px; border: 1px solid #1e2535; background: #0e1117;
+  border-radius: 2px; transition: all 0.1s; user-select: none;
+  color: #4a5568;
+}
+.overlay-toggle:hover { border-color: #263045; color: #718096; }
+.overlay-toggle.on { border-color: transparent; }
+.overlay-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+
+.sma-custom-wrap { display: flex; align-items: center; gap: 6px; }
+.sma-custom-input {
+  width: 52px; background: #141820; border: 1px solid #1e2535;
+  padding: 4px 7px; font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+  color: #e8f0fa; outline: none; border-radius: 2px; text-align: center;
+  transition: border-color 0.1s;
+}
+.sma-custom-input:focus { border-color: #a78bfa; }
+
+.ctrl-sep { width: 1px; height: 20px; background: #1e2535; }
+.ctrl-label { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #4a5568; letter-spacing: 0.5px; }
+
+/* ── Stats bar ── */
+.stock-stats-bar {
+  background: #0e1117; border-bottom: 1px solid #1e2535;
+  padding: 12px 24px; display: flex; gap: 0; align-items: stretch;
+  flex-shrink: 0; overflow-x: auto;
+}
+.stat-sep { width: 1px; background: #1e2535; margin: 0 20px; flex-shrink: 0; }
+.stock-stat { display: flex; flex-direction: column; gap: 3px; min-width: 100px; }
+.ss-label { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #4a5568; letter-spacing: 1px; text-transform: uppercase; }
+.ss-value { font-family: 'IBM Plex Mono', monospace; font-size: 18px; font-weight: 600; color: #e8f0fa; line-height: 1; letter-spacing: -0.5px; }
+.ss-value.pos { color: #00d97e; }
+.ss-value.neg { color: #f04438; }
+.ss-value.amber { color: #0f7d40; }
+.ss-sub { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #4a5568; }
+.ss-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-family: 'IBM Plex Mono', monospace; font-size: 10px; font-weight: 500;
+  padding: 2px 7px; border-radius: 1px; align-self: flex-start; margin-top: 2px;
+}
+.ss-badge.pos { color: #00d97e; background: rgba(0,217,126,0.08); border: 1px solid rgba(0,217,126,0.15); }
+.ss-badge.neg { color: #f04438; background: rgba(240,68,56,0.08); border: 1px solid rgba(240,68,56,0.15); }
+
+/* ── Chart area ── */
+.chart-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+.chart-canvas-wrap {
+  flex: 1; position: relative; cursor: crosshair; overflow: hidden; min-height: 0;
+  background: #090b0f; display: flex; flex-direction: column;
+}
+.chart-canvas-wrap:active { cursor: grabbing; }
+.chart-svg { display: block; width: 100%; height: 100%; }
+
+/* ── Tooltip / crosshair ── */
+.crosshair-tooltip {
+  position: absolute; pointer-events: none;
+  background: #141820; border: 1px solid #263045;
+  padding: 10px 12px; min-width: 180px;
+  font-family: 'IBM Plex Mono', monospace;
+  z-index: 30;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.7);
+}
+.tt-date { font-size: 10px; color: #4a5568; letter-spacing: 0.5px; margin-bottom: 7px; border-bottom: 1px solid #1e2535; padding-bottom: 6px; }
+.tt-row { display: flex; justify-content: space-between; gap: 16px; font-size: 11px; margin-bottom: 3px; }
+.tt-key { color: #4a5568; }
+.tt-val { color: #e8f0fa; font-weight: 500; }
+.tt-val.pos { color: #00d97e; }
+.tt-val.neg { color: #f04438; }
+.tt-divider { height: 1px; background: #1e2535; margin: 5px 0; }
+.tt-sma { display: flex; align-items: center; gap: 6px; font-size: 11px; margin-bottom: 3px; }
+.tt-sma-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.tt-sma-key { color: #4a5568; }
+.tt-sma-val { color: #e8f0fa; margin-left: auto; }
+
+/* ── Breakout badge ── */
+.breakout-badge {
+  position: absolute; pointer-events: none;
+  font-family: 'IBM Plex Mono', monospace; font-size: 9px; font-weight: 700;
+  padding: 2px 6px; border-radius: 1px; letter-spacing: 0.8px;
+  white-space: nowrap; z-index: 10;
+}
+.bo-bull { background: rgba(0,217,126,0.9); color: #060f08; }
+.bo-bear { background: rgba(240,68,56,0.9); color: #fff; }
+
+/* ── Price axis ── */
+.price-axis-label {
+  font-family: 'IBM Plex Mono', monospace; font-size: 10px; fill: #4a5568;
+}
+.current-price-line text {
+  font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+}
+
+/* ── Empty state ── */
+.chart-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  height: 100%; gap: 12px;
+  font-family: 'IBM Plex Mono', monospace; color: #4a5568;
+}
+.chart-empty-title { font-family: 'Bebas Neue', sans-serif; font-size: 32px; color: var(--border2); letter-spacing: 2px; }
+.chart-empty-sub { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
+
+/* ── Legend ── */
+.chart-legend {
+  position: absolute; top: 12px; left: 16px;
+  display: flex; gap: 12px; align-items: center; pointer-events: none; z-index: 5;
+  flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 5px;
+  font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #4a5568;
+  background: rgba(9,11,15,0.8); padding: 2px 6px;
+}
+.legend-line { width: 16px; height: 2px; border-radius: 1px; flex-shrink: 0; }
+
+/* ── Y-axis price tag ── */
+.price-tag {
+  position: absolute; right: 0;
+  font-family: 'IBM Plex Mono', monospace; font-size: 10px; font-weight: 600;
+  padding: 2px 6px; pointer-events: none;
+}
+
+/* ── Scanline ── */
+.charts-page::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
 }
 `;
 
-const BROKER_LIST = [
-  {
-    id: "robinhood", name: "Robinhood", short: "RH", color: "#00c805", bg: "#003d01",
-    type: "US Equities & Crypto", formats: ["CSV"],
-    desc: "Export account history from Settings → Account → History & Statements",
-    steps: [
-      { text: 'Log into <a href="#" onClick="return false">Robinhood Web</a>' },
-      { text: 'Go to <code>Account → Statements & History</code>' },
-      { text: 'Select date range and click <code>Download CSV</code>' },
-      { text: 'Upload the downloaded file below' },
-    ],
-    cols: "Date, Type, Symbol, Shares, Price, Amount",
-  },
-  {
-    id: "ibkr", name: "IBKR", short: "IB", color: "#c8282a", bg: "#3d0a0b",
-    type: "Multi-asset Global Broker", formats: ["CSV", "XML", "PDF"],
-    desc: "Interactive Brokers Flex Query exports detailed trade history",
-    steps: [
-      { text: 'Log into <a href="#" onClick="return false">IBKR Client Portal</a>' },
-      { text: 'Go to <code>Reports → Statements → Flex Queries</code>' },
-      { text: 'Create a new Flex Query or use the default <code>Activity Statement</code>' },
-      { text: 'Run query, select CSV format, and download' },
-    ],
-    cols: "TradeDate, Symbol, Quantity, TradePrice, IBCommission, AssetClass",
-  },
-  {
-    id: "etrade", name: "E*TRADE", short: "ET", color: "#6633cc", bg: "#1a0d33",
-    type: "US Equities & Options", formats: ["CSV", "OFX"],
-    desc: "E*TRADE provides full trade history exports from the Brokerage account section",
-    steps: [
-      { text: 'Log into <a href="#" onClick="return false">E*TRADE</a> and go to <code>Accounts</code>' },
-      { text: 'Select <code>Documents → Brokerage Tax Documents</code>' },
-      { text: 'Choose <code>Trade Confirmations</code> and date range' },
-      { text: 'Click <code>Export to CSV</code> and upload below' },
-    ],
-    cols: "TransactionDate, SecurityType, Symbol, Quantity, Price, Amount",
-  },
-  {
-    id: "td", name: "TD Ameritrade", short: "TD", color: "#00a651", bg: "#003118",
-    type: "US Full-Service Broker", formats: ["CSV", "OFX", "QFX"],
-    desc: "Schwab (formerly TD Ameritrade) exports trade history with full OHLCV data",
-    steps: [
-      { text: 'Log into <a href="#" onClick="return false">Schwab/TDA</a>' },
-      { text: 'Navigate to <code>History & Statements → Transactions</code>' },
-      { text: 'Set date range and select <code>Export to Spreadsheet (.csv)</code>' },
-      { text: 'Upload the downloaded CSV file below' },
-    ],
-    cols: "DATE, TRANSACTION TYPE, SECURITY, QUANTITY, PRICE, AMOUNT",
-  },
-  {
-    id: "coinbase", name: "Coinbase", short: "CB", color: "#0052ff", bg: "#000f3d",
-    type: "Cryptocurrency Exchange", formats: ["CSV"],
-    desc: "Full transaction history including buys, sells, transfers, staking rewards",
-    steps: [
-      { text: 'Log into <a href="#" onClick="return false">Coinbase</a>' },
-      { text: 'Go to <code>Profile → Statements</code>' },
-      { text: 'Under <code>Transaction History</code>, select date range' },
-      { text: 'Click <code>Generate Report</code> then download CSV' },
-    ],
-    cols: "Timestamp, Transaction Type, Asset, Quantity Transacted, Spot Price, Subtotal",
-  },
-  {
-    id: "binance", name: "Binance", short: "BN", color: "#f0b90b", bg: "#2d2200",
-    type: "Global Crypto Exchange", formats: ["CSV", "XLSX"],
-    desc: "Export full order history, P&L reports, and tax statements from Binance",
-    steps: [
-      { text: 'Log into <a href="#" onClick="return false">Binance</a>' },
-      { text: 'Go to <code>Orders → Trade History</code>' },
-      { text: 'Select date range (max 3 months per export)' },
-      { text: 'Click <code>Export Complete Trade History</code> → CSV' },
-    ],
-    cols: "Date, Pair, Side, Price, Executed, Amount, Fee",
-  },
-  {
-    id: "schwab", name: "Charles Schwab", short: "CS", color: "#1b7ee0", bg: "#051d35",
-    type: "US Full-Service Broker", formats: ["CSV", "OFX", "QFX"],
-    desc: "Download detailed position history and trade confirmations from Schwab",
-    steps: [
-      { text: 'Log into <a href="#" onClick="return false">Schwab</a>' },
-      { text: 'Go to <code>Accounts → History</code>' },
-      { text: 'Filter transactions by date range and type' },
-      { text: 'Click <code>Export</code> and choose CSV format' },
-    ],
-    cols: "Date, Action, Symbol, Description, Quantity, Price, Amount",
-  },
-  {
-    id: "fidelity", name: "Fidelity", short: "FD", color: "#009b49", bg: "#002d15",
-    type: "US Full-Service Broker", formats: ["CSV", "OFX"],
-    desc: "Download account history and tax documents directly from Fidelity NetBenefits",
-    steps: [
-      { text: 'Log into <a href="#" onClick="return false">Fidelity</a>' },
-      { text: 'Go to <code>Accounts & Trade → Portfolio</code>' },
-      { text: 'Select <code>Activity & Orders → History</code>' },
-      { text: 'Click <code>Download</code> and select CSV format' },
-    ],
-    cols: "Run Date, Action, Symbol, Description, Type, Quantity, Price, Amount",
-  },
-];
-
-const ASSET_TYPES = [
-  { value: "Stock",           label: "STOCK",            cls: "at-stock" },
-  { value: "Crypto",          label: "CRYPTO",           cls: "at-crypto" },
-  { value: "MetalsPhisical",  label: "METALS PHYSICAL",  cls: "at-metalsphisical" },
-  { value: "MetalsETF",       label: "METALS ETF",       cls: "at-metalsetf" },
-];

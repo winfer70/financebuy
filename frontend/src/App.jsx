@@ -317,9 +317,6 @@ export default function App() {
     return params.get("reset_token") || null;
   });
 
-  /* ── When auth succeeds, navigate to dashboard ────────────────────────── */
-  const handleAuthSuccess = useCallback(() => setPage("dashboard"), [setPage]);
-
   return (
     <>
       {/* Inject global Bloomberg-inspired design system CSS */}
@@ -329,9 +326,8 @@ export default function App() {
         AuthProvider owns all auth state (token, user, accountId, login,
         logout, session-expiry, inactivity timer).
         onToast wires auth events (login success, logout) into the toast stack.
-        onNavigate lets AuthProvider redirect to dashboard after a successful login.
       */}
-      <AuthProvider onToast={addToast} onNavigate={handleAuthSuccess}>
+      <AuthProvider onToast={addToast}>
         <PageRouter
           page={page}
           setPage={setPage}

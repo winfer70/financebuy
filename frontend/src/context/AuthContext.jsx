@@ -115,7 +115,7 @@ export function AuthProvider({ children, onToast }) {
    * @throws {Error} Re-throws API errors so LoginPage can display them
    */
   const handleLogin = useCallback(async (email, password) => {
-    if (!backendOk) {
+    if (backendOk === false) {
       // Demo mode — backend is offline
       const demoUser = {
         email,
@@ -123,8 +123,12 @@ export function AuthProvider({ children, onToast }) {
         last_name: "Morgan",
         user_id: "demo",
       };
+      setAuthToken("demo-token");
       setAuthUser(demoUser);
       setAccountId("ACC-4821");
+      sessionStorage.setItem(STORAGE_TOKEN, "demo-token");
+      sessionStorage.setItem(STORAGE_USER, JSON.stringify(demoUser));
+      sessionStorage.setItem(STORAGE_ACCOUNT, "ACC-4821");
       onToast?.("DEMO MODE · BACKEND OFFLINE — SHOWING MOCK DATA");
       return { page: "dashboard" };
     }

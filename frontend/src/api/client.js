@@ -77,7 +77,7 @@ const api = {
   // ── Accounts ─────────────────────────────────────────────────────────────
   /** @param {string} userId @param {string} token */
   listAccounts: (userId, token) =>
-    apiFetch(`/accounts/?user_id=${userId}`, { token }),
+    apiFetch(`/accounts/me`, { token }),
 
   // ── Transactions ─────────────────────────────────────────────────────────
   /** @param {string} accountId @param {string} token */

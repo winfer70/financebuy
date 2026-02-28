@@ -580,7 +580,7 @@ select.form-control option { background: var(--bg3); }
 }
 .app-footer a { color: var(--amber); text-decoration: none; }
 .app-footer a:hover { text-decoration: underline; }
-\`;
+`;
 
 export const HOLDINGS = [
   { symbol:"AAPL", name:"Apple Inc.",         qty:12.5, avg:142.30, price:189.45, chg:+2.34, chgPct:+1.25 },

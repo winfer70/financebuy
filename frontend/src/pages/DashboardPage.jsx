@@ -7,7 +7,7 @@
 import { useState, useEffect, useMemo } from "react";
 import api, { useApi } from "../api/client";
 import { Ic } from "../components/common/Icons";
-import { SkeletonRow, ApiError } from "../components/common";
+import { SkeletonRow, ApiError, useMarketStatus } from "../components/common";
 import { Sparkline, PortfolioChart, AllocationDonut } from "../components/charts";
 import { HOLDINGS, TRANSACTIONS } from "../styles/globals";
 

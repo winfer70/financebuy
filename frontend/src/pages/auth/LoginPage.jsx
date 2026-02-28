@@ -9,12 +9,10 @@ import { Ic } from "../../components/common/Icons";
 import { Sparkline } from "../../components/charts";
 import { TICKER_DATA } from "../../styles/globals";
 
-const DEMO_EMAIL = "demo@example.com";
-
 export const DEMO_EMAIL = "demo@fticker-tap.com";
 const DEMO_PWD   = "Demo1234!";
 
-function LoginPage({ onLogin, onRegister, onForgotPassword, backendOk }) {
+export function LoginPage({ onLogin, onRegister, onForgotPassword, backendOk }) {
   const [email, setEmail] = useState(DEMO_EMAIL);
   const [pwd, setPwd] = useState(DEMO_PWD);
   const [show, setShow] = useState(false);

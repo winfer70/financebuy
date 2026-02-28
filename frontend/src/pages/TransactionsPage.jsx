@@ -5,7 +5,7 @@
  */
 
 import { useState, useMemo } from "react";
-import { useApi } from "../api/client";
+import api, { useApi } from "../api/client";
 import { Ic } from "../components/common/Icons";
 import { SkeletonRow, ApiError } from "../components/common";
 import { TRANSACTIONS } from "../styles/globals";
