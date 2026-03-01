@@ -42,6 +42,15 @@ services:
       interval: 10s
       timeout:  5s
       retries:  5
+    # Resource limits (P6.6) — prevent a runaway DB from starving other services
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
 
   redis:
     image: redis:7-alpine
@@ -55,6 +64,15 @@ services:
       interval: 10s
       timeout:  5s
       retries:  5
+    # Resource limits (P6.6)
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+        reservations:
+          cpus: "0.1"
+          memory: 32M
 
   app:
     build:
@@ -81,6 +99,15 @@ services:
         condition: service_healthy
     volumes:
       - ./backend/app:/app/app:ro
+    # Resource limits (P6.6)
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
 
 volumes:
   db_data:

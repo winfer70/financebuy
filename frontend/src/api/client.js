@@ -9,8 +9,14 @@
 
 import { useState, useEffect, useCallback } from "react";
 
-/* ── Base URL ────────────────────────────────────────────────────────────── */
-const API_BASE = import.meta.env.VITE_API_URL || "https://ticker-tap.com";
+/* ── Base URL (P7.12, P7.18) ─────────────────────────────────────────────── */
+// Default to the current page origin so local dev works without any .env
+// configuration (e.g. http://localhost:5173 in dev, proxied to :8000).
+// In production, VITE_API_URL points to the backend host.
+const _ORIGIN = import.meta.env.VITE_API_URL || window.location.origin;
+
+// All business API routes are versioned under /api/v1 (P7.18 — API versioning).
+const API_BASE = `${_ORIGIN}/api/v1`;
 
 /**
  * apiFetch — low-level fetch wrapper.
@@ -130,8 +136,20 @@ const api = {
   /** @param {string} token */
   getPortfolioSummary: (token) => apiFetch("/portfolio/summary", { token }),
 
-  // ── Health ───────────────────────────────────────────────────────────────
-  health: () => apiFetch("/health"),
+  // ── Auth refresh / logout (P6.3) ─────────────────────────────────────────
+  /**
+   * Obtain a new access token using the httpOnly refresh cookie.
+   * The browser sends the cookie automatically; no token argument needed.
+   */
+  refreshToken: () =>
+    apiFetch("/auth/refresh", { method: "POST" }),
+
+  /** @param {string} token - current access token */
+  logout: (token) =>
+    apiFetch("/auth/logout", { method: "POST", token }),
+
+  // ── Health (unversioned — stays at /health not /api/v1/health) ──────────
+  health: () => fetch(`${_ORIGIN}/health`).then((r) => r.json()),
 };
 
 export default api;

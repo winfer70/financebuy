@@ -13,9 +13,24 @@ async def send_password_reset_email(to_email: str, reset_url: str) -> None:
     smtp_pass = os.getenv("SMTP_PASS", "")
     from_addr = os.getenv("SMTP_FROM", smtp_user)
 
-    # Proton Bridge uses a self-signed certificate
+    # Build TLS context — full certificate verification is the default.
+    # SMTP_SKIP_TLS_VERIFY is provided only for local dev/Proton Bridge.
+    # In production this flag is explicitly blocked (P6.1 security guard).
     tls_context = ssl.create_default_context()
-    if os.getenv("SMTP_SKIP_TLS_VERIFY", "").lower() in ("1", "true", "yes"):
+    _env = os.getenv("ENVIRONMENT", "development").lower()
+    _skip_verify = os.getenv("SMTP_SKIP_TLS_VERIFY", "").lower() in ("1", "true", "yes")
+
+    if _skip_verify and _env == "production":
+        import sys
+        print(
+            "FATAL: SMTP_SKIP_TLS_VERIFY must not be enabled in production — "
+            "this disables certificate verification and exposes password-reset tokens. "
+            "Remove SMTP_SKIP_TLS_VERIFY from your production environment.",
+            file=sys.stderr,
+        )
+        raise RuntimeError("SMTP_SKIP_TLS_VERIFY is disallowed in production")
+
+    if _skip_verify:
         tls_context.check_hostname = False
         tls_context.verify_mode = ssl.CERT_NONE
 

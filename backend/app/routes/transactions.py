@@ -147,18 +147,31 @@ async def list_transactions(
         default=None,
         description="Filter by account_id; must belong to current user.",
     ),
+    limit: int = Query(
+        default=50,
+        ge=1,
+        le=100,
+        description="Maximum number of transactions to return (1–100).",
+    ),
+    offset: int = Query(
+        default=0,
+        ge=0,
+        description="Number of transactions to skip for pagination.",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """List transactions belonging to the current user.
+    """List transactions belonging to the current user with pagination (P7.1).
 
     Args:
         account_id: Optional filter — only return transactions for this account.
+        limit: Maximum results per page (1–100, default 50).
+        offset: Number of records to skip (default 0).
         db: AsyncSession — injected database session.
         current_user: User — the authenticated user (from JWT).
 
     Returns:
-        List[TransactionOut] — transactions ordered newest-first.
+        List[TransactionOut] — transactions ordered newest-first (paginated).
     """
     query = (
         select(Transaction)
@@ -167,6 +180,6 @@ async def list_transactions(
     )
     if account_id is not None:
         query = query.where(Transaction.account_id == account_id)
-    query = query.order_by(Transaction.created_at.desc())
+    query = query.order_by(Transaction.created_at.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
     return result.scalars().all()

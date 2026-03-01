@@ -182,6 +182,41 @@ class PasswordResetToken(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class RefreshToken(Base):
+    """Long-lived refresh token linked to a user session (P6.3).
+
+    The raw token value is sent to the client via an httpOnly, Secure,
+    SameSite=Strict cookie only.  Only the SHA-256 hash is persisted here
+    so that a compromised database cannot be used to issue new access tokens.
+
+    Lifecycle:
+        - Created at login alongside the short-lived access token.
+        - Consumed at /auth/refresh to issue a new access token.
+        - Rotated on each use (old token deleted, new token issued).
+        - Expires after REFRESH_TOKEN_EXPIRE_DAYS days (default: 7).
+        - Deleted on explicit logout.
+
+    Relationships:
+        user: The User who owns this token (CASCADE on user deletion).
+
+    Indexes:
+        token — unique index for O(1) lookup by hash.
+    """
+
+    __tablename__ = "refresh_tokens"
+
+    token_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # SHA-256 hex digest of the raw refresh token — never store the raw value
+    token = Column(String(128), unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class AuditLog(Base):
     """Immutable audit trail for all user-initiated actions."""
 

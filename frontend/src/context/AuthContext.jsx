@@ -24,12 +24,26 @@ import api from "../api/client";
 /* ── Context creation ────────────────────────────────────────────────────── */
 const AuthContext = createContext(null);
 
-/* ── Storage keys (centralised so typos don't create ghost keys) ─────────── */
-const STORAGE_TOKEN   = "fb_token";
-const STORAGE_USER    = "fb_user";
-const STORAGE_ACCOUNT = "fb_account";
-const IDLE_KEY        = "fb_last_activity";
+/* ── Storage keys (P7.13 — renamed from fb_* to tickertap_* prefix) ─────── */
+// Old "fb_" prefix suggested Firebase; app doesn't use Firebase.
+// Migration: old keys are cleaned up automatically on first load below.
+const STORAGE_TOKEN   = "tickertap_token";
+const STORAGE_USER    = "tickertap_user";
+const STORAGE_ACCOUNT = "tickertap_account";
+const IDLE_KEY        = "tickertap_last_activity";
 const IDLE_MS         = 5 * 60 * 1000; // 5 minutes
+
+// Migrate old fb_* keys to new tickertap_* keys on first load
+const _OLD_KEYS = ["fb_token", "fb_user", "fb_account", "fb_last_activity"];
+_OLD_KEYS.forEach((k) => {
+  const v = sessionStorage.getItem(k) ?? localStorage.getItem(k);
+  if (v) {
+    const newKey = k.replace("fb_", "tickertap_");
+    sessionStorage.setItem(newKey, v);
+  }
+  sessionStorage.removeItem(k);
+  localStorage.removeItem(k);
+});
 
 /**
  * AuthProvider — mount once at the root of the component tree.

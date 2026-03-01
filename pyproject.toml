@@ -4,5 +4,11 @@ target-version = ["py311"]
 
 [tool.ruff]
 line-length = 88
-extend-select = ["E", "F", "W", "C90"]
+# P7.11 — Extended rule set:
+#   E/F/W — pycodestyle + pyflakes (was already enabled)
+#   C90   — McCabe complexity (was already enabled)
+#   I     — isort: enforce import ordering to prevent disorganised imports
+#   B     — flake8-bugbear: catches common bugs (mutable defaults, etc.)
+#   UP    — pyupgrade: enforce modern Python 3.11+ syntax
+extend-select = ["E", "F", "W", "C90", "I", "B", "UP"]
 exclude = [".git", "__pycache__", "build", "dist", "venv"]

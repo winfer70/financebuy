@@ -38,4 +38,10 @@ RUN chmod +x /app/entrypoint.sh
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
 
+# Health check (P6.7) — allows Docker / orchestrators to detect and restart
+# the container when the API stops responding.  Uses curl against the
+# unversioned /health endpoint which is always available.
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
+  CMD curl -f http://localhost:8000/health || exit 1
+
 ENTRYPOINT ["/app/entrypoint.sh"]

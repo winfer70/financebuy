@@ -433,13 +433,26 @@ async def list_orders(
         default=None,
         description="Filter by account_id; must belong to current user if provided.",
     ),
+    limit: int = Query(
+        default=50,
+        ge=1,
+        le=100,
+        description="Maximum number of orders to return (1–100).",
+    ),
+    offset: int = Query(
+        default=0,
+        ge=0,
+        description="Number of orders to skip for pagination.",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """List orders belonging to the current user.
+    """List orders belonging to the current user with pagination (P7.2).
 
     Args:
         account_id: Optional filter — only return orders for this account.
+        limit: Maximum results per page (1–100, default 50).
+        offset: Number of records to skip (default 0).
         db: AsyncSession — injected database session.
         current_user: User — the authenticated user (from JWT).
 
@@ -456,7 +469,7 @@ async def list_orders(
     if account_id is not None:
         query = query.where(Order.account_id == account_id)
 
-    query = query.order_by(Order.placed_at.desc())
+    query = query.order_by(Order.placed_at.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
 
     orders = []
