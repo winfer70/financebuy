@@ -9,8 +9,12 @@ import { Ic } from "../../components/common/Icons";
 import { Sparkline } from "../../components/charts";
 import { TICKER_DATA } from "../../styles/globals";
 
-export const DEMO_EMAIL = "demo@fticker-tap.com";
-const DEMO_PWD   = "Demo1234!";
+// Demo credentials are supplied via build-time env vars (VITE_DEMO_EMAIL /
+// VITE_DEMO_PWD).  Both default to empty string so the form starts blank in
+// production builds where the vars are not set.  Never hardcode credentials
+// in source — they end up in the production bundle and version history.
+const DEMO_EMAIL = import.meta.env.VITE_DEMO_EMAIL || "";
+const DEMO_PWD   = import.meta.env.VITE_DEMO_PWD   || "";
 
 export function LoginPage({ onLogin, onRegister, onForgotPassword, backendOk }) {
   const [email, setEmail] = useState(DEMO_EMAIL);
@@ -89,7 +93,6 @@ export function LoginPage({ onLogin, onRegister, onForgotPassword, backendOk }) 
             <label className="form-label">Email Address</label>
             <input className="form-control" type="email" value={email}
               onChange={e=>setEmail(e.target.value)}
-              onFocus={()=>{ if (email===DEMO_EMAIL) setEmail(""); }}
               onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
           </div>
           <div className="form-field">
@@ -97,7 +100,6 @@ export function LoginPage({ onLogin, onRegister, onForgotPassword, backendOk }) 
             <div className="pw-wrap">
               <input className="form-control" type={show?"text":"password"}
                 value={pwd} onChange={e=>setPwd(e.target.value)}
-                onFocus={()=>{ if (pwd===DEMO_PWD) setPwd(""); }}
                 onKeyDown={e=>e.key==="Enter"&&handleLogin()}
                 style={{paddingRight:36}}/>
               <button className="pw-eye" onClick={()=>setShow(v=>!v)}>

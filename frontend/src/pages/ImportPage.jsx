@@ -9,6 +9,55 @@ import { useState, useRef, useCallback } from "react";
 import api from "../api/client";
 import { Ic } from "../components/common/Icons";
 
+/**
+ * SafeStepText — renders broker instruction strings containing only <a> and
+ * <code> tags without using dangerouslySetInnerHTML.
+ *
+ * The broker step strings in BROKER_LIST are static constants defined in this
+ * file, not user-supplied data.  Regardless, dangerouslySetInnerHTML is a
+ * dangerous pattern: if BROKER_LIST were ever loaded from an API or a CMS,
+ * any XSS payload in step.text would execute directly in the page context.
+ *
+ * This component parses only the two tag types actually present in the data
+ * (<a href="…">…</a> and <code>…</code>) and renders them as React elements,
+ * keeping all other content as plain escaped text.
+ *
+ * @param {string} html - A string that may contain <a> and <code> tags only.
+ * @returns React fragment with safe, escaped content.
+ */
+function SafeStepText({ html }) {
+  // Split on <a ...>...</a> and <code>...</code> boundaries, preserving the
+  // delimiters so we can inspect each segment.
+  const parts = html.split(/(<a [^>]*>.*?<\/a>|<code>.*?<\/code>)/g);
+
+  return (
+    <>
+      {parts.map((part, idx) => {
+        // Render <code>text</code> as an inline code element.
+        const codeMatch = part.match(/^<code>(.*?)<\/code>$/);
+        if (codeMatch) {
+          return <code key={idx}>{codeMatch[1]}</code>;
+        }
+
+        // Render <a href="..." onClick="...">text</a> as a styled span.
+        // We intentionally do NOT use <a> with href to avoid navigation;
+        // all broker links in the guide are informational labels only.
+        const aMatch = part.match(/^<a [^>]*>(.*?)<\/a>$/);
+        if (aMatch) {
+          return (
+            <span key={idx} style={{ color: "var(--amber)" }}>
+              {aMatch[1]}
+            </span>
+          );
+        }
+
+        // Anything else is rendered as plain escaped text.
+        return part ? <span key={idx}>{part}</span> : null;
+      })}
+    </>
+  );
+}
+
 const EMPTY_ENTRY = () => ({
   id: Date.now() + Math.random(),
   type: "Stock",
@@ -483,7 +532,7 @@ export function ImportPage({ addToast, goBack }) {
                 {selectedBroker.steps.map((step, i) => (
                   <div key={i} className="dl-step">
                     <div className="dl-step-num">{i + 1}</div>
-                    <div className="dl-step-text" dangerouslySetInnerHTML={{ __html: step.text }} />
+                    <div className="dl-step-text"><SafeStepText html={step.text} /></div>
                   </div>
                 ))}
 

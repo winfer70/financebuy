@@ -1,8 +1,13 @@
 """
 main.py — FastAPI application entry point for TickerTap.
 
-Configures middleware (CORS, request logging), registers all route modules,
-and performs startup validation of critical settings.
+Configures middleware (CORS, rate limiting, request logging), registers all
+route modules, and performs startup validation of critical settings.
+
+Security middleware applied (outermost → innermost):
+  1. SlowAPIMiddleware  — rate-limit enforcement (429 on breach)
+  2. CORSMiddleware     — origin restriction
+  3. RequestLoggingMiddleware — structured access logs
 """
 
 import logging
@@ -11,9 +16,13 @@ import time
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .auth import validate_jwt_config
+from .limiter import limiter
 from .routes import accounts, admin, auth_routes, holdings, market, orders, portfolio, transactions
 
 # ── Logging ──────────────────────────────────────────────────────────────────
@@ -26,6 +35,12 @@ logger = logging.getLogger("tickerTap")
 # ── Application ──────────────────────────────────────────────────────────────
 app = FastAPI(title="tickerTap API", version="0.2.0")
 
+# Attach limiter to app state so SlowAPIMiddleware can find it.
+app.state.limiter = limiter
+
+# Return HTTP 429 with a clear JSON body when a rate limit is exceeded.
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 
 # ── Startup validation ───────────────────────────────────────────────────────
 @app.on_event("startup")
@@ -35,7 +50,12 @@ async def _startup_checks():
     logger.info("Startup checks passed — JWT secret validated.")
 
 
-# ── CORS — restricted to known origins with explicit methods/headers ─────────
+# ── Middleware stack (registered last → executes first) ──────────────────────
+
+# Rate limiting — must be added before CORS so limits apply to all requests.
+app.add_middleware(SlowAPIMiddleware)
+
+# CORS — restricted to known origins with explicit methods/headers.
 _origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173")
 app.add_middleware(
     CORSMiddleware,
