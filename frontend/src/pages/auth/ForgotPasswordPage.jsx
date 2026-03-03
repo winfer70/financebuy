@@ -66,7 +66,7 @@ export function ForgotPasswordPage({ onBack, backendOk }) {
       <div className="login-right">
         <div className="login-head">RESET PASSWORD</div>
         <div className="login-subhead">Enter your account email to receive a reset link</div>
-        <div className="login-form">
+        <form className="login-form" onSubmit={e=>{e.preventDefault();handleSubmit();}}>
           {sent ? (
             <div style={{display:"flex",flexDirection:"column",gap:16}}>
               <div style={{
@@ -86,11 +86,10 @@ export function ForgotPasswordPage({ onBack, backendOk }) {
                 <label className="form-label">Email Address</label>
                 <input className="form-control" type="email" value={email}
                   onChange={e=>setEmail(e.target.value)}
-                  onKeyDown={e=>e.key==="Enter"&&handleSubmit()}
-                  placeholder="you@example.com"/>
+                  autoComplete="email" placeholder="you@example.com"/>
               </div>
               {err && <div style={{fontFamily:"var(--font-mono)",fontSize:11,color:"var(--red)"}}>{err}</div>}
-              <button className="btn btn-amber login-btn-full" onClick={handleSubmit} disabled={loading||!backendOk}>
+              <button type="submit" className="btn btn-amber login-btn-full" disabled={loading||!backendOk}>
                 {loading ? <span className="loading-pulse">SENDING...</span> : "SEND RESET LINK"}
               </button>
               {backendOk===false && (
@@ -103,7 +102,7 @@ export function ForgotPasswordPage({ onBack, backendOk }) {
               </div>
             </>
           )}
-        </div>
+        </form>
         <div className="login-security">
           <div className="security-item"><Ic.lock/> TLS 1.3 Encrypted</div>
           <div className="security-item"><Ic.shield/> SOC 2 Compliant</div>

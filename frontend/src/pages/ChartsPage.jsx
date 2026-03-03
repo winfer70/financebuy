@@ -153,6 +153,310 @@ function detectBreakouts(data, sma50) {
   return out;
 }
 
+/* ─── INTERVAL CONFIG ──────────────────────────────────────────────────────── */
+const INTERVAL_DAYS = {
+  "1m": 7, "2m": 60, "3m": 7, "5m": 60, "10m": 60,
+  "15m": 60, "30m": 60, "45m": 60, "1h": 365, "2h": 365,
+  "3h": 365, "4h": 365, "1d": 1825, "1wk": 3650,
+  "1mo": 3650, "3mo": 3650, "6mo": 3650, "12mo": 3650,
+};
+const INTRADAY_INTERVALS = new Set(["1m","2m","3m","5m","10m","15m","30m","45m","1h","2h","3h","4h"]);
+
+/* ─── DRAWING TOOLS CONFIG ─────────────────────────────────────────────────── */
+const DRAWING_TOOLS = {
+  trendLine:      { label: "TREND LINE",      anchors: 2, icon: "trendLine" },
+  horizontalLine: { label: "HORIZONTAL LINE", anchors: 1, icon: "hLine" },
+  ray:            { label: "RAY",             anchors: 2, icon: "ray" },
+  rectangle:      { label: "RECTANGLE",       anchors: 2, icon: "rectangle" },
+  fibonacci:      { label: "FIBONACCI",       anchors: 2, icon: "fibonacci" },
+  pitchfork:      { label: "PITCHFORK",       anchors: 3, icon: "pitchfork" },
+  text:           { label: "TEXT",            anchors: 1, icon: "textTool" },
+  arrow:          { label: "ARROW",           anchors: 2, icon: "arrowTool" },
+};
+
+const DEFAULT_DRAW_STYLE = { color: "#f59e0b", lineWidth: 1.5, lineStyle: "solid", fontSize: 12, text: "" };
+
+let _drawingIdCounter = 0;
+function genDrawingId() { return `d_${Date.now()}_${++_drawingIdCounter}`; }
+
+/* ─── COORDINATE TRANSLATION ──────────────────────────────────────────────── */
+/** Binary search: find fractional index of timestamp in data array */
+function timeToIndex(timestamp, data) {
+  if (!data.length) return 0;
+  const t = new Date(timestamp).getTime();
+  let lo = 0, hi = data.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (new Date(data[mid].date).getTime() < t) lo = mid + 1;
+    else hi = mid;
+  }
+  // Fractional interpolation between lo-1 and lo
+  if (lo > 0 && lo < data.length) {
+    const tLo = new Date(data[lo - 1].date).getTime();
+    const tHi = new Date(data[lo].date).getTime();
+    if (tHi !== tLo) {
+      const frac = (t - tLo) / (tHi - tLo);
+      return lo - 1 + Math.max(0, Math.min(1, frac));
+    }
+  }
+  return lo;
+}
+
+/** Resolve a drawing anchor {time, price} to pixel x within visible data */
+function resolveAnchorX(anchor, visibleData, visibleStart, allData, xOf) {
+  const globalIdx = timeToIndex(anchor.time, allData);
+  const localIdx = globalIdx - visibleStart;
+  return xOf(localIdx);
+}
+
+/** Resolve a drawing anchor price to pixel y */
+function resolveAnchorY(price, PAD, H, pLo, pHi) {
+  return PAD.top + H - ((price - pLo) / (pHi - pLo)) * H;
+}
+
+/** Distance from point to line segment */
+function pointToSegmentDist(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return Math.hypot(px - x1, py - y1);
+  let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+}
+
+/* ─── DRAWING RENDERERS ───────────────────────────────────────────────────── */
+function renderDrawing(drawing, visibleData, visibleStart, allData, xOf, yOf, PAD, H, W, pLo, pHi, dims, isSelected) {
+  const { type, anchors, style } = drawing;
+  const col = style.color || "#f59e0b";
+  const lw = style.lineWidth || 1.5;
+  const dash = style.lineStyle === "dashed" ? "6,4" : style.lineStyle === "dotted" ? "2,3" : "none";
+  const selStroke = isSelected ? "#fff" : null;
+
+  const ax = (i) => resolveAnchorX(anchors[i], visibleData, visibleStart, allData, xOf);
+  const ay = (i) => resolveAnchorY(anchors[i].price, PAD, H, pLo, pHi);
+
+  switch (type) {
+    case "trendLine": {
+      if (anchors.length < 2) return null;
+      return (
+        <g key={drawing.id}>
+          {isSelected && <line x1={ax(0)} y1={ay(0)} x2={ax(1)} y2={ay(1)} stroke="#fff" strokeWidth={lw + 2} opacity="0.3" />}
+          <line x1={ax(0)} y1={ay(0)} x2={ax(1)} y2={ay(1)}
+            stroke={col} strokeWidth={lw} strokeDasharray={dash} />
+          <circle cx={ax(0)} cy={ay(0)} r={3} fill={col} opacity="0.7" />
+          <circle cx={ax(1)} cy={ay(1)} r={3} fill={col} opacity="0.7" />
+        </g>
+      );
+    }
+    case "horizontalLine": {
+      if (anchors.length < 1) return null;
+      const y = ay(0);
+      const price = anchors[0].price;
+      return (
+        <g key={drawing.id}>
+          {isSelected && <line x1={PAD.left} y1={y} x2={dims.w - PAD.right} y2={y} stroke="#fff" strokeWidth={lw + 2} opacity="0.3" />}
+          <line x1={PAD.left} y1={y} x2={dims.w - PAD.right} y2={y}
+            stroke={col} strokeWidth={lw} strokeDasharray={dash} />
+          <rect x={PAD.left} y={y - 8} width={60} height={16} rx={1} fill={col} opacity="0.85" />
+          <text x={PAD.left + 4} y={y + 4} fontFamily="IBM Plex Mono" fontSize="9" fontWeight="600" fill="#060f08">
+            ${price.toFixed(2)}
+          </text>
+        </g>
+      );
+    }
+    case "ray": {
+      if (anchors.length < 2) return null;
+      const x1 = ax(0), y1 = ay(0), x2 = ax(1), y2 = ay(1);
+      // Extend ray from anchor[0] through anchor[1] to chart edge
+      const dx = x2 - x1, dy = y2 - y1;
+      const len = Math.hypot(dx, dy) || 1;
+      const scale = Math.max(W, H) * 2 / len;
+      const ex = x1 + dx * scale, ey = y1 + dy * scale;
+      return (
+        <g key={drawing.id}>
+          {isSelected && <line x1={x1} y1={y1} x2={ex} y2={ey} stroke="#fff" strokeWidth={lw + 2} opacity="0.3" />}
+          <line x1={x1} y1={y1} x2={ex} y2={ey}
+            stroke={col} strokeWidth={lw} strokeDasharray={dash} />
+          <circle cx={x1} cy={y1} r={3} fill={col} opacity="0.7" />
+        </g>
+      );
+    }
+    case "rectangle": {
+      if (anchors.length < 2) return null;
+      const x1 = ax(0), y1 = ay(0), x2 = ax(1), y2 = ay(1);
+      const rx = Math.min(x1, x2), ry = Math.min(y1, y2);
+      const rw = Math.abs(x2 - x1), rh = Math.abs(y2 - y1);
+      return (
+        <g key={drawing.id}>
+          <rect x={rx} y={ry} width={rw} height={rh} fill={col} fillOpacity="0.08" stroke={col} strokeWidth={lw} strokeDasharray={dash} />
+          {isSelected && <rect x={rx} y={ry} width={rw} height={rh} fill="none" stroke="#fff" strokeWidth={lw + 1} opacity="0.3" />}
+        </g>
+      );
+    }
+    case "arrow": {
+      if (anchors.length < 2) return null;
+      const x1 = ax(0), y1 = ay(0), x2 = ax(1), y2 = ay(1);
+      const angle = Math.atan2(y2 - y1, x2 - x1);
+      const hs = 10; // arrowhead size
+      const p1x = x2 - hs * Math.cos(angle - 0.4), p1y = y2 - hs * Math.sin(angle - 0.4);
+      const p2x = x2 - hs * Math.cos(angle + 0.4), p2y = y2 - hs * Math.sin(angle + 0.4);
+      return (
+        <g key={drawing.id}>
+          {isSelected && <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#fff" strokeWidth={lw + 2} opacity="0.3" />}
+          <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={col} strokeWidth={lw} strokeDasharray={dash} />
+          <polygon points={`${x2},${y2} ${p1x},${p1y} ${p2x},${p2y}`} fill={col} />
+        </g>
+      );
+    }
+    case "fibonacci": {
+      if (anchors.length < 2) return null;
+      const p1 = anchors[0].price, p2 = anchors[1].price;
+      const high = Math.max(p1, p2), low = Math.min(p1, p2);
+      const levels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+      const x1 = ax(0), x2 = ax(1);
+      const left = Math.min(x1, x2), right = Math.max(x1, x2);
+      return (
+        <g key={drawing.id}>
+          {levels.map((lv, i) => {
+            const price = high - (high - low) * lv;
+            const y = resolveAnchorY(price, PAD, H, pLo, pHi);
+            const pctLabel = `${(lv * 100).toFixed(1)}%`;
+            return (
+              <g key={i}>
+                <line x1={left} y1={y} x2={right} y2={y}
+                  stroke={col} strokeWidth={lv === 0 || lv === 1 ? lw : lw * 0.7}
+                  strokeDasharray={lv === 0.5 ? "4,3" : "none"} opacity={0.7} />
+                <text x={right + 4} y={y + 3} fontFamily="IBM Plex Mono" fontSize="8" fill={col} opacity="0.8">
+                  {pctLabel} ${price.toFixed(2)}
+                </text>
+              </g>
+            );
+          })}
+          {/* Shaded 38.2-61.8 zone */}
+          {(() => {
+            const y382 = resolveAnchorY(high - (high - low) * 0.382, PAD, H, pLo, pHi);
+            const y618 = resolveAnchorY(high - (high - low) * 0.618, PAD, H, pLo, pHi);
+            return <rect x={left} y={Math.min(y382, y618)} width={right - left} height={Math.abs(y618 - y382)} fill={col} fillOpacity="0.06" />;
+          })()}
+          {isSelected && <rect x={left} y={resolveAnchorY(high, PAD, H, pLo, pHi)} width={right - left} height={Math.abs(resolveAnchorY(low, PAD, H, pLo, pHi) - resolveAnchorY(high, PAD, H, pLo, pHi))} fill="none" stroke="#fff" strokeWidth="1" opacity="0.3" />}
+        </g>
+      );
+    }
+    case "pitchfork": {
+      if (anchors.length < 3) return null;
+      const x0 = ax(0), y0 = ay(0); // pivot
+      const x1 = ax(1), y1 = ay(1); // point 1
+      const x2 = ax(2), y2 = ay(2); // point 2
+      const mx = (x1 + x2) / 2, my = (y1 + y2) / 2; // midpoint
+      // Extend all three lines
+      const extendLine = (sx, sy, ex, ey) => {
+        const dx = ex - sx, dy = ey - sy;
+        const len = Math.hypot(dx, dy) || 1;
+        const s = Math.max(W, H) * 2 / len;
+        return { ex: sx + dx * s, ey: sy + dy * s };
+      };
+      const med = extendLine(x0, y0, mx, my);
+      const prong1 = extendLine(x1, y1, x1 + (mx - x0), y1 + (my - y0));
+      const prong2 = extendLine(x2, y2, x2 + (mx - x0), y2 + (my - y0));
+      return (
+        <g key={drawing.id} clipPath="url(#chartClip)">
+          {isSelected && <line x1={x0} y1={y0} x2={med.ex} y2={med.ey} stroke="#fff" strokeWidth={lw + 2} opacity="0.3" />}
+          <line x1={x0} y1={y0} x2={med.ex} y2={med.ey} stroke={col} strokeWidth={lw} />
+          <line x1={x1} y1={y1} x2={prong1.ex} y2={prong1.ey} stroke={col} strokeWidth={lw * 0.7} strokeDasharray="4,3" />
+          <line x1={x2} y1={y2} x2={prong2.ex} y2={prong2.ey} stroke={col} strokeWidth={lw * 0.7} strokeDasharray="4,3" />
+          <circle cx={x0} cy={y0} r={3} fill={col} />
+          <circle cx={x1} cy={y1} r={3} fill={col} opacity="0.7" />
+          <circle cx={x2} cy={y2} r={3} fill={col} opacity="0.7" />
+        </g>
+      );
+    }
+    case "text": {
+      if (anchors.length < 1) return null;
+      const x = ax(0), y = ay(0);
+      const txt = style.text || "Text";
+      const fs = style.fontSize || 12;
+      return (
+        <g key={drawing.id}>
+          {isSelected && <rect x={x - 2} y={y - fs - 2} width={txt.length * fs * 0.65 + 4} height={fs + 6} fill="#fff" fillOpacity="0.1" stroke="#fff" strokeWidth="1" rx="1" />}
+          <text x={x} y={y} fontFamily="IBM Plex Mono" fontSize={fs} fill={col} fontWeight="500">{txt}</text>
+        </g>
+      );
+    }
+    default:
+      return null;
+  }
+}
+
+/** Render a rubber-band preview while placing anchors */
+function renderPreview(toolType, anchors, previewPoint, visibleData, visibleStart, allData, xOf, yOf, PAD, H, W, pLo, pHi, dims, style) {
+  if (!previewPoint) return null;
+  const col = style.color || "#f59e0b";
+  const lw = style.lineWidth || 1.5;
+  const ax = (a) => resolveAnchorX(a, visibleData, visibleStart, allData, xOf);
+  const ay = (a) => resolveAnchorY(a.price, PAD, H, pLo, pHi);
+  const px = resolveAnchorX(previewPoint, visibleData, visibleStart, allData, xOf);
+  const py = resolveAnchorY(previewPoint.price, PAD, H, pLo, pHi);
+
+  switch (toolType) {
+    case "trendLine":
+    case "arrow":
+      if (anchors.length === 1) {
+        return <line x1={ax(anchors[0])} y1={ay(anchors[0])} x2={px} y2={py} stroke={col} strokeWidth={lw} strokeDasharray="4,4" opacity="0.7" />;
+      }
+      return null;
+    case "horizontalLine":
+      return <line x1={PAD.left} y1={py} x2={dims.w - PAD.right} y2={py} stroke={col} strokeWidth={lw} strokeDasharray="4,4" opacity="0.7" />;
+    case "ray":
+      if (anchors.length === 1) {
+        const x1 = ax(anchors[0]), y1 = ay(anchors[0]);
+        const dx = px - x1, dy = py - y1;
+        const len = Math.hypot(dx, dy) || 1;
+        const scale = Math.max(W, H) * 2 / len;
+        return <line x1={x1} y1={y1} x2={x1 + dx * scale} y2={y1 + dy * scale} stroke={col} strokeWidth={lw} strokeDasharray="4,4" opacity="0.7" />;
+      }
+      return null;
+    case "rectangle":
+      if (anchors.length === 1) {
+        const x1 = ax(anchors[0]), y1 = ay(anchors[0]);
+        return <rect x={Math.min(x1, px)} y={Math.min(y1, py)} width={Math.abs(px - x1)} height={Math.abs(py - y1)} fill={col} fillOpacity="0.06" stroke={col} strokeWidth={lw} strokeDasharray="4,4" opacity="0.7" />;
+      }
+      return null;
+    case "fibonacci":
+      if (anchors.length === 1) {
+        const p1 = anchors[0].price, p2 = previewPoint.price;
+        const high = Math.max(p1, p2), low = Math.min(p1, p2);
+        const levels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+        const x1 = ax(anchors[0]);
+        const left = Math.min(x1, px), right = Math.max(x1, px);
+        return (
+          <g opacity="0.5">
+            {levels.map((lv, i) => {
+              const price = high - (high - low) * lv;
+              const y = resolveAnchorY(price, PAD, H, pLo, pHi);
+              return <line key={i} x1={left} y1={y} x2={right} y2={y} stroke={col} strokeWidth={lw * 0.7} strokeDasharray="4,3" />;
+            })}
+          </g>
+        );
+      }
+      return null;
+    case "pitchfork":
+      if (anchors.length >= 1) {
+        const pts = [...anchors.map(a => ({ x: ax(a), y: ay(a) })), { x: px, y: py }];
+        return (
+          <g opacity="0.5">
+            {pts.map((p, i) => i > 0 && <line key={i} x1={pts[i-1].x} y1={pts[i-1].y} x2={p.x} y2={p.y} stroke={col} strokeWidth={lw} strokeDasharray="4,4" />)}
+            {pts.map((p, i) => <circle key={`c${i}`} cx={p.x} cy={p.y} r={3} fill={col} opacity="0.7" />)}
+          </g>
+        );
+      }
+      return null;
+    case "text":
+      return <text x={px} y={py} fontFamily="IBM Plex Mono" fontSize={style.fontSize || 12} fill={col} opacity="0.5">{style.text || "Text"}</text>;
+    default:
+      return null;
+  }
+}
+
 /* ─── CHART COMPONENT ───────────────────────────────────────────────────────── */
 function StockChart({ symbol, stockInfo, onClose, token }) {
   const svgRef = useRef(null);
@@ -167,6 +471,10 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
   const [overlays, setOverlays] = useState({ sma50: true, sma150: true, smaCustom: true, volume: true, breakouts: true });
   const [customPeriod, setCustomPeriod] = useState(20);
   const [chartType, setChartType] = useState("candle");
+  const [interval, setIntervalState] = useState("1d");
+  const [dataWarning, setDataWarning] = useState(null);
+  const [showIntervalPicker, setShowIntervalPicker] = useState(false);
+  const isIntraday = INTRADAY_INTERVALS.has(interval);
   // Zoom/pan state: offset = index offset from right, zoom = candles visible
   const [zoom, setZoom] = useState(null); // null = use period preset
 
@@ -179,20 +487,22 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
     let cancelled = false;
     setDataLoading(true);
     setVolumeSource(null);
+    setDataWarning(null);
     if (!token) {
       setAllData(generateOHLCV(stockInfo.price, 5));
       setDataLoading(false);
       return;
     }
-    api.getOhlcv(symbol, token)
+    const days = INTERVAL_DAYS[interval] || 1825;
+    api.getOhlcvInterval(symbol, token, interval, days)
       .then(resp => {
         if (!cancelled) {
-          // New response format: { bars: [...], volume_source: "GLD" | null }
           const bars = resp.bars || resp;
           setVolumeSource(resp.volume_source || null);
+          setDataWarning(resp.warning || null);
           setAllData(bars.map(b => ({
             date: b.date, open: b.open, high: b.high, low: b.low,
-            close: b.close, volume: b.volume, isEarnings: b.is_earnings,
+            close: b.close, volume: b.volume, isEarnings: b.is_earnings || false,
           })));
         }
       })
@@ -201,9 +511,21 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
       })
       .finally(() => { if (!cancelled) setDataLoading(false); });
     return () => { cancelled = true; };
-  }, [symbol, token]);
+  }, [symbol, token, interval]);
 
-  const PERIODS = { "1M": 21, "3M": 63, "6M": 126, "1Y": 252, "2Y": 504, "5Y": 1260, "ALL": 9999 };
+  const PERIODS = isIntraday
+    ? { "100": 100, "500": 500, "1000": 1000, "ALL": 9999 }
+    : { "1M": 21, "3M": 63, "6M": 126, "1Y": 252, "2Y": 504, "5Y": 1260, "ALL": 9999 };
+
+  // Reset period when switching between intraday/daily
+  useEffect(() => {
+    if (isIntraday && !["100","500","1000","ALL"].includes(period)) {
+      setPeriod("ALL");
+    } else if (!isIntraday && !["1M","3M","6M","1Y","2Y","5Y","ALL"].includes(period)) {
+      setPeriod("1Y");
+    }
+    setZoom(null);
+  }, [isIntraday]); // eslint-disable-line
 
   // Visible slice — respects period preset OR manual zoom
   const { visibleData, visibleStart } = useMemo(() => {
@@ -293,18 +615,27 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
   const xLabels = useMemo(() => {
     const labels = [];
     let lastYear = null;
-    const maxLabels = Math.floor(W / 70);
+    let lastDay = null;
+    const maxLabels = Math.floor(W / 80);
     const step = Math.max(1, Math.floor(n / maxLabels));
     for (let i = 0; i < n; i += step) {
-      const d   = new Date(visibleData[i].date);
-      const mo  = d.toLocaleString("en-US", { month: "short" });
-      const yr  = d.getFullYear();
-      const lbl = yr !== lastYear ? `${mo} '${String(yr).slice(2)}` : mo;
-      labels.push({ x: xOf(i), label: lbl });
-      lastYear = yr;
+      const d = new Date(visibleData[i].date);
+      if (isIntraday) {
+        const dayStr = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+        const timeStr = d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+        const lbl = dayStr !== lastDay ? `${dayStr} ${timeStr}` : timeStr;
+        labels.push({ x: xOf(i), label: lbl });
+        lastDay = dayStr;
+      } else {
+        const mo  = d.toLocaleString("en-US", { month: "short" });
+        const yr  = d.getFullYear();
+        const lbl = yr !== lastYear ? `${mo} '${String(yr).slice(2)}` : mo;
+        labels.push({ x: xOf(i), label: lbl });
+        lastYear = yr;
+      }
     }
     return labels;
-  }, [visibleData, n, W]);
+  }, [visibleData, n, W, isIntraday]);
 
   // SMA path builder
   const smaPath = (smaData) => {
@@ -327,6 +658,181 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
     return p;
   }, [visibleData, W, H, pLo, pHi]);
 
+  // ── Drawing tools state ──────────────────────────────────────────────────
+  const [drawings, setDrawings] = useState([]);
+  const [activeTool, setActiveTool] = useState(null);      // null | "trendLine" | "horizontalLine" | ...
+  const [pendingAnchors, setPendingAnchors] = useState([]); // anchors placed so far for current drawing
+  const [previewPoint, setPreviewPoint] = useState(null);   // mouse position as {time, price} during drawing
+  const [selectedDrawingId, setSelectedDrawingId] = useState(null);
+  const [drawingStyle, setDrawingStyle] = useState({ ...DEFAULT_DRAW_STYLE });
+  const [textInput, setTextInput] = useState("");
+  const drawSaveTimerRef = useRef(null);
+
+  // ── Template state ──────────────────────────────────────────────────────
+  const [templates, setTemplates] = useState([]);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [showLoadDropdown, setShowLoadDropdown] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [templateSaving, setTemplateSaving] = useState(false);
+
+  // Fetch templates from backend on mount
+  useEffect(() => {
+    if (!token) return;
+    api.listChartTemplates(token)
+      .then(list => setTemplates(list))
+      .catch(() => {});
+  }, [token]);
+
+  // Save template handler
+  const handleSaveTemplate = async () => {
+    if (!templateName.trim() || !token) return;
+    setTemplateSaving(true);
+    try {
+      const payload = {
+        name: templateName.trim(),
+        symbol: symbol || null,
+        interval: interval || null,
+        drawings_json: drawings,
+        overlays_json: overlays,
+      };
+      const created = await api.createChartTemplate(payload, token);
+      setTemplates(prev => [created, ...prev]);
+      setShowSaveModal(false);
+      setTemplateName("");
+    } catch {}
+    setTemplateSaving(false);
+  };
+
+  // Load template handler
+  const handleLoadTemplate = (tpl) => {
+    if (tpl.drawings_json) setDrawings(tpl.drawings_json);
+    if (tpl.overlays_json) setOverlays(tpl.overlays_json);
+    setShowLoadDropdown(false);
+    setSelectedDrawingId(null);
+  };
+
+  // Delete template handler
+  const handleDeleteTemplate = async (e, templateId) => {
+    e.stopPropagation();
+    if (!token) return;
+    try {
+      await api.deleteChartTemplate(templateId, token);
+      setTemplates(prev => prev.filter(t => t.template_id !== templateId));
+    } catch {}
+  };
+
+  // Load drawings from localStorage on mount / symbol change
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(`tt_drawings_${symbol}`);
+      if (stored) setDrawings(JSON.parse(stored));
+      else setDrawings([]);
+    } catch { setDrawings([]); }
+  }, [symbol]);
+
+  // Save drawings to localStorage (debounced)
+  useEffect(() => {
+    clearTimeout(drawSaveTimerRef.current);
+    drawSaveTimerRef.current = setTimeout(() => {
+      try { localStorage.setItem(`tt_drawings_${symbol}`, JSON.stringify(drawings)); } catch {}
+    }, 500);
+    return () => clearTimeout(drawSaveTimerRef.current);
+  }, [drawings, symbol]);
+
+  // Cancel drawing on Escape, delete selected on Delete/Backspace
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        if (activeTool) { setActiveTool(null); setPendingAnchors([]); setPreviewPoint(null); }
+        else setSelectedDrawingId(null);
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedDrawingId && !activeTool) {
+        // Don't delete if user is typing in an input
+        if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+        setDrawings(prev => prev.filter(d => d.id !== selectedDrawingId));
+        setSelectedDrawingId(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [activeTool, selectedDrawingId]);
+
+  // Convert pixel position to {time, price} anchor
+  const pixelToAnchor = useCallback((mx, my) => {
+    const idx = Math.round((mx - PAD.left - candleGap / 2) / candleGap);
+    const clamped = Math.max(0, Math.min(n - 1, idx));
+    const d = visibleData[clamped];
+    if (!d) return null;
+    const price = pLo + ((PAD.top + H - my) / H) * (pHi - pLo);
+    return { time: d.date, price };
+  }, [visibleData, n, PAD, candleGap, H, pLo, pHi]);
+
+  // Hit-test: find drawing near pixel (mx, my)
+  const hitTestDrawing = useCallback((mx, my) => {
+    const threshold = 10;
+    for (let di = drawings.length - 1; di >= 0; di--) {
+      const dr = drawings[di];
+      const { type, anchors } = dr;
+      if (!anchors || !anchors.length) continue;
+      const ax = (a) => resolveAnchorX(a, visibleData, visibleStart, allData, xOf);
+      const ay = (a) => resolveAnchorY(a.price, PAD, H, pLo, pHi);
+      switch (type) {
+        case "trendLine":
+        case "arrow":
+          if (anchors.length >= 2) {
+            const dist = pointToSegmentDist(mx, my, ax(anchors[0]), ay(anchors[0]), ax(anchors[1]), ay(anchors[1]));
+            if (dist < threshold) return dr.id;
+          }
+          break;
+        case "horizontalLine":
+          if (anchors.length >= 1) {
+            const y = ay(anchors[0]);
+            if (Math.abs(my - y) < threshold) return dr.id;
+          }
+          break;
+        case "ray":
+          if (anchors.length >= 2) {
+            const x1 = ax(anchors[0]), y1 = ay(anchors[0]);
+            const x2 = ax(anchors[1]), y2 = ay(anchors[1]);
+            const dx = x2 - x1, dy = y2 - y1;
+            const len = Math.hypot(dx, dy) || 1;
+            const scale = Math.max(W, H) * 2 / len;
+            const dist = pointToSegmentDist(mx, my, x1, y1, x1 + dx * scale, y1 + dy * scale);
+            if (dist < threshold) return dr.id;
+          }
+          break;
+        case "rectangle":
+        case "fibonacci":
+          if (anchors.length >= 2) {
+            const x1 = ax(anchors[0]), y1 = ay(anchors[0]);
+            const x2 = ax(anchors[1]), y2 = ay(anchors[1]);
+            const rx = Math.min(x1, x2), ry = Math.min(y1, y2);
+            const rw = Math.abs(x2 - x1), rh = Math.abs(y2 - y1);
+            if (mx >= rx - threshold && mx <= rx + rw + threshold && my >= ry - threshold && my <= ry + rh + threshold) return dr.id;
+          }
+          break;
+        case "text":
+          if (anchors.length >= 1) {
+            const x = ax(anchors[0]), y = ay(anchors[0]);
+            const fs = dr.style.fontSize || 12;
+            const tw = (dr.style.text || "Text").length * fs * 0.65;
+            if (mx >= x - 4 && mx <= x + tw + 4 && my >= y - fs - 4 && my <= y + 4) return dr.id;
+          }
+          break;
+        case "pitchfork":
+          if (anchors.length >= 3) {
+            for (let ai = 0; ai < 2; ai++) {
+              const dist = pointToSegmentDist(mx, my, ax(anchors[ai]), ay(anchors[ai]), ax(anchors[ai + 1]), ay(anchors[ai + 1]));
+              if (dist < threshold) return dr.id;
+            }
+          }
+          break;
+        default: break;
+      }
+    }
+    return null;
+  }, [drawings, visibleData, visibleStart, allData, xOf, PAD, H, W, pLo, pHi]);
+
   // ── Mouse handlers ────────────────────────────────────────────────────────
   const handleMouseMove = useCallback((e) => {
     const svg = svgRef.current;
@@ -335,7 +841,13 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
 
-    // Drag-to-pan
+    // Drawing mode: update preview point
+    if (activeTool && pendingAnchors.length >= 0) {
+      const anchor = pixelToAnchor(mx, my);
+      if (anchor) setPreviewPoint(anchor);
+    }
+
+    // Drag-to-pan (only when not drawing)
     if (dragRef.current) {
       const dx = mx - dragRef.current.startX;
       const candleShift = Math.round(-dx / candleGap);
@@ -363,7 +875,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
       sCx: smaCustom[clamped]?.value,
       screen: { x: mx, y: my, tRight, tBottom },
     });
-  }, [visibleData, sma50, sma150, smaCustom, n, W, H, pLo, pHi, candleGap, allData.length]);
+  }, [visibleData, sma50, sma150, smaCustom, n, W, H, pLo, pHi, candleGap, allData.length, activeTool, pendingAnchors, pixelToAnchor]);
 
   const handleMouseDown = useCallback((e) => {
     if (e.button !== 0) return;
@@ -371,13 +883,62 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
     if (!svg) return;
     const rect = svg.getBoundingClientRect();
     const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    // Drawing mode: place anchor
+    if (activeTool) {
+      const anchor = pixelToAnchor(mx, my);
+      if (!anchor) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      const toolDef = DRAWING_TOOLS[activeTool];
+      const newAnchors = [...pendingAnchors, anchor];
+
+      if (newAnchors.length >= toolDef.anchors) {
+        // Drawing is complete — commit it
+        const style = { ...drawingStyle };
+        if (activeTool === "text") style.text = textInput || "Text";
+        setDrawings(prev => [...prev, {
+          id: genDrawingId(),
+          type: activeTool,
+          anchors: newAnchors,
+          style,
+          visible: true,
+          locked: false,
+          createdAt: new Date().toISOString(),
+        }]);
+        setPendingAnchors([]);
+        setPreviewPoint(null);
+        // Keep tool active for rapid successive drawings (click trendLine multiple times)
+      } else {
+        setPendingAnchors(newAnchors);
+      }
+      return;
+    }
+
+    // Selection mode: try hit-testing existing drawings
+    const hitId = hitTestDrawing(mx, my);
+    if (hitId) {
+      setSelectedDrawingId(hitId);
+      e.preventDefault();
+      return;
+    }
+    setSelectedDrawingId(null);
+
+    // Default: drag-to-pan
     const cur = zoom || { start: visibleStart, count: visibleData.length };
     dragRef.current = { startX: mx, baseStart: cur.start, baseCount: cur.count };
     e.preventDefault();
-  }, [zoom, visibleStart, visibleData.length]);
+  }, [zoom, visibleStart, visibleData.length, activeTool, pendingAnchors, drawingStyle, textInput, pixelToAnchor, hitTestDrawing]);
 
   const handleMouseUp   = () => { dragRef.current = null; };
-  const handleMouseLeave = () => { dragRef.current = null; setCrosshair(null); setTooltip(null); };
+  const handleMouseLeave = () => {
+    dragRef.current = null;
+    setCrosshair(null);
+    setTooltip(null);
+    if (activeTool) setPreviewPoint(null);
+  };
 
   // Mouse-wheel zoom
   const handleWheel = useCallback((e) => {
@@ -433,6 +994,10 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginRight: 18 }}>
           <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 30, color: "#0f7d40", letterSpacing: 2, lineHeight: 1 }}>{symbol}</div>
           <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: "#718096", maxWidth: 160, lineHeight: 1.4 }}>{stockInfo.name}</div>
+          <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, fontWeight: 600, color: "#0f7d40", background: "rgba(15,125,64,0.1)", border: "1px solid rgba(15,125,64,0.2)", padding: "2px 8px", borderRadius: 2, letterSpacing: "0.8px" }}>
+            {interval.toUpperCase()}
+          </div>
+          {dataLoading && <span className="loading-pulse" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: "#4a5568" }}>LOADING...</span>}
           {onClose && (
             <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#4a5568", padding: 4 }}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
@@ -527,9 +1092,20 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
 
       {/* ── CONTROLS ── */}
       <div className="chart-controls">
+        <span className="ctrl-label">INTERVAL:</span>
+        <div className="ctrl-group">
+          {["1m","5m","15m","1h","4h","1d","1wk","1mo"].map(iv => (
+            <button key={iv} className={`ctrl-btn${interval===iv ? " active" : ""}`}
+              onClick={() => { setIntervalState(iv); setZoom(null); }}>{iv.toUpperCase()}</button>
+          ))}
+          <button className={`ctrl-btn${showIntervalPicker ? " active" : ""}`}
+            onClick={() => setShowIntervalPicker(v => !v)}
+            style={{ fontSize: 11, letterSpacing: 0 }}>···</button>
+        </div>
+        <div className="ctrl-sep" />
         <span className="ctrl-label">RANGE:</span>
         <div className="ctrl-group">
-          {["1M","3M","6M","1Y","2Y","5Y","ALL"].map(p => (
+          {Object.keys(PERIODS).map(p => (
             <button key={p} className={`ctrl-btn${!zoom && period===p ? " active" : ""}`} onClick={() => handlePeriod(p)}>{p}</button>
           ))}
         </div>
@@ -567,6 +1143,49 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
         )}
       </div>
 
+      {/* ── INTERVAL PICKER EXPANDED ── */}
+      {showIntervalPicker && (
+        <div style={{
+          background: "#0e1117", borderBottom: "1px solid #1e2535",
+          padding: "10px 24px", display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", flexShrink: 0,
+        }}>
+          <span className="ctrl-label" style={{ minWidth: 55 }}>MINUTES:</span>
+          <div className="ctrl-group">
+            {["1m","2m","3m","5m","10m","15m","30m","45m"].map(iv => (
+              <button key={iv} className={`ctrl-btn${interval===iv ? " active" : ""}`}
+                onClick={() => { setIntervalState(iv); setZoom(null); setShowIntervalPicker(false); }}>{iv}</button>
+            ))}
+          </div>
+          <div className="ctrl-sep" />
+          <span className="ctrl-label" style={{ minWidth: 40 }}>HOURS:</span>
+          <div className="ctrl-group">
+            {["1h","2h","3h","4h"].map(iv => (
+              <button key={iv} className={`ctrl-btn${interval===iv ? " active" : ""}`}
+                onClick={() => { setIntervalState(iv); setZoom(null); setShowIntervalPicker(false); }}>{iv}</button>
+            ))}
+          </div>
+          <div className="ctrl-sep" />
+          <span className="ctrl-label" style={{ minWidth: 40 }}>D/W/M:</span>
+          <div className="ctrl-group">
+            {["1d","1wk","1mo","3mo","6mo","12mo"].map(iv => (
+              <button key={iv} className={`ctrl-btn${interval===iv ? " active" : ""}`}
+                onClick={() => { setIntervalState(iv); setZoom(null); setShowIntervalPicker(false); }}>{iv}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── DATA WARNING ── */}
+      {dataWarning && (
+        <div style={{
+          background: "rgba(255,191,0,.06)", borderBottom: "1px solid rgba(255,191,0,.18)",
+          padding: "5px 24px", fontFamily: "'IBM Plex Mono',monospace", fontSize: 10,
+          color: "#d4a017", letterSpacing: "0.5px", flexShrink: 0,
+        }}>
+          ⚠ {dataWarning}
+        </div>
+      )}
+
       {/* ── CHART BODY — single SVG with price + volume ── */}
       <div ref={wrapRef} style={{ flex: 1, overflow: "hidden", minHeight: 0, position: "relative" }}
         onMouseMove={handleMouseMove}
@@ -584,8 +1203,144 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
             {overlays.breakouts && <div className="legend-item"><div style={{ width: 8, height: 8, background: "#00d97e", clipPath: "polygon(50% 0,100% 100%,0 100%)", flexShrink: 0 }}/>BREAKOUT</div>}
           </div>
 
+          {/* ── DRAWING TOOLBAR ── */}
+          <div className="draw-toolbar">
+            {/* Select / cursor mode */}
+            <button className={`draw-tool-btn${!activeTool ? " active" : ""}`}
+              title="Select (ESC)"
+              onClick={() => { setActiveTool(null); setPendingAnchors([]); setPreviewPoint(null); }}>
+              <Ic.cursor />
+            </button>
+
+            <div className="draw-toolbar-sep" />
+
+            {/* Tool buttons */}
+            {Object.entries(DRAWING_TOOLS).map(([key, def]) => {
+              const IconComp = Ic[def.icon];
+              return (
+              <button key={key}
+                className={`draw-tool-btn${activeTool === key ? " active" : ""}`}
+                title={`${def.label} (${def.anchors} click${def.anchors > 1 ? "s" : ""})`}
+                onClick={() => {
+                  setActiveTool(activeTool === key ? null : key);
+                  setPendingAnchors([]);
+                  setPreviewPoint(null);
+                  setSelectedDrawingId(null);
+                }}>
+                <IconComp />
+              </button>
+              );
+            })}
+
+            <div className="draw-toolbar-sep" />
+
+            {/* Color picker */}
+            <div className="draw-color-wrap" title="Drawing color">
+              <div className="draw-color-swatch" style={{ background: drawingStyle.color }} />
+              <input type="color" className="draw-color-input"
+                value={drawingStyle.color}
+                onChange={e => setDrawingStyle(s => ({ ...s, color: e.target.value }))} />
+            </div>
+
+            {/* Line style */}
+            {["solid", "dashed", "dotted"].map(ls => (
+              <button key={ls}
+                className={`draw-tool-btn mini${drawingStyle.lineStyle === ls ? " active" : ""}`}
+                title={ls}
+                onClick={() => setDrawingStyle(s => ({ ...s, lineStyle: ls }))}>
+                <svg width="14" height="6" viewBox="0 0 14 6">
+                  <line x1="0" y1="3" x2="14" y2="3" stroke="currentColor" strokeWidth="1.5"
+                    strokeDasharray={ls === "dashed" ? "4,3" : ls === "dotted" ? "1.5,2" : "none"} />
+                </svg>
+              </button>
+            ))}
+
+            <div className="draw-toolbar-sep" />
+
+            {/* Text input (visible when text tool active) */}
+            {activeTool === "text" && (
+              <input className="draw-text-input"
+                placeholder="Label..."
+                value={textInput}
+                onChange={e => setTextInput(e.target.value)}
+                onClick={e => e.stopPropagation()}
+                onMouseDown={e => e.stopPropagation()}
+                autoFocus
+              />
+            )}
+
+            {/* Clear all drawings */}
+            <button className="draw-tool-btn danger"
+              title="Clear all drawings"
+              onClick={() => { setDrawings([]); setSelectedDrawingId(null); }}>
+              <Ic.eraser />
+            </button>
+
+            <div className="draw-toolbar-sep" />
+
+            {/* Save template */}
+            <button className="draw-tool-btn"
+              title="Save template"
+              onClick={() => { setShowSaveModal(true); setShowLoadDropdown(false); }}>
+              <Ic.save />
+            </button>
+
+            {/* Load template */}
+            <div style={{ position: "relative" }}>
+              <button className={`draw-tool-btn${showLoadDropdown ? " active" : ""}`}
+                title="Load template"
+                onClick={() => { setShowLoadDropdown(v => !v); setShowSaveModal(false); }}>
+                <Ic.folder />
+              </button>
+              {showLoadDropdown && (
+                <div className="tpl-dropdown">
+                  <div className="tpl-dropdown-header">TEMPLATES</div>
+                  {templates.length === 0 && (
+                    <div className="tpl-dropdown-empty">No saved templates</div>
+                  )}
+                  {templates.map(tpl => (
+                    <div key={tpl.template_id} className="tpl-dropdown-item"
+                      onClick={() => handleLoadTemplate(tpl)}>
+                      <div className="tpl-item-name">{tpl.name}</div>
+                      <div className="tpl-item-meta">
+                        {tpl.symbol || "ALL"} · {tpl.drawings_json?.length || 0} drawings
+                      </div>
+                      <button className="tpl-item-del"
+                        onClick={e => handleDeleteTemplate(e, tpl.template_id)}
+                        title="Delete template">
+                        <Ic.close />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Drawing count */}
+            {drawings.length > 0 && (
+              <div className="draw-count">{drawings.length}</div>
+            )}
+
+            {/* Active tool indicator */}
+            {activeTool && (
+              <div className="draw-active-label">
+                {DRAWING_TOOLS[activeTool].label}
+                {pendingAnchors.length > 0 && (
+                  <span className="draw-anchor-count">
+                    {pendingAnchors.length}/{DRAWING_TOOLS[activeTool].anchors}
+                  </span>
+                )}
+              </div>
+            )}
+            {selectedDrawingId && !activeTool && (
+              <div className="draw-active-label" style={{ color: "#f04438" }}>
+                SELECTED · DEL TO REMOVE
+              </div>
+            )}
+          </div>
+
           {/* Date range info */}
-          <div style={{ position: "absolute", bottom: 18, left: 12, fontFamily: "var(--font-mono)", fontSize: 9, color: "#263045", pointerEvents: "none", zIndex: 2 }}>
+          <div style={{ position: "absolute", bottom: 18, left: 46, fontFamily: "var(--font-mono)", fontSize: 9, color: "#263045", pointerEvents: "none", zIndex: 2 }}>
             {visibleData[0]?.date && visibleData[n-1]?.date ? `${visibleData[0].date} → ${visibleData[n-1].date}  ·  ${n} SESSIONS` : ""}
           </div>
 
@@ -698,6 +1453,14 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
               );
             })}
 
+            {/* ── DRAWING LAYER ── */}
+            <g clipPath="url(#chartClip)">
+              {drawings.filter(d => d.visible).map(d =>
+                renderDrawing(d, visibleData, visibleStart, allData, xOf, yOf, PAD, H, W, pLo, pHi, dims, d.id === selectedDrawingId)
+              )}
+              {activeTool && renderPreview(activeTool, pendingAnchors, previewPoint, visibleData, visibleStart, allData, xOf, yOf, PAD, H, W, pLo, pHi, dims, drawingStyle)}
+            </g>
+
             {/* ── VOLUME BARS (inside same SVG) ── */}
             {overlays.volume && (
               <g>
@@ -798,6 +1561,33 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
                 {overlays.smaCustom && tooltip.sCx  && <div className="tt-sma"><div className="tt-sma-dot" style={{ background: "#a78bfa" }}/><span className="tt-sma-key">SMA {customPeriod}</span><span className="tt-sma-val">${tooltip.sCx.toFixed(2)}</span></div>}
               </>
             )}
+          </div>
+        )}
+
+        {/* ── SAVE TEMPLATE MODAL ── */}
+        {showSaveModal && (
+          <div className="tpl-modal-overlay" onClick={() => setShowSaveModal(false)}>
+            <div className="tpl-modal" onClick={e => e.stopPropagation()}>
+              <div className="tpl-modal-title">SAVE TEMPLATE</div>
+              <div className="tpl-modal-desc">
+                Save current drawings ({drawings.length}) and overlay settings for {symbol}.
+              </div>
+              <input className="tpl-modal-input"
+                placeholder="Template name..."
+                value={templateName}
+                onChange={e => setTemplateName(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") handleSaveTemplate(); if (e.key === "Escape") setShowSaveModal(false); }}
+                autoFocus
+              />
+              <div className="tpl-modal-actions">
+                <button className="tpl-modal-btn cancel" onClick={() => setShowSaveModal(false)}>CANCEL</button>
+                <button className="tpl-modal-btn save"
+                  disabled={!templateName.trim() || templateSaving}
+                  onClick={handleSaveTemplate}>
+                  {templateSaving ? "SAVING..." : "SAVE"}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -916,11 +1706,149 @@ function ChartSearchBar({ watchlist, onAdd, onSelect, onRemove, activeSymbol, to
   );
 }
 
+/* ─── PORTFOLIO SIDE PANEL ──────────────────────────────────────────────────── */
+function PortfolioSidePanel({ token, onSelectSymbol, activeSymbol }) {
+  const [portfolios, setPortfolios] = useState([]);
+  const [activePortfolioId, setActivePortfolioId] = useState(null);
+  const [positions, setPositions] = useState([]);
+  const [quotes, setQuotes] = useState({});
+  const [loading, setLoading] = useState(false);
+
+  // Load portfolios on mount
+  useEffect(() => {
+    if (!token) return;
+    api.listPortfolios(token)
+      .then(list => {
+        setPortfolios(list);
+        if (list.length) setActivePortfolioId(list[0].portfolio_id);
+      })
+      .catch(() => {});
+  }, [token]);
+
+  // Load positions when portfolio changes
+  useEffect(() => {
+    if (!token || !activePortfolioId) { setPositions([]); return; }
+    setLoading(true);
+    api.listPositions(activePortfolioId, token)
+      .then(list => setPositions(list))
+      .catch(() => setPositions([]))
+      .finally(() => setLoading(false));
+  }, [activePortfolioId, token]);
+
+  // Load quotes for all positions
+  useEffect(() => {
+    if (!token || !positions.length) { setQuotes({}); return; }
+    const tickers = [...new Set(positions.map(p => p.ticker))];
+    api.bulkQuotes(tickers, token)
+      .then(list => {
+        const map = {};
+        list.forEach(q => { map[q.symbol] = q; });
+        setQuotes(map);
+      })
+      .catch(() => {});
+  }, [positions, token]);
+
+  const activePortfolio = portfolios.find(p => p.portfolio_id === activePortfolioId);
+
+  // Summary
+  const summary = useMemo(() => {
+    let totalValue = 0, totalCost = 0;
+    positions.filter(p => !p.is_excluded).forEach(p => {
+      const price = quotes[p.ticker]?.price;
+      const qty = parseFloat(p.quantity);
+      const bep = parseFloat(p.purchase_price);
+      if (price != null) totalValue += price * qty;
+      totalCost += bep * qty;
+    });
+    return { totalValue, totalCost, gainLoss: totalValue - totalCost, gainPct: totalCost > 0 ? ((totalValue - totalCost) / totalCost) * 100 : 0 };
+  }, [positions, quotes]);
+
+  const fmtUSD = (n) => `$${parseFloat(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const fmtPct = (n) => `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
+
+  return (
+    <div className="portfolio-panel">
+      {/* Header */}
+      <div className="pp-header">
+        <div className="pp-title">PORTFOLIO</div>
+        {portfolios.length > 1 ? (
+          <select className="pp-select"
+            value={activePortfolioId || ""}
+            onChange={e => setActivePortfolioId(e.target.value)}>
+            {portfolios.map(p => <option key={p.portfolio_id} value={p.portfolio_id}>{p.name}</option>)}
+          </select>
+        ) : activePortfolio ? (
+          <div className="pp-portfolio-name">{activePortfolio.name}</div>
+        ) : null}
+      </div>
+
+      {/* Summary */}
+      <div className="pp-summary">
+        <div className="pp-summary-row">
+          <span className="pp-summary-label">VALUE</span>
+          <span className="pp-summary-val">{fmtUSD(summary.totalValue)}</span>
+        </div>
+        <div className="pp-summary-row">
+          <span className="pp-summary-label">P&L</span>
+          <span className={`pp-summary-val ${summary.gainLoss >= 0 ? "pos" : "neg"}`}>
+            {fmtUSD(summary.gainLoss)} ({fmtPct(summary.gainPct)})
+          </span>
+        </div>
+      </div>
+
+      {/* Positions list */}
+      <div className="pp-positions">
+        {loading && <div className="pp-loading loading-pulse">LOADING...</div>}
+        {!loading && positions.length === 0 && (
+          <div className="pp-empty">No positions</div>
+        )}
+        {positions.map(pos => {
+          const q = quotes[pos.ticker];
+          const price = q?.price;
+          const qty = parseFloat(pos.quantity);
+          const bep = parseFloat(pos.purchase_price);
+          const gainPct = price != null ? ((price - bep) / bep) * 100 : null;
+          const isActive = activeSymbol === pos.ticker;
+
+          return (
+            <div key={pos.position_id}
+              className={`pp-position${isActive ? " active" : ""}`}
+              onClick={() => onSelectSymbol(pos.ticker)}>
+              <div className="pp-pos-top">
+                <span className="pp-pos-ticker">{pos.ticker}</span>
+                <span className="pp-pos-price">
+                  {price != null ? fmtUSD(price) : <span className="loading-pulse">...</span>}
+                </span>
+              </div>
+              <div className="pp-pos-bottom">
+                <span className="pp-pos-qty">{qty} shares</span>
+                {gainPct != null && (
+                  <span className={`pp-pos-gain ${gainPct >= 0 ? "pos" : "neg"}`}>
+                    {gainPct >= 0 ? "+" : ""}{gainPct.toFixed(2)}%
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /* ─── MAIN CHARTS PAGE ──────────────────────────────────────────────────────── */
 export function ChartsPage({ initialSymbol, goBack, token }) {
   const [watchlist, setWatchlist] = useState(["AAPL", "NVDA", "TSLA"]);
   const [activeSymbol, setActiveSymbol] = useState(initialSymbol || "AAPL");
+  const [panelOpen, setPanelOpen] = useState(() => localStorage.getItem("tt_chart_panel") !== "0");
   const mktStatus = useMarketStatus();
+
+  const togglePanel = () => {
+    setPanelOpen(v => {
+      localStorage.setItem("tt_chart_panel", v ? "0" : "1");
+      return !v;
+    });
+  };
 
   // When initialSymbol changes (nav from holdings), add and select it
   useEffect(() => {
@@ -960,6 +1888,11 @@ export function ChartsPage({ initialSymbol, goBack, token }) {
     if (activeSymbol === sym) setActiveSymbol(watchlist.find(s => s !== sym) || "");
   };
 
+  const handlePanelSelect = (sym) => {
+    addSymbol(sym);
+    setActiveSymbol(sym);
+  };
+
   return (
     <div className="charts-page" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <style>{CHART_CSS}</style>
@@ -979,12 +1912,19 @@ export function ChartsPage({ initialSymbol, goBack, token }) {
             INTERACTIVE ANALYSIS · SMA OVERLAYS · BREAKOUT DETECTION
           </div>
         </div>
-        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4a5568", textAlign: "right" }}>
-          <div style={{ color: mktStatus.isOpen ? "#00d97e" : "var(--red)", display: "flex", alignItems: "center", gap: 5, justifyContent: "flex-end" }}>
-            <span style={{ width: 5, height: 5, borderRadius: "50%", background: mktStatus.isOpen ? "#00d97e" : "var(--red)", display: "inline-block", animation: "blink 2s infinite" }} />
-            {mktStatus.isOpen ? "NYSE OPEN" : `CLOSED · OPENS IN ${mktStatus.countdown}`}
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <button className={`btn btn-ghost`} onClick={togglePanel}
+            style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, letterSpacing: "0.5px", padding: "4px 10px",
+              color: panelOpen ? "#0f7d40" : "#4a5568", border: `1px solid ${panelOpen ? "rgba(15,125,64,0.3)" : "#1e2535"}` }}>
+            {panelOpen ? "◁ PORTFOLIO" : "PORTFOLIO ▷"}
+          </button>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4a5568", textAlign: "right" }}>
+            <div style={{ color: mktStatus.isOpen ? "#00d97e" : "var(--red)", display: "flex", alignItems: "center", gap: 5, justifyContent: "flex-end" }}>
+              <span style={{ width: 5, height: 5, borderRadius: "50%", background: mktStatus.isOpen ? "#00d97e" : "var(--red)", display: "inline-block", animation: "blink 2s infinite" }} />
+              {mktStatus.isOpen ? "NYSE OPEN" : `CLOSED · OPENS IN ${mktStatus.countdown}`}
+            </div>
+            <div style={{ marginTop: 2 }}>{mktStatus.dateStr} · {mktStatus.timeStr}</div>
           </div>
-          <div style={{ marginTop: 2 }}>{mktStatus.dateStr} · {mktStatus.timeStr}</div>
         </div>
       </div>
 
@@ -998,20 +1938,32 @@ export function ChartsPage({ initialSymbol, goBack, token }) {
         token={token}
       />
 
-      {/* Chart */}
-      <div style={{ flex: 1, overflow: "hidden", minHeight: 0, position: "relative" }}>
-        {activeSymbol ? (
-          <StockChart
-            key={activeSymbol}
-            symbol={activeSymbol}
-            stockInfo={stockInfo}
+      {/* Chart + Side Panel */}
+      <div style={{ flex: 1, overflow: "hidden", minHeight: 0, display: "flex", position: "relative" }}>
+        {/* Chart area */}
+        <div style={{ flex: 1, overflow: "hidden", minHeight: 0, position: "relative" }}>
+          {activeSymbol ? (
+            <StockChart
+              key={activeSymbol}
+              symbol={activeSymbol}
+              stockInfo={stockInfo}
+              token={token}
+            />
+          ) : (
+            <div className="chart-empty">
+              <div className="chart-empty-title">NO SYMBOL SELECTED</div>
+              <div className="chart-empty-sub">Search for a symbol above to load chart</div>
+            </div>
+          )}
+        </div>
+
+        {/* Portfolio side panel */}
+        {panelOpen && (
+          <PortfolioSidePanel
             token={token}
+            onSelectSymbol={handlePanelSelect}
+            activeSymbol={activeSymbol}
           />
-        ) : (
-          <div className="chart-empty">
-            <div className="chart-empty-title">NO SYMBOL SELECTED</div>
-            <div className="chart-empty-sub">Search for a symbol above to load chart</div>
-          </div>
         )}
       </div>
     </div>
@@ -1208,7 +2160,7 @@ const CHART_CSS = `
 
 /* ── Legend ── */
 .chart-legend {
-  position: absolute; top: 12px; left: 16px;
+  position: absolute; top: 12px; left: 46px;
   display: flex; gap: 12px; align-items: center; pointer-events: none; z-index: 5;
   flex-wrap: wrap;
 }
@@ -1231,6 +2183,230 @@ const CHART_CSS = `
   content: '';
   position: fixed; inset: 0; z-index: 9999; pointer-events: none;
   background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
+}
+
+/* ── Portfolio Side Panel ── */
+.portfolio-panel {
+  width: 280px; flex-shrink: 0;
+  background: #0e1117; border-left: 1px solid #1e2535;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.pp-header {
+  padding: 14px 16px 10px; border-bottom: 1px solid #1e2535;
+  flex-shrink: 0;
+}
+.pp-title {
+  font-family: 'Bebas Neue', sans-serif; font-size: 18px;
+  color: #e8f0fa; letter-spacing: 1.5px; margin-bottom: 6px;
+}
+.pp-select {
+  width: 100%; background: #141820; border: 1px solid #1e2535;
+  color: #e8f0fa; font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+  padding: 5px 8px; border-radius: 2px; outline: none; cursor: pointer;
+}
+.pp-select:focus { border-color: #0f7d40; }
+.pp-portfolio-name {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+  color: #0f7d40; font-weight: 600; letter-spacing: 0.5px;
+}
+.pp-summary {
+  padding: 10px 16px; border-bottom: 1px solid #1e2535;
+  flex-shrink: 0;
+}
+.pp-summary-row {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 4px;
+}
+.pp-summary-label {
+  font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+  color: #4a5568; letter-spacing: 0.8px;
+}
+.pp-summary-val {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+  color: #e8f0fa; font-weight: 500;
+}
+.pp-summary-val.pos { color: #00d97e; }
+.pp-summary-val.neg { color: #f04438; }
+.pp-positions {
+  flex: 1; overflow-y: auto; overflow-x: hidden;
+}
+.pp-loading, .pp-empty {
+  padding: 24px 16px; text-align: center;
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #4a5568;
+}
+.pp-position {
+  padding: 8px 16px; cursor: pointer;
+  border-bottom: 1px solid #141820;
+  transition: background .1s;
+}
+.pp-position:hover { background: #141820; }
+.pp-position.active { background: rgba(15,125,64,.08); border-left: 2px solid #0f7d40; }
+.pp-pos-top {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 2px;
+}
+.pp-pos-ticker {
+  font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+  font-weight: 700; color: #0f7d40; letter-spacing: 0.5px;
+}
+.pp-pos-price {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+  color: #e8f0fa; font-weight: 500;
+}
+.pp-pos-bottom {
+  display: flex; justify-content: space-between; align-items: center;
+}
+.pp-pos-qty {
+  font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #4a5568;
+}
+.pp-pos-gain {
+  font-family: 'IBM Plex Mono', monospace; font-size: 10px; font-weight: 600;
+}
+.pp-pos-gain.pos { color: #00d97e; }
+.pp-pos-gain.neg { color: #f04438; }
+
+/* ── Drawing Toolbar ── */
+.draw-toolbar {
+  position: absolute; top: 0; left: 0; bottom: 0; width: 36px;
+  background: rgba(14,17,23,0.92); border-right: 1px solid #1e2535;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 8px 0; gap: 2px; z-index: 10;
+  backdrop-filter: blur(6px);
+}
+.draw-tool-btn {
+  width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+  background: none; border: 1px solid transparent; border-radius: 2px;
+  cursor: pointer; color: #4a5568; transition: all 0.1s; flex-shrink: 0;
+  padding: 0;
+}
+.draw-tool-btn:hover { color: #c8d3e0; background: rgba(255,255,255,0.04); border-color: #263045; }
+.draw-tool-btn.active { color: #f59e0b; background: rgba(245,158,11,0.08); border-color: rgba(245,158,11,0.3); }
+.draw-tool-btn.mini { width: 28px; height: 18px; }
+.draw-tool-btn.danger { color: #4a5568; }
+.draw-tool-btn.danger:hover { color: #f04438; background: rgba(240,68,56,0.08); border-color: rgba(240,68,56,0.3); }
+.draw-toolbar-sep {
+  width: 18px; height: 1px; background: #1e2535; margin: 4px 0; flex-shrink: 0;
+}
+.draw-color-wrap {
+  width: 28px; height: 28px; position: relative; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.draw-color-swatch {
+  width: 14px; height: 14px; border-radius: 2px; border: 1px solid #263045;
+  pointer-events: none;
+}
+.draw-color-input {
+  position: absolute; inset: 0; opacity: 0; cursor: pointer;
+  width: 100%; height: 100%;
+}
+.draw-text-input {
+  width: 28px; background: #141820; border: 1px solid #263045;
+  color: #e8f0fa; font-family: 'IBM Plex Mono', monospace; font-size: 8px;
+  padding: 3px 2px; text-align: center; outline: none; border-radius: 2px;
+  flex-shrink: 0;
+}
+.draw-text-input:focus { border-color: #f59e0b; }
+.draw-count {
+  font-family: 'IBM Plex Mono', monospace; font-size: 8px; color: #4a5568;
+  text-align: center; line-height: 1; margin-top: 2px; flex-shrink: 0;
+}
+.draw-active-label {
+  writing-mode: vertical-rl; text-orientation: mixed;
+  font-family: 'IBM Plex Mono', monospace; font-size: 8px; font-weight: 600;
+  color: #f59e0b; letter-spacing: 1px; margin-top: auto; padding-bottom: 8px;
+  white-space: nowrap; flex-shrink: 0;
+}
+.draw-anchor-count {
+  font-size: 8px; color: #718096; margin-top: 4px;
+}
+
+/* ── Template Dropdown & Modal ── */
+.tpl-dropdown {
+  position: absolute; left: calc(100% + 4px); top: 0;
+  width: 220px; background: #141820; border: 1px solid #263045;
+  z-index: 20; max-height: 300px; overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.7);
+}
+.tpl-dropdown-header {
+  padding: 8px 12px; font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px; color: #4a5568; letter-spacing: 1px;
+  border-bottom: 1px solid #1e2535;
+}
+.tpl-dropdown-empty {
+  padding: 16px 12px; font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px; color: #4a5568; text-align: center;
+}
+.tpl-dropdown-item {
+  padding: 8px 12px; cursor: pointer;
+  border-bottom: 1px solid #1a1d2e; transition: background 0.08s;
+  position: relative;
+}
+.tpl-dropdown-item:last-child { border-bottom: none; }
+.tpl-dropdown-item:hover { background: #1a1d2e; }
+.tpl-item-name {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+  color: #e8f0fa; font-weight: 500; margin-bottom: 2px;
+}
+.tpl-item-meta {
+  font-family: 'IBM Plex Mono', monospace; font-size: 9px;
+  color: #4a5568; letter-spacing: 0.3px;
+}
+.tpl-item-del {
+  position: absolute; top: 6px; right: 6px;
+  background: none; border: none; cursor: pointer; color: #4a5568;
+  padding: 2px; display: flex; align-items: center;
+  transition: color 0.1s;
+}
+.tpl-item-del:hover { color: #f04438; }
+
+.tpl-modal-overlay {
+  position: absolute; inset: 0; z-index: 60;
+  background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+}
+.tpl-modal {
+  background: #141820; border: 1px solid #263045;
+  padding: 24px; width: 340px;
+  box-shadow: 0 12px 48px rgba(0,0,0,0.8);
+}
+.tpl-modal-title {
+  font-family: 'Bebas Neue', sans-serif; font-size: 22px;
+  color: #e8f0fa; letter-spacing: 1.5px; margin-bottom: 8px;
+}
+.tpl-modal-desc {
+  font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+  color: #4a5568; margin-bottom: 16px; line-height: 1.5;
+}
+.tpl-modal-input {
+  width: 100%; background: #0e1117; border: 1px solid #1e2535;
+  padding: 10px 12px; font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px; color: #e8f0fa; outline: none;
+  border-radius: 2px; box-sizing: border-box;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  transition: border-color 0.1s;
+}
+.tpl-modal-input:focus { border-color: #0f7d40; }
+.tpl-modal-input::placeholder { color: #4a5568; text-transform: none; letter-spacing: 0; }
+.tpl-modal-actions {
+  display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px;
+}
+.tpl-modal-btn {
+  padding: 8px 20px; font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.8px;
+  cursor: pointer; border: 1px solid; border-radius: 2px;
+  transition: all 0.1s;
+}
+.tpl-modal-btn.cancel {
+  background: none; border-color: #1e2535; color: #4a5568;
+}
+.tpl-modal-btn.cancel:hover { border-color: #263045; color: #718096; }
+.tpl-modal-btn.save {
+  background: #0f7d40; border-color: #0f7d40; color: #060f08;
+}
+.tpl-modal-btn.save:hover { background: #10a050; }
+.tpl-modal-btn.save:disabled {
+  opacity: 0.4; cursor: not-allowed;
 }
 `;
 

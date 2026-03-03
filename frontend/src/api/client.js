@@ -48,8 +48,13 @@ export async function apiFetch(path, { method = "GET", body, token } = {}) {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    let msg = err.detail;
+    if (Array.isArray(msg)) msg = msg.map(e => e.msg || JSON.stringify(e)).join("; ");
+    throw new Error(msg || `HTTP ${res.status}`);
   }
+
+  // 204 No Content — return null (no body to parse)
+  if (res.status === 204) return null;
 
   return res.json();
 }
@@ -125,6 +130,9 @@ const api = {
   getOhlcv: (symbol, token, years = 5) =>
     apiFetch(`/market/ohlcv/${symbol}?years=${years}`, { token }),
 
+  getOhlcvInterval: (symbol, token, interval = "1d", days = 365) =>
+    apiFetch(`/market/ohlcv_interval/${symbol}?interval=${interval}&days=${days}`, { token }),
+
   /** @param {string} query @param {string} token */
   searchSymbols: (query, token) =>
     apiFetch(`/market/search?q=${encodeURIComponent(query)}`, { token }),
@@ -150,6 +158,56 @@ const api = {
 
   // ── Health (unversioned — stays at /health not /api/v1/health) ──────────
   health: () => fetch(`${_ORIGIN}/health`).then((r) => r.json()),
+
+  // ── Portfolio Manager ─────────────────────────────────────────────────────
+  listPortfolios: (token) =>
+    apiFetch("/portfolio-manager/portfolios", { token }),
+
+  createPortfolio: (payload, token) =>
+    apiFetch("/portfolio-manager/portfolios", { method: "POST", body: payload, token }),
+
+  deletePortfolio: (portfolioId, token) =>
+    apiFetch(`/portfolio-manager/portfolios/${portfolioId}`, { method: "DELETE", token }),
+
+  listPositions: (portfolioId, token) =>
+    apiFetch(`/portfolio-manager/portfolios/${portfolioId}/positions`, { token }),
+
+  addPosition: (portfolioId, payload, token) =>
+    apiFetch(`/portfolio-manager/portfolios/${portfolioId}/positions`, { method: "POST", body: payload, token }),
+
+  importPositions: (portfolioId, positions, token) =>
+    apiFetch(`/portfolio-manager/portfolios/${portfolioId}/import`, { method: "POST", body: positions, token }),
+
+  modifyPosition: (positionId, payload, token) =>
+    apiFetch(`/portfolio-manager/positions/${positionId}`, { method: "PATCH", body: payload, token }),
+
+  deletePosition: (positionId, token) =>
+    apiFetch(`/portfolio-manager/positions/${positionId}`, { method: "DELETE", token }),
+
+  sellPosition: (positionId, quantity, token) =>
+    apiFetch(`/portfolio-manager/positions/${positionId}/sell`, { method: "POST", body: { quantity }, token }),
+
+  bulkQuotes: (symbols, token) =>
+    apiFetch(`/market/bulk_quotes?symbols=${symbols.join(",")}`, { token }),
+
+  priceChange: (symbol, period, token) =>
+    apiFetch(`/market/price_change?symbol=${encodeURIComponent(symbol)}&period=${period}`, { token }),
+
+  bulkSma: (symbols, period, token) =>
+    apiFetch(`/market/bulk_sma?symbols=${symbols.join(",")}&period=${period}`, { token }),
+
+  // ── Chart Templates ────────────────────────────────────────────────────────
+  listChartTemplates: (token) =>
+    apiFetch("/chart-templates/", { token }),
+
+  createChartTemplate: (payload, token) =>
+    apiFetch("/chart-templates/", { method: "POST", body: payload, token }),
+
+  updateChartTemplate: (templateId, payload, token) =>
+    apiFetch(`/chart-templates/${templateId}`, { method: "PATCH", body: payload, token }),
+
+  deleteChartTemplate: (templateId, token) =>
+    apiFetch(`/chart-templates/${templateId}`, { method: "DELETE", token }),
 };
 
 export default api;

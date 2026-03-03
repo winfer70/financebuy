@@ -71,6 +71,55 @@ def _hash_token(raw_token: str) -> str:
     return hashlib.sha256(raw_token.encode()).hexdigest()
 
 
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """FastAPI dependency that decodes the JWT and returns the active User.
+
+    Raises HTTP 401 if the token is missing, invalid, or the user is inactive.
+    Import this via dependencies.py to keep route modules decoupled from the
+    specific auth implementation.
+    """
+    subject = decode_access_token(token)
+    if subject is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid token",
+        )
+
+    try:
+        user_id = UUID(subject)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid token subject",
+        )
+
+    result = await db.execute(select(User).where(User.user_id == user_id))
+    user = result.scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="user not found or inactive",
+        )
+    return user
+
+
+async def get_current_admin(current_user: User = Depends(get_current_user)) -> User:
+    """FastAPI dependency that requires admin privileges.
+
+    Raises HTTP 403 if the authenticated user's email is not listed in the
+    ADMIN_EMAILS environment variable.
+    """
+    if not _is_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="admin privileges required",
+        )
+    return current_user
+
+
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 @limiter.limit("3/minute")
 async def register_user(
@@ -444,52 +493,3 @@ async def reset_password(
     await db.commit()
 
     return {"detail": "Password updated successfully."}
-
-
-async def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    db: AsyncSession = Depends(get_db),
-) -> User:
-    """FastAPI dependency that decodes the JWT and returns the active User.
-
-    Raises HTTP 401 if the token is missing, invalid, or the user is inactive.
-    Import this via dependencies.py to keep route modules decoupled from the
-    specific auth implementation.
-    """
-    subject = decode_access_token(token)
-    if subject is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="invalid token",
-        )
-
-    try:
-        user_id = UUID(subject)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="invalid token subject",
-        )
-
-    result = await db.execute(select(User).where(User.user_id == user_id))
-    user = result.scalar_one_or_none()
-    if not user or not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="user not found or inactive",
-        )
-    return user
-
-
-async def get_current_admin(current_user: User = Depends(get_current_user)) -> User:
-    """FastAPI dependency that requires admin privileges.
-
-    Raises HTTP 403 if the authenticated user's email is not listed in the
-    ADMIN_EMAILS environment variable.
-    """
-    if not _is_admin(current_user):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="admin privileges required",
-        )
-    return current_user

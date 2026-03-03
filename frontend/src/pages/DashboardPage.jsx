@@ -8,7 +8,7 @@ import { useState, useEffect, useMemo } from "react";
 import api, { useApi } from "../api/client";
 import { Ic } from "../components/common/Icons";
 import { SkeletonRow, ApiError, useMarketStatus } from "../components/common";
-import { Sparkline, PortfolioChart, AllocationDonut } from "../components/charts";
+import { Sparkline, PortfolioChart, AllocationDonut, Heatmap } from "../components/charts";
 import { HOLDINGS, TRANSACTIONS } from "../styles/globals";
 
 export function DashboardPage({ onNewTx, token, accountId, setPage }) {
@@ -41,7 +41,7 @@ export function DashboardPage({ onNewTx, token, accountId, setPage }) {
           const map = {};
           results.forEach((r, i) => {
             if (r.status === "fulfilled") {
-              map[symbols[i]] = { price: Number(r.value.price), change: Number(r.value.change), change_pct: Number(r.value.change_pct) };
+              map[symbols[i]] = { price: Number(r.value.price), change: Number(r.value.change), change_pct: Number(r.value.change_pct), volume: Number(r.value.volume || 0) };
             }
           });
           setQuotesMap(map);
@@ -61,6 +61,7 @@ export function DashboardPage({ onNewTx, token, accountId, setPage }) {
         current_price: q ? q.price : +(p.current_price||0),
         market_value: +(p.market_value||0),
         chg: q ? q.change : 0, chgPct: q ? q.change_pct : 0,
+        volume: q ? q.volume : 0,
       };
   });
   // Unify transactions + orders into one activity feed
@@ -147,6 +148,17 @@ export function DashboardPage({ onNewTx, token, accountId, setPage }) {
       </div>
 
       <div className="page-inner stagger">
+        {/* Heatmap */}
+        <div className="panel">
+          <div className="panel-header">
+            <span className="panel-title">MARKET HEATMAP</span>
+            <span style={{fontFamily:"var(--font-mono)",fontSize:10,color:"var(--muted)"}}>BY VOLUME</span>
+          </div>
+          <div className="panel-body" style={{padding:0}}>
+            <Heatmap holdings={holdings}/>
+          </div>
+        </div>
+
         {/* Main chart + allocation */}
         <div className="grid-main">
           <div className="panel">

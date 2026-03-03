@@ -71,7 +71,7 @@ export function ResetPasswordPage({ resetToken, onBack, onSuccess }) {
       <div className="login-right">
         <div className="login-head">{done ? "PASSWORD RESET" : "CREATE NEW PASSWORD"}</div>
         <div className="login-subhead">{done ? "Your password has been updated." : "Enter a strong password"}</div>
-        <div className="login-form">
+        <form className="login-form" onSubmit={e=>{e.preventDefault();handleSubmit();}}>
           {done ? (
             <div style={{display:"flex",flexDirection:"column",gap:16}}>
               <div style={{fontFamily:"var(--font-mono)",fontSize:11,color:"var(--green)",textAlign:"center",padding:"20px"}}>
@@ -84,16 +84,16 @@ export function ResetPasswordPage({ resetToken, onBack, onSuccess }) {
               <div className="form-field">
                 <label className="form-label">New Password</label>
                 <div className="pw-wrap">
-                  <input className="form-control" type={show?"text":"password"} value={pwd} onChange={e=>setPwd(e.target.value)} placeholder="Min 8 characters"/>
-                  <button className="pw-eye" onClick={()=>setShow(!show)}>{show?<Ic.eyeOff/>:<Ic.eye/>}</button>
+                  <input className="form-control" type={show?"text":"password"} value={pwd} onChange={e=>setPwd(e.target.value)} autoComplete="new-password" placeholder="Min 8 characters"/>
+                  <button type="button" className="pw-eye" onClick={()=>setShow(!show)}>{show?<Ic.eyeOff/>:<Ic.eye/>}</button>
                 </div>
               </div>
               <div className="form-field">
                 <label className="form-label">Confirm Password</label>
-                <input className="form-control" type={show?"text":"password"} value={pwd2} onChange={e=>setPwd2(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSubmit()} placeholder="Re-enter password"/>
+                <input className="form-control" type={show?"text":"password"} value={pwd2} onChange={e=>setPwd2(e.target.value)} autoComplete="new-password" placeholder="Re-enter password"/>
               </div>
               {err && <div style={{fontFamily:"var(--font-mono)",fontSize:11,color:"var(--red)"}}>{err}</div>}
-              <button className="btn btn-amber login-btn-full" onClick={handleSubmit} disabled={loading}>
+              <button type="submit" className="btn btn-amber login-btn-full" disabled={loading}>
                 {loading ? <span className="loading-pulse">RESETTING...</span> : "RESET PASSWORD"}
               </button>
               <div className="login-footer-links">
@@ -101,7 +101,7 @@ export function ResetPasswordPage({ resetToken, onBack, onSuccess }) {
               </div>
             </>
           )}
-        </div>
+        </form>
         <div className="login-security">
           <div className="security-item"><Ic.lock/> TLS 1.3 Encrypted</div>
           <div className="security-item"><Ic.shield/> SOC 2 Compliant</div>
