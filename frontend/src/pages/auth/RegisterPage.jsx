@@ -73,46 +73,46 @@ export function RegisterPage({ onLogin, onBack, backendOk }) {
       <div className="login-right">
         <div className="login-head">CREATE ACCOUNT</div>
         <div className="login-subhead">Open your trading terminal account</div>
-        <div className="login-form">
+        <form className="login-form" onSubmit={e=>{e.preventDefault();handleRegister();}}>
           <div style={{display:"flex",gap:12}}>
             <div className="form-field" style={{flex:1}}>
               <label className="form-label">First Name</label>
               <input className="form-control" type="text" value={firstName}
-                onChange={e=>setFirstName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleRegister()} placeholder="First"/>
+                onChange={e=>setFirstName(e.target.value)} placeholder="First"/>
             </div>
             <div className="form-field" style={{flex:1}}>
               <label className="form-label">Last Name</label>
               <input className="form-control" type="text" value={lastName}
-                onChange={e=>setLastName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleRegister()} placeholder="Last"/>
+                onChange={e=>setLastName(e.target.value)} placeholder="Last"/>
             </div>
           </div>
           <div className="form-field">
             <label className="form-label">Email Address</label>
             <input className="form-control" type="email" value={email}
-              onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleRegister()} placeholder="you@example.com"/>
+              onChange={e=>setEmail(e.target.value)} autoComplete="email" placeholder="you@example.com"/>
           </div>
           <div className="form-field">
             <label className="form-label">Password</label>
             <div className="pw-wrap">
               <input className="form-control" type={show?"text":"password"} value={pwd}
-                onChange={e=>setPwd(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleRegister()}
-                placeholder="Min 8 characters" style={{paddingRight:36}}/>
-              <button className="pw-eye" onClick={()=>setShow(v=>!v)}>{show?<Ic.eyeOff/>:<Ic.eye/>}</button>
+                onChange={e=>setPwd(e.target.value)}
+                autoComplete="new-password" placeholder="Min 8 characters" style={{paddingRight:36}}/>
+              <button type="button" className="pw-eye" onClick={()=>setShow(v=>!v)}>{show?<Ic.eyeOff/>:<Ic.eye/>}</button>
             </div>
           </div>
           <div className="form-field">
             <label className="form-label">Confirm Password</label>
             <input className="form-control" type={show?"text":"password"} value={pwd2}
-              onChange={e=>setPwd2(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleRegister()} placeholder="Repeat password"/>
+              onChange={e=>setPwd2(e.target.value)} autoComplete="new-password" placeholder="Repeat password"/>
           </div>
           {err && <div style={{fontFamily:"var(--font-mono)",fontSize:11,color:"var(--red)"}}>{err}</div>}
-          <button className="btn btn-amber login-btn-full" onClick={handleRegister} disabled={loading}>
+          <button type="submit" className="btn btn-amber login-btn-full" disabled={loading}>
             {loading ? <span className="loading-pulse">CREATING ACCOUNT...</span> : "CREATE ACCOUNT"}
           </button>
           <div className="login-footer-links">
             <span className="login-link" onClick={onBack}>← Back to sign in</span>
           </div>
-        </div>
+        </form>
         <div className="login-security">
           <div className="security-item"><Ic.lock/> TLS 1.3 Encrypted</div>
           <div className="security-item"><Ic.shield/> SOC 2 Compliant</div>

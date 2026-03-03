@@ -217,6 +217,50 @@ class RefreshToken(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class Portfolio(Base):
+    """Named portfolio owned by a user for tracking custom positions."""
+
+    __tablename__ = "portfolios"
+
+    portfolio_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name = Column(String(128), nullable=False)
+    strategy = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PortfolioPosition(Base):
+    """A single holding within a Portfolio."""
+
+    __tablename__ = "portfolio_positions"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_portfolio_positions_quantity_positive"),
+        Index("idx_portfolio_positions_portfolio_id", "portfolio_id"),
+    )
+
+    position_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    portfolio_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("portfolios.portfolio_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    ticker = Column(String(20), nullable=False)
+    name = Column(String(256), nullable=True)
+    quantity = Column(Numeric(18, 6), nullable=False)
+    purchase_date = Column(DateTime(timezone=True), nullable=True)
+    purchase_price = Column(Numeric(18, 2), nullable=False)
+    group_tag = Column(String(64), nullable=True)
+    is_excluded = Column(Boolean, server_default="false", nullable=False)
+    asset_type = Column(String(20), server_default="stock", nullable=False)
+    physical_type = Column(String(20), nullable=True)
+    stop_loss = Column(Numeric(18, 2), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class AuditLog(Base):
     """Immutable audit trail for all user-initiated actions."""
 
@@ -237,3 +281,26 @@ class AuditLog(Base):
     ip_address = Column(INET)
     user_agent = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class ChartTemplate(Base):
+    """Saved chart template with drawings and overlay configuration."""
+
+    __tablename__ = "chart_templates"
+    __table_args__ = (
+        Index("idx_chart_templates_user_id", "user_id"),
+    )
+
+    template_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name = Column(String(128), nullable=False)
+    symbol = Column(String(20), nullable=True)
+    interval = Column(String(10), nullable=True)
+    drawings_json = Column(JSONB, nullable=False, server_default="'[]'::jsonb")
+    overlays_json = Column(JSONB, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

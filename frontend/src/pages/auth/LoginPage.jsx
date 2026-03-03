@@ -88,34 +88,32 @@ export function LoginPage({ onLogin, onRegister, onForgotPassword, backendOk }) 
       <div className="login-right">
         <div className="login-head">SIGN IN</div>
         <div className="login-subhead">Access your trading terminal</div>
-        <div className="login-form">
+        <form className="login-form" onSubmit={e=>{e.preventDefault();handleLogin();}}>
           <div className="form-field">
             <label className="form-label">Email Address</label>
             <input className="form-control" type="email" value={email}
-              onChange={e=>setEmail(e.target.value)}
-              onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
+              onChange={e=>setEmail(e.target.value)} autoComplete="email"/>
           </div>
           <div className="form-field">
             <label className="form-label">Password</label>
             <div className="pw-wrap">
               <input className="form-control" type={show?"text":"password"}
                 value={pwd} onChange={e=>setPwd(e.target.value)}
-                onKeyDown={e=>e.key==="Enter"&&handleLogin()}
-                style={{paddingRight:36}}/>
-              <button className="pw-eye" onClick={()=>setShow(v=>!v)}>
+                autoComplete="current-password" style={{paddingRight:36}}/>
+              <button type="button" className="pw-eye" onClick={()=>setShow(v=>!v)}>
                 {show ? <Ic.eyeOff/> : <Ic.eye/>}
               </button>
             </div>
           </div>
           {err && <div style={{fontFamily:"var(--font-mono)",fontSize:11,color:"var(--red)"}}>{err}</div>}
-          <button className="btn btn-amber login-btn-full" onClick={handleLogin} disabled={loading}>
+          <button type="submit" className="btn btn-amber login-btn-full" disabled={loading}>
             {loading ? <span className="loading-pulse">AUTHENTICATING...</span> : "SIGN IN TO TERMINAL"}
           </button>
           <div className="login-footer-links">
             <span className="login-link" onClick={onForgotPassword}>Reset password</span>
             <span className="login-link" onClick={onRegister}>Create account →</span>
           </div>
-        </div>
+        </form>
         <div className="login-security">
           <div className="security-item"><Ic.lock/> TLS 1.3 Encrypted</div>
           <div className="security-item"><Ic.shield/> SOC 2 Compliant</div>

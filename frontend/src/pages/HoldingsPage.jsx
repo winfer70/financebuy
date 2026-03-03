@@ -14,6 +14,7 @@ import { HOLDINGS } from "../styles/globals";
 export function HoldingsPage({ onNewTx, onViewChart, token, accountId, goBack }) {
   const { data: apiHoldings, loading, error, refetch } =
     useApi(() => token ? api.getPositions(token) : Promise.resolve(null), [token]);
+  const [categoryFilter, setCategoryFilter] = useState("all");
 
   const rawHoldings = apiHoldings || [];
   // Normalise field names — API uses snake_case, mock uses short names
@@ -26,16 +27,27 @@ export function HoldingsPage({ onNewTx, onViewChart, token, accountId, goBack })
     name:   h.name   ?? h.symbol ?? "",
     chgPct: h.chgPct ?? 0,
     chg:    h.chg    ?? 0,
+    secType: (h.security_type || "stock").toLowerCase(),
   }));
+
+  const categories = useMemo(() => {
+    const types = [...new Set(holdings.map(h => h.secType))].sort();
+    return ["all", ...types];
+  }, [holdings]);
+
+  const filtered = categoryFilter === "all" ? holdings : holdings.filter(h => h.secType === categoryFilter);
   const total = holdings.reduce((s,h)=>s+h.qty*h.price,0);
   const cost  = holdings.reduce((s,h)=>s+h.qty*h.avg,0);
+  const fTotal = filtered.reduce((s,h)=>s+h.qty*h.price,0);
+  const fCost  = filtered.reduce((s,h)=>s+h.qty*h.avg,0);
+  const fPnl   = fTotal - fCost;
 
   return (
     <div className="page-scroll">
       <div className="page-header">
         <div>
           <div className="page-title"><button className="btn btn-ghost" onClick={goBack} style={{padding:"4px 6px",marginRight:8,verticalAlign:"middle"}}><Ic.back/></button>HOLDINGS</div>
-          <div className="page-sub">{holdings.length} POSITIONS · {accountId ? `ACCOUNT ${String(accountId).slice(0,8).toUpperCase()}` : "DEMO"}</div>
+          <div className="page-sub">{filtered.length} POSITIONS{categoryFilter !== "all" ? ` (${categoryFilter.toUpperCase()})` : ""} · {accountId ? `ACCOUNT ${String(accountId).slice(0,8).toUpperCase()}` : "DEMO"}</div>
         </div>
         <div className="page-actions">
           <button className="btn btn-outline"><Ic.file/> STATEMENTS</button>
@@ -62,7 +74,31 @@ export function HoldingsPage({ onNewTx, onViewChart, token, accountId, goBack })
         <div className="grid-main">
           {/* Holdings table */}
           <div className="panel">
-            <div className="panel-header"><span className="panel-title">POSITIONS</span></div>
+            <div className="panel-header">
+              <span className="panel-title">POSITIONS</span>
+              <div style={{display:"flex",gap:1}}>
+                {categories.map(c=>(
+                  <button key={c} className={`filter-btn${c===categoryFilter?" active":""}`}
+                    style={{padding:"4px 10px",fontSize:9}}
+                    onClick={()=>setCategoryFilter(c)}
+                  >{c.toUpperCase()}</button>
+                ))}
+              </div>
+            </div>
+            {categoryFilter !== "all" && (
+              <div style={{display:"flex",gap:16,padding:"10px 16px",borderBottom:"1px solid var(--border)",background:"rgba(255,255,255,0.02)"}}>
+                {[
+                  {lbl:"Section Value", val:`$${fTotal.toLocaleString("en-US",{minimumFractionDigits:2})}`, cls:"amber"},
+                  {lbl:"Section Cost",  val:`$${fCost.toLocaleString("en-US",{minimumFractionDigits:2})}`,  cls:""},
+                  {lbl:"Section Gain/Loss", val:`${fPnl>=0?"+":""}$${Math.abs(fPnl).toLocaleString("en-US",{minimumFractionDigits:2})}`, cls:fPnl>=0?"green":"red"},
+                ].map((s,i)=>(
+                  <div key={i} style={{fontFamily:"var(--font-mono)",fontSize:11}}>
+                    <span style={{color:"var(--muted)",marginRight:6}}>{s.lbl}</span>
+                    <span className={s.cls}>{s.val}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             <div style={{overflowX:"auto"}}>
               <table className="data-table">
                 <thead>
@@ -82,12 +118,12 @@ export function HoldingsPage({ onNewTx, onViewChart, token, accountId, goBack })
                 <tbody>
                   {loading && [0,1,2,3].map(i=><SkeletonRow key={i} cols={10}/>)}
                   {error   && <tr><td colSpan={10}><ApiError message={error} onRetry={refetch}/></td></tr>}
-                  {!loading && !error && holdings.length === 0 && (
+                  {!loading && !error && filtered.length === 0 && (
                     <tr><td colSpan={10} style={{textAlign:"center",padding:"32px 0",fontFamily:"var(--font-mono)",fontSize:12,color:"var(--muted)"}}>
-                      No assets in portfolio
+                      {categoryFilter === "all" ? "No assets in portfolio" : `No ${categoryFilter.toUpperCase()} positions`}
                     </td></tr>
                   )}
-                  {holdings.map(h=>{
+                  {filtered.map(h=>{
                     const val=(h.qty*h.price), pl=(h.price-h.avg)*h.qty, ret=((h.price-h.avg)/h.avg)*100;
                     const weight=(val/total)*100;
                     return (
@@ -136,7 +172,7 @@ export function HoldingsPage({ onNewTx, onViewChart, token, accountId, goBack })
           <div style={{display:"flex",flexDirection:"column",gap:16}}>
             <div className="panel">
               <div className="panel-header"><span className="panel-title">ALLOCATION</span></div>
-              <div className="panel-body"><AllocationDonut holdings={holdings}/></div>
+              <div className="panel-body"><AllocationDonut holdings={filtered}/></div>
             </div>
             <div className="panel">
               <div className="panel-header"><span className="panel-title">PERFORMANCE</span></div>

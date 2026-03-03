@@ -42,6 +42,6 @@ EXPOSE 8000
 # the container when the API stops responding.  Uses curl against the
 # unversioned /health endpoint which is always available.
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
-  CMD curl -f http://localhost:8000/health || exit 1
+  CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
 
 ENTRYPOINT ["/app/entrypoint.sh"]

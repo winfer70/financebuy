@@ -12,10 +12,10 @@ Conventions:
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field
 
 
 # ── User schemas ─────────────────────────────────────────────────────────────
@@ -179,6 +179,7 @@ class HoldingPositionOut(BaseModel):
     current_price: Optional[Decimal] = Field(None, description="Most recent market price.")
     market_value: Decimal = Field(..., max_digits=18, decimal_places=2, description="quantity × current_price.")
     currency: str = Field(..., description="Position currency (ISO 4217).")
+    security_type: Optional[str] = Field(None, description="Asset category (stock, etf, crypto, etc.).")
 
 
 class AccountPortfolioSummary(BaseModel):
@@ -296,3 +297,113 @@ class AuditLogOut(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+# ── Portfolio Manager schemas ─────────────────────────────────────────────────
+
+class PortfolioCreate(BaseModel):
+    """Payload to create a named portfolio."""
+
+    name: str = Field(..., min_length=1, max_length=128, description="Portfolio name.", example="Tech Portfolio")
+    strategy: Optional[str] = Field(None, max_length=2000, description="Optional strategy description.", example="Long-term tech picks")
+
+
+class PortfolioOut(BaseModel):
+    """Serialised portfolio returned by the API."""
+
+    portfolio_id: UUID = Field(..., description="Unique portfolio identifier.")
+    name: str
+    strategy: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+
+class PositionCreate(BaseModel):
+    """Payload to add a single position to a portfolio."""
+
+    ticker: str = Field(..., min_length=1, max_length=20, description="Ticker symbol.", example="AAPL")
+    name: Optional[str] = Field(None, max_length=256, description="Company/security name.", example="Apple Inc.")
+    quantity: Decimal = Field(..., gt=Decimal("0"), max_digits=18, decimal_places=6, description="Number of shares/units.", example="10.0")
+    purchase_date: Optional[datetime] = Field(None, description="Date the position was entered.", example="2023-01-15T00:00:00Z")
+    purchase_price: Decimal = Field(..., gt=Decimal("0"), max_digits=18, decimal_places=2, description="Break-even price per unit.", example="155.00")
+    group_tag: Optional[str] = Field(None, max_length=64, description="Optional group/label for the position.", example="Core")
+    asset_type: str = Field("stock", description="Asset type: stock, crypto, etf, or physical.", example="stock")
+    physical_type: Optional[str] = Field(None, max_length=20, description="Physical asset sub-type: coin or bar.", example="coin")
+    stop_loss: Optional[Decimal] = Field(None, gt=Decimal("0"), max_digits=18, decimal_places=2, description="Stop-loss price trigger.", example="140.00")
+
+
+class PositionOut(BaseModel):
+    """Serialised position returned by the API."""
+
+    position_id: UUID
+    portfolio_id: UUID
+    ticker: str
+    name: Optional[str] = None
+    quantity: Decimal = Field(..., max_digits=18, decimal_places=6)
+    purchase_date: Optional[datetime] = None
+    purchase_price: Decimal = Field(..., max_digits=18, decimal_places=2)
+    group_tag: Optional[str] = None
+    is_excluded: bool
+    asset_type: str = "stock"
+    physical_type: Optional[str] = None
+    stop_loss: Optional[Decimal] = Field(None, max_digits=18, decimal_places=2)
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+
+class PositionUpdate(BaseModel):
+    """Payload for partial position update — all fields optional."""
+
+    quantity: Optional[Decimal] = Field(None, gt=Decimal("0"), max_digits=18, decimal_places=6)
+    purchase_price: Optional[Decimal] = Field(None, gt=Decimal("0"), max_digits=18, decimal_places=2)
+    group_tag: Optional[str] = Field(None, max_length=64)
+    is_excluded: Optional[bool] = None
+    stop_loss: Optional[Decimal] = Field(None, max_digits=18, decimal_places=2)
+
+
+class SellRequest(BaseModel):
+    """Payload for a partial sell — reduces quantity; deletes if fully sold."""
+
+    quantity: Decimal = Field(..., gt=Decimal("0"), max_digits=18, decimal_places=6, description="Units to sell.")
+
+
+# ── Chart Template schemas ────────────────────────────────────────────────────
+
+class ChartTemplateCreate(BaseModel):
+    """Payload to save a chart template."""
+
+    name: str = Field(..., min_length=1, max_length=128, description="Template name.", example="AAPL Fibonacci Setup")
+    symbol: Optional[str] = Field(None, max_length=20, description="Associated ticker symbol (null for universal).")
+    interval: Optional[str] = Field(None, max_length=10, description="Chart interval, e.g. '1d', '1h'.")
+    drawings_json: List[Dict[str, Any]] = Field(default_factory=list, description="Array of drawing objects.")
+    overlays_json: Optional[Dict[str, Any]] = Field(None, description="Overlay configuration (SMA toggles, etc.).")
+
+
+class ChartTemplateOut(BaseModel):
+    """Serialised chart template returned by the API."""
+
+    template_id: UUID
+    name: str
+    symbol: Optional[str] = None
+    interval: Optional[str] = None
+    drawings_json: List[Dict[str, Any]] = Field(default_factory=list)
+    overlays_json: Optional[Dict[str, Any]] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        orm_mode = True
+
+
+class ChartTemplateUpdate(BaseModel):
+    """Payload for partial chart template update."""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=128)
+    symbol: Optional[str] = Field(None, max_length=20)
+    interval: Optional[str] = Field(None, max_length=10)
+    drawings_json: Optional[List[Dict[str, Any]]] = None
+    overlays_json: Optional[Dict[str, Any]] = None

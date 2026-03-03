@@ -7,7 +7,7 @@
  * - AllocationDonut: Donut chart showing portfolio allocation percentages
  */
 
-import { useState, useMemo, useRef, useCallback } from "react";
+import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 
 /**
  * Sparkline: Compact inline chart for quick trend visualization
@@ -204,6 +204,181 @@ export function AllocationDonut({ holdings: holdingsProp = null }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Heatmap: Treemap-style heatmap of portfolio holdings
+ * Tile size = daily volume, color = daily gain (green pos / red neg)
+ */
+function heatColor(chgPct) {
+  const t = Math.min(Math.abs(chgPct) / 5, 1);
+  if (chgPct >= 0) {
+    return `rgb(${Math.round(10 - t * 10)},${Math.round(46 + t * 171)},${Math.round(26 + t * 100)})`;
+  }
+  return `rgb(${Math.round(46 + t * 194)},${Math.round(10 + t * 58)},${Math.round(10 + t * 46)})`;
+}
+
+function squarify(items, rect) {
+  if (!items.length) return [];
+  const totalVal = items.reduce((s, it) => s + it.value, 0);
+  if (totalVal <= 0) return [];
+  const results = [];
+  let remaining = [...items];
+  let { x, y, w, h } = rect;
+
+  while (remaining.length > 0) {
+    const remVal = remaining.reduce((s, it) => s + it.value, 0);
+    const isVert = w >= h;
+    const side = isVert ? h : w;
+
+    let row = [remaining[0]];
+    let rowVal = remaining[0].value;
+
+    const worstAspect = (rItems, rVal) => {
+      const area = (rVal / remVal) * w * h;
+      const rowSide = area / side;
+      let mx = 0;
+      for (const it of rItems) {
+        const dim = (it.value / rVal) * area / rowSide;
+        const aspect = dim > rowSide ? dim / rowSide : rowSide / dim;
+        if (aspect > mx) mx = aspect;
+      }
+      return mx;
+    };
+
+    let bestWorst = worstAspect(row, rowVal);
+    let i = 1;
+    while (i < remaining.length) {
+      row.push(remaining[i]);
+      const newVal = rowVal + remaining[i].value;
+      const w2 = worstAspect(row, newVal);
+      if (w2 > bestWorst) {
+        row.pop();
+        break;
+      }
+      rowVal = newVal;
+      bestWorst = w2;
+      i++;
+    }
+
+    const rowFrac = rowVal / remVal;
+    const rowThickness = isVert ? w * rowFrac : h * rowFrac;
+    let offset = 0;
+    for (const it of row) {
+      const itemFrac = it.value / rowVal;
+      const itemLen = side * itemFrac;
+      if (isVert) {
+        results.push({ ...it, rx: x, ry: y + offset, rw: rowThickness, rh: itemLen });
+      } else {
+        results.push({ ...it, rx: x + offset, ry: y, rw: itemLen, rh: rowThickness });
+      }
+      offset += itemLen;
+    }
+
+    if (isVert) { x += rowThickness; w -= rowThickness; }
+    else { y += rowThickness; h -= rowThickness; }
+    remaining = remaining.slice(row.length);
+  }
+  return results;
+}
+
+export function Heatmap({ holdings = [] }) {
+  const wrapRef = useRef(null);
+  const [dims, setDims] = useState({ w: 600, h: 220 });
+  const [hover, setHover] = useState(null);
+
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      const cr = entries[0].contentRect;
+      if (cr.width > 0) setDims({ w: cr.width, h: 220 });
+    });
+    ro.observe(el);
+    setDims({ w: el.clientWidth || 600, h: 220 });
+    return () => ro.disconnect();
+  }, []);
+
+  const items = useMemo(() => {
+    return holdings
+      .filter(h => (h.volume || 0) > 0)
+      .map(h => ({ symbol: h.symbol, chgPct: h.chgPct || 0, volume: h.volume, value: h.volume }))
+      .sort((a, b) => b.value - a.value);
+  }, [holdings]);
+
+  const tiles = useMemo(() => {
+    if (!items.length || dims.w <= 0) return [];
+    const gap = 2;
+    return squarify(items, { x: gap, y: gap, w: dims.w - gap * 2, h: dims.h - gap * 2 });
+  }, [items, dims]);
+
+  if (!items.length) {
+    return (
+      <div ref={wrapRef} style={{ width: "100%", height: 220, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>
+        NO VOLUME DATA
+      </div>
+    );
+  }
+
+  const fmtVol = v => v >= 1e9 ? (v / 1e9).toFixed(1) + "B" : v >= 1e6 ? (v / 1e6).toFixed(1) + "M" : v >= 1e3 ? (v / 1e3).toFixed(0) + "K" : String(v);
+
+  return (
+    <div ref={wrapRef} style={{ width: "100%", position: "relative" }}>
+      <svg width={dims.w} height={dims.h} viewBox={`0 0 ${dims.w} ${dims.h}`} style={{ display: "block", background: "var(--panel)" }}>
+        {tiles.map((t, i) => {
+          const gap = 1.5;
+          const isHovered = hover === i;
+          return (
+            <g key={t.symbol} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} style={{ cursor: "pointer" }}>
+              <rect
+                x={t.rx + gap} y={t.ry + gap}
+                width={Math.max(0, t.rw - gap * 2)} height={Math.max(0, t.rh - gap * 2)}
+                rx={2}
+                fill={heatColor(t.chgPct)}
+                opacity={isHovered ? 1 : 0.85}
+                stroke={isHovered ? "var(--bright)" : "var(--bg)"}
+                strokeWidth={isHovered ? 1.5 : 0.5}
+              />
+              {t.rw > 40 && t.rh > 24 && (
+                <text
+                  x={t.rx + t.rw / 2} y={t.ry + t.rh / 2 - (t.rh > 40 ? 6 : 0)}
+                  textAnchor="middle" dominantBaseline="central"
+                  fill="#fff" fontSize={t.rw > 80 ? 12 : 10} fontFamily="IBM Plex Mono" fontWeight="600"
+                  style={{ pointerEvents: "none" }}
+                >
+                  {t.symbol}
+                </text>
+              )}
+              {t.rw > 50 && t.rh > 40 && (
+                <text
+                  x={t.rx + t.rw / 2} y={t.ry + t.rh / 2 + 10}
+                  textAnchor="middle" dominantBaseline="central"
+                  fill="rgba(255,255,255,0.8)" fontSize={9} fontFamily="IBM Plex Mono"
+                  style={{ pointerEvents: "none" }}
+                >
+                  {t.chgPct >= 0 ? "+" : ""}{t.chgPct.toFixed(2)}%
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+      {hover !== null && tiles[hover] && (
+        <div style={{
+          position: "absolute", top: 8, right: 8,
+          background: "rgba(14,17,23,0.95)", border: "1px solid var(--border)",
+          padding: "8px 12px", borderRadius: 3, pointerEvents: "none",
+          fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.6, zIndex: 5,
+        }}>
+          <div style={{ color: "var(--bright)", fontWeight: 600, marginBottom: 2 }}>{tiles[hover].symbol}</div>
+          <div style={{ color: tiles[hover].chgPct >= 0 ? "var(--green)" : "var(--red)" }}>
+            {tiles[hover].chgPct >= 0 ? "+" : ""}{tiles[hover].chgPct.toFixed(2)}% TODAY
+          </div>
+          <div style={{ color: "var(--mid)" }}>VOL {fmtVol(tiles[hover].volume)}</div>
+        </div>
+      )}
     </div>
   );
 }

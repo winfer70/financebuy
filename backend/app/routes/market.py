@@ -2,7 +2,7 @@ import asyncio
 import json
 import time
 import urllib.request
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
@@ -29,6 +29,8 @@ class OHLCVBar(BaseModel):
 class OHLCVResponse(BaseModel):
     bars: List[OHLCVBar]
     volume_source: Optional[str] = None  # e.g. "GLD" when ETF volume is used
+    interval: str = "1d"
+    warning: Optional[str] = None
 
 
 class QuoteOut(BaseModel):
@@ -104,6 +106,53 @@ def _resolve_name(ticker: yf.Ticker, sym: str) -> str:
         pass
     _set_cached(f"name:{sym}", name)
     return name
+
+
+# ── Interval mapping ─────────────────────────────────────────────────────────
+# (yf_interval, aggregate_n, max_days)  — None max_days = unlimited
+_INTERVAL_MAP: Dict[str, Tuple[str, int, Optional[int]]] = {
+    "1m":   ("1m",   1, 7),
+    "2m":   ("2m",   1, 60),
+    "3m":   ("1m",   3, 7),
+    "5m":   ("5m",   1, 60),
+    "10m":  ("5m",   2, 60),
+    "15m":  ("15m",  1, 60),
+    "30m":  ("30m",  1, 60),
+    "45m":  ("15m",  3, 60),
+    "1h":   ("60m",  1, 730),
+    "2h":   ("60m",  2, 730),
+    "3h":   ("60m",  3, 730),
+    "4h":   ("60m",  4, 730),
+    "1d":   ("1d",   1, None),
+    "1wk":  ("1wk",  1, None),
+    "1mo":  ("1mo",  1, None),
+    "3mo":  ("3mo",  1, None),
+    "6mo":  ("1mo",  6, None),
+    "12mo": ("1mo", 12, None),
+}
+
+_INTRADAY_INTERVALS = {"1m", "2m", "3m", "5m", "10m", "15m", "30m", "45m", "1h", "2h", "3h", "4h"}
+
+
+def _aggregate_bars(bars: List[OHLCVBar], n: int) -> List[OHLCVBar]:
+    """Group consecutive bars into candles of size n."""
+    result: List[OHLCVBar] = []
+    for i in range(0, len(bars), n):
+        group = bars[i : i + n]
+        if not group:
+            break
+        result.append(
+            OHLCVBar(
+                date=group[0].date,
+                open=group[0].open,
+                high=round(max(b.high for b in group), 2),
+                low=round(min(b.low for b in group), 2),
+                close=group[-1].close,
+                volume=sum(b.volume for b in group),
+                is_earnings=any(b.is_earnings for b in group),
+            )
+        )
+    return result
 
 
 # ── yfinance helpers (synchronous — called via asyncio.to_thread) ────────────
@@ -188,6 +237,76 @@ def _fetch_ohlcv(sym: str, years: int) -> OHLCVResponse:
     )
 
 
+def _fetch_ohlcv_interval(sym: str, interval: str, days: int) -> OHLCVResponse:
+    """Fetch OHLCV data for a symbol at a specific interval.
+
+    Uses the _INTERVAL_MAP to resolve yfinance base interval and aggregation
+    factor.  Clamps `days` to the maximum allowed by yfinance for intraday
+    intervals and returns a warning when clamped.
+    """
+    entry = _INTERVAL_MAP.get(interval)
+    if entry is None:
+        raise ValueError(f"Unsupported interval: {interval}")
+
+    yf_interval, aggregate_n, max_days = entry
+    warning = None
+
+    if max_days is not None and days > max_days:
+        warning = f"{interval} data limited to {max_days} days of history"
+        days = max_days
+
+    is_intraday = interval in _INTRADAY_INTERVALS
+    start = (date.today() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+    ticker = yf.Ticker(sym)
+    hist = ticker.history(start=start, interval=yf_interval, auto_adjust=True)
+    if hist.empty:
+        raise ValueError(f"No data for {sym} at interval {interval}")
+
+    # Fetch ETF volume for futures symbols
+    etf_sym = _FUTURES_TO_ETF.get(sym)
+    etf_vol: Dict[str, int] = {}
+    if etf_sym and not is_intraday:
+        try:
+            etf_hist = yf.Ticker(etf_sym).history(
+                start=start, interval=yf_interval, auto_adjust=True
+            )
+            for dt, row in etf_hist.iterrows():
+                key = dt.strftime("%Y-%m-%dT%H:%M:%S%z") if is_intraday else dt.strftime("%Y-%m-%d")
+                etf_vol[key] = int(row["Volume"])
+        except Exception:
+            etf_sym = None
+
+    bars: List[OHLCVBar] = []
+    for dt, row in hist.iterrows():
+        if is_intraday:
+            date_str = dt.strftime("%Y-%m-%dT%H:%M:%S%z")
+        else:
+            date_str = dt.strftime("%Y-%m-%d")
+        volume = etf_vol.get(date_str, int(row["Volume"])) if etf_vol else int(row["Volume"])
+        bars.append(
+            OHLCVBar(
+                date=date_str,
+                open=round(float(row["Open"]), 2),
+                high=round(float(row["High"]), 2),
+                low=round(float(row["Low"]), 2),
+                close=round(float(row["Close"]), 2),
+                volume=volume,
+                is_earnings=False,
+            )
+        )
+
+    if aggregate_n > 1:
+        bars = _aggregate_bars(bars, aggregate_n)
+
+    return OHLCVResponse(
+        bars=bars,
+        volume_source=etf_sym if etf_vol else None,
+        interval=interval,
+        warning=warning,
+    )
+
+
 def _fetch_symbols_info() -> List[dict]:
     results = []
     for sym in _DEFAULT_SYMBOLS:
@@ -234,6 +353,42 @@ async def get_ohlcv(symbol: str, years: int = Query(default=5, ge=1, le=10),
         result = await asyncio.to_thread(_fetch_ohlcv, sym, years)
     except Exception as exc:
         raise HTTPException(status_code=404, detail=f"Could not fetch OHLCV for '{sym}': {exc}")
+
+    _set_cached(cache_key, result)
+    return result
+
+
+@router.get("/ohlcv_interval/{symbol}", response_model=OHLCVResponse)
+async def get_ohlcv_interval(
+    symbol: str,
+    interval: str = Query(
+        default="1d",
+        description="Candle interval: 1m,2m,3m,5m,10m,15m,30m,45m,1h,2h,3h,4h,1d,1wk,1mo,3mo,6mo,12mo",
+    ),
+    days: int = Query(default=365, ge=1, le=3650, description="Calendar days of history"),
+    current_user=Depends(get_current_user),
+):
+    """Fetch OHLCV data at any supported interval with automatic aggregation."""
+    sym = symbol.upper()
+
+    if interval not in _INTERVAL_MAP:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid interval '{interval}'. Valid: {list(_INTERVAL_MAP.keys())}",
+        )
+
+    cache_key = f"ohlcv_interval:{sym}:{interval}:{days}"
+    cached = _get_cached(cache_key, _OHLCV_TTL)
+    if cached:
+        return cached
+
+    try:
+        result = await asyncio.to_thread(_fetch_ohlcv_interval, sym, interval, days)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Could not fetch OHLCV for '{sym}' at interval '{interval}': {exc}",
+        )
 
     _set_cached(cache_key, result)
     return result
@@ -300,4 +455,146 @@ async def search_symbols(
         results = []
 
     _set_cached(cache_key, results)
+    return results
+
+
+# ── Bulk quotes ───────────────────────────────────────────────────────────────
+
+@router.get("/bulk_quotes", response_model=List[QuoteOut])
+async def get_bulk_quotes(
+    symbols: str = Query(..., description="Comma-separated ticker symbols, e.g. AAPL,MSFT,TSLA"),
+    current_user=Depends(get_current_user),
+):
+    """Fetch quotes for multiple symbols in one request.
+
+    Uses the same per-symbol cache as /quote/{symbol} so repeated calls
+    for the same ticker within the TTL are free.  Symbols that fail to
+    fetch are silently skipped.
+    """
+    sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    if not sym_list:
+        raise HTTPException(status_code=400, detail="No symbols provided.")
+    if len(sym_list) > 50:
+        raise HTTPException(status_code=400, detail="Maximum 50 symbols per request.")
+
+    results: List[QuoteOut] = []
+    for sym in sym_list:
+        cache_key = f"quote:{sym}"
+        cached = _get_cached(cache_key, _quote_ttl())
+        if cached:
+            results.append(cached)
+            continue
+        try:
+            quote = await asyncio.to_thread(_fetch_quote, sym)
+            _set_cached(cache_key, quote)
+            results.append(quote)
+        except Exception:
+            pass  # Skip symbols that can't be fetched
+    return results
+
+
+# ── Price change ──────────────────────────────────────────────────────────────
+
+_PRICE_CHANGE_TTL = 300  # 5 minutes
+_SMA_TTL = 300  # 5 minutes
+
+_PERIOD_DAYS_MAP: Dict[str, int] = {
+    "1D": 5,    # ~5 calendar days to ensure at least one prior trading day
+    "1W": 10,
+    "1M": 35,
+    "3M": 95,
+    "1Y": 370,
+}
+
+
+def _fetch_price_change(sym: str, period: str) -> dict:
+    """Compute percentage price change for a symbol over the given period.
+
+    Fetches history from (today - period_days) to today and computes:
+        change_pct = (last_close - first_close) / first_close * 100
+
+    Returns 0.0 if insufficient data is available.
+    """
+    days = _PERIOD_DAYS_MAP[period]
+    start = (date.today() - timedelta(days=days)).strftime("%Y-%m-%d")
+    hist = yf.Ticker(sym).history(start=start, auto_adjust=True)
+    if len(hist) < 2:
+        return {"symbol": sym, "period": period, "change_pct": 0.0}
+    first_close = float(hist.iloc[0]["Close"])
+    last_close = float(hist.iloc[-1]["Close"])
+    if first_close == 0:
+        return {"symbol": sym, "period": period, "change_pct": 0.0}
+    change_pct = round((last_close - first_close) / first_close * 100, 2)
+    return {"symbol": sym, "period": period, "change_pct": change_pct}
+
+
+@router.get("/price_change")
+async def get_price_change(
+    symbol: str = Query(..., description="Ticker symbol"),
+    period: str = Query(..., description="Period: 1D, 1W, 1M, 3M, or 1Y"),
+    current_user=Depends(get_current_user),
+):
+    """Return the percentage price change for a symbol over a given period."""
+    sym = symbol.upper()
+    if period not in _PERIOD_DAYS_MAP:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid period '{period}'. Valid values: {list(_PERIOD_DAYS_MAP.keys())}",
+        )
+
+    cache_key = f"price_change:{sym}:{period}"
+    cached = _get_cached(cache_key, _PRICE_CHANGE_TTL)
+    if cached:
+        return cached
+
+    try:
+        result = await asyncio.to_thread(_fetch_price_change, sym, period)
+    except Exception:
+        result = {"symbol": sym, "period": period, "change_pct": 0.0}
+
+    _set_cached(cache_key, result)
+    return result
+
+
+# ── SMA (Simple Moving Average) ─────────────────────────────────────────────
+
+def _fetch_sma(sym: str, period: int) -> dict:
+    """Compute the Simple Moving Average for a symbol over `period` trading days."""
+    # ~1.5 calendar days per trading day + buffer
+    cal_days = int(period * 1.5) + 60
+    start = (date.today() - timedelta(days=cal_days)).strftime("%Y-%m-%d")
+    hist = yf.Ticker(sym).history(start=start, auto_adjust=True)
+    if len(hist) < period:
+        return {"symbol": sym, "period": period, "sma": None}
+    closes = hist["Close"].values[-period:]
+    sma = round(float(sum(closes) / len(closes)), 2)
+    return {"symbol": sym, "period": period, "sma": sma}
+
+
+@router.get("/bulk_sma", response_model=List[dict])
+async def get_bulk_sma(
+    symbols: str = Query(..., description="Comma-separated ticker symbols"),
+    period: int = Query(default=50, ge=5, le=200, description="SMA period in trading days"),
+    current_user=Depends(get_current_user),
+):
+    """Return SMA values for multiple symbols in one request."""
+    sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    if not sym_list:
+        raise HTTPException(status_code=400, detail="No symbols provided.")
+    if len(sym_list) > 50:
+        raise HTTPException(status_code=400, detail="Maximum 50 symbols per request.")
+
+    results: List[dict] = []
+    for sym in sym_list:
+        cache_key = f"sma:{sym}:{period}"
+        cached = _get_cached(cache_key, _SMA_TTL)
+        if cached:
+            results.append(cached)
+            continue
+        try:
+            sma_result = await asyncio.to_thread(_fetch_sma, sym, period)
+            _set_cached(cache_key, sma_result)
+            results.append(sma_result)
+        except Exception:
+            results.append({"symbol": sym, "period": period, "sma": None})
     return results

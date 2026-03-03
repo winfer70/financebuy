@@ -41,12 +41,13 @@ import { ForgotPasswordPage } from "./pages/auth/ForgotPasswordPage";
 import { ResetPasswordPage }  from "./pages/auth/ResetPasswordPage";
 
 /* ── App pages ────────────────────────────────────────────────────────────── */
-import { DashboardPage }    from "./pages/DashboardPage";
-import { TransactionsPage } from "./pages/TransactionsPage";
-import { HoldingsPage }     from "./pages/HoldingsPage";
-import { OrdersPage }       from "./pages/OrdersPage";
-import { ChartsPage }       from "./pages/ChartsPage";
-import { ImportPage }       from "./pages/ImportPage";
+import { DashboardPage }          from "./pages/DashboardPage";
+import { TransactionsPage }       from "./pages/TransactionsPage";
+import { HoldingsPage }           from "./pages/HoldingsPage";
+import { OrdersPage }             from "./pages/OrdersPage";
+import { ChartsPage }             from "./pages/ChartsPage";
+import { ImportPage }             from "./pages/ImportPage";
+import { PortfolioManagerPage }   from "./pages/PortfolioManagerPage";
 
 /* ── API ─────────────────────────────────────────────────────────────────── */
 import api from "./api/client";
@@ -101,12 +102,12 @@ function AppShell({ page, setPage, goBack, toasts, addToast }) {
 
   /* ── Sidebar navigation items ───────────────────────────────────────── */
   const NAV = [
-    { id: "dashboard",    label: "DASHBOARD",    Icon: Ic.dashboard    },
-    { id: "transactions", label: "TRANSACTIONS", Icon: Ic.transactions },
-    { id: "holdings",     label: "HOLDINGS",     Icon: Ic.holdings     },
-    { id: "orders",       label: "ORDERS",       Icon: Ic.orders       },
-    { id: "charts",       label: "CHARTS",       Icon: Ic.charts       },
-    { id: "import",       label: "IMPORT",       Icon: Ic.import       },
+    { id: "dashboard",        label: "DASHBOARD",    Icon: Ic.dashboard    },
+    { id: "transactions",     label: "TRANSACTIONS", Icon: Ic.transactions },
+    { id: "holdings",         label: "HOLDINGS",     Icon: Ic.holdings     },
+    { id: "orders",           label: "ORDERS",       Icon: Ic.orders       },
+    { id: "charts",           label: "CHARTS",       Icon: Ic.charts       },
+    { id: "portfolio-manager",label: "PORTFOLIO",    Icon: Ic.portfolio    },
   ];
 
   return (
@@ -238,6 +239,12 @@ function AppShell({ page, setPage, goBack, toasts, addToast }) {
             token={authToken}
             accountId={accountId}
             goBack={goBack}
+          />
+        )}
+        {page === "portfolio-manager" && (
+          <PortfolioManagerPage
+            token={authToken}
+            onViewChart={navigateToChart}
           />
         )}
 
