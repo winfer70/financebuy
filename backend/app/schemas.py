@@ -411,12 +411,70 @@ class ChartTemplateUpdate(BaseModel):
 
 # ── News schemas ─────────────────────────────────────────────────────────────
 
-class NewsArticleOut(BaseModel):
-    """Serialised news article returned by the news aggregation endpoints.
 
-    Each article is associated with zero or more ticker symbols and carries
-    a sentiment classification produced by the FinBERT model (or a neutral
-    default when the model is unavailable).
+class TickerScoreOut(BaseModel):
+    """Per-ticker impact score returned alongside a news article."""
+
+    ticker: str = Field(..., description="Stock ticker symbol (e.g. 'NVDA').")
+    score: int = Field(
+        ...,
+        ge=-5,
+        le=5,
+        description="Ticker-specific impact score (-5 extremely bearish to +5 extremely bullish).",
+    )
+    reasoning: Optional[str] = Field(
+        None,
+        description="One-sentence LLM explanation of the impact on this ticker.",
+    )
+
+
+class TickerScoreIngest(BaseModel):
+    """Per-ticker score submitted by the LLM worker via the internal API."""
+
+    ticker: str = Field(
+        ..., min_length=1, max_length=20, description="Ticker symbol."
+    )
+    score: int = Field(
+        ..., ge=-5, le=5, description="Impact score for this ticker (-5 to +5)."
+    )
+    reasoning: Optional[str] = Field(
+        None, description="One-sentence LLM explanation."
+    )
+
+
+class NewsArticleIngest(BaseModel):
+    """Single article submitted by the LLM worker via POST /api/v1/internal/news."""
+
+    url: str = Field(..., description="Full URL to the original article.")
+    title: str = Field(..., description="Article headline text.")
+    summary: Optional[str] = Field(
+        None, max_length=500, description="Short description / first ~200 chars."
+    )
+    source: str = Field(
+        ..., description="Source identifier: 'yahoo', 'google', 'finviz', or 'marketwatch'.",
+    )
+    published_at: Optional[datetime] = Field(
+        None, description="Original publication time (ISO-8601 with timezone)."
+    )
+    general_score: int = Field(
+        ..., ge=-5, le=5, description="General market impact score (-5 to +5)."
+    )
+    general_reasoning: Optional[str] = Field(
+        None, description="One-sentence LLM explanation of the general market impact."
+    )
+    tickers: List[TickerScoreIngest] = Field(
+        default_factory=list,
+        description="Per-ticker impact scores identified by the LLM.",
+    )
+
+
+class NewsArticleOut(BaseModel):
+    """Serialised news article returned by the news feed endpoints.
+
+    Each article carries a general market impact score from the LLM and
+    optionally per-ticker scores.  The ``score`` and ``reasoning`` fields
+    reflect the most relevant score: ticker-specific when the article
+    matches a user's portfolio, otherwise the general market score.
     """
 
     title: str = Field(..., description="Article headline text.")
@@ -428,26 +486,105 @@ class NewsArticleOut(BaseModel):
     published_at: Optional[datetime] = Field(
         None, description="UTC publication timestamp, or null if unavailable."
     )
-    tickers: List[str] = Field(
+    score: int = Field(
+        0,
+        ge=-5,
+        le=5,
+        description="Most relevant impact score: ticker-specific if in portfolio, otherwise general (-5 to +5).",
+    )
+    reasoning: Optional[str] = Field(
+        None,
+        description="LLM explanation for the displayed score.",
+    )
+    ticker_scores: List[TickerScoreOut] = Field(
         default_factory=list,
-        description="Ticker symbols associated with this article.",
+        description="All per-ticker impact scores for drill-down.",
     )
     in_portfolio: bool = Field(
         False,
         description="True if any associated ticker belongs to the user's portfolios.",
     )
-    sentiment: str = Field(
-        "neutral",
-        description="Sentiment label: 'positive', 'negative', or 'neutral'.",
-    )
-    sentiment_score: float = Field(
-        0.0,
-        ge=0.0,
-        le=1.0,
-        description="Sentiment confidence score (0.0–1.0).",
-    )
     summary: Optional[str] = Field(
         None,
-        max_length=200,
-        description="First ~200 characters of the article body, if available.",
+        max_length=500,
+        description="Short description of the article, if available.",
     )
+
+
+# ── Feedback loop schemas ────────────────────────────────────────────────────
+
+
+class ScoreOutcomeOut(BaseModel):
+    """Serialised score outcome returned by the feedback data endpoint.
+
+    Includes denormalised article fields so the learner can analyse patterns
+    without a separate article fetch.
+    """
+
+    outcome_id: UUID
+    article_id: UUID
+    ticker: str = Field(..., description="Ticker symbol, or 'SPY' for general score.")
+    score_type: str = Field(..., description="'general' or 'ticker'.")
+    predicted_score: int = Field(..., ge=-5, le=5, description="Original LLM score.")
+    predicted_reasoning: Optional[str] = None
+    price_at_score: Optional[Decimal] = Field(None, description="Close price on scoring day.")
+    price_after: Optional[Decimal] = Field(None, description="Close price next trading day.")
+    actual_change_pct: Optional[Decimal] = Field(None, description="Actual % change.")
+    accuracy_grade: str = Field(..., description="'correct', 'close', 'wrong', or 'opposite'.")
+    scored_at: datetime
+    checked_at: datetime
+    # Denormalised article context for the learner.
+    article_title: Optional[str] = None
+    article_summary: Optional[str] = None
+    article_source: Optional[str] = None
+
+    class Config:
+        orm_mode = True
+
+
+class ScoringRuleCreate(BaseModel):
+    """Payload from the learner to submit new calibration rules."""
+
+    rules_text: str = Field(
+        ..., min_length=10, description="Scoring rules to inject into the LLM prompt."
+    )
+    analysis_summary: Optional[str] = Field(
+        None, description="Summary of patterns the learner found in the data."
+    )
+    sample_size: Optional[int] = Field(
+        None, ge=0, description="Number of outcome records analysed."
+    )
+    accuracy_before: Optional[Decimal] = Field(
+        None, description="Overall accuracy % before this rule set."
+    )
+
+
+class ScoringRuleOut(BaseModel):
+    """Serialised scoring rule returned by the rules endpoint."""
+
+    rule_id: UUID
+    rule_version: int
+    rules_text: str
+    analysis_summary: Optional[str] = None
+    sample_size: Optional[int] = None
+    accuracy_before: Optional[Decimal] = None
+    is_active: bool
+    generated_at: datetime
+
+    class Config:
+        orm_mode = True
+
+
+class TrainingPairOut(BaseModel):
+    """Export format for future LoRA fine-tuning (AppREDACTED 3 migration).
+
+    Each record maps an article input to the original LLM prediction and a
+    corrected output derived from actual price movements.
+    """
+
+    instruction: str = Field(..., description="System prompt for the model.")
+    input_text: str = Field(..., description="Article headline + summary.")
+    original_output: Dict[str, Any] = Field(..., description="Original LLM prediction.")
+    corrected_output: Dict[str, Any] = Field(..., description="Score derived from actual price data.")
+    actual_change_pct: Optional[Decimal] = None
+    accuracy_grade: str

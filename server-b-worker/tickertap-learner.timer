@@ -1,0 +1,33 @@
+# tickertap-learner.timer — weekly timer for the TickerTap scoring learner.
+#
+# Triggers tickertap-learner.service every Sunday at 02:00 local time.
+# This schedule ensures a full week of outcome data is available for analysis
+# and avoids running during market hours.
+#
+# Installation:
+#   1. Copy this file + tickertap-learner.service to /etc/systemd/system/
+#   2. sudo systemctl daemon-reload
+#   3. sudo systemctl enable tickertap-learner.timer
+#   4. sudo systemctl start tickertap-learner.timer
+#
+# Check status:
+#   systemctl list-timers --all | grep learner
+#
+# Logs:
+#   journalctl -u tickertap-learner -e
+
+[Unit]
+Description=Weekly trigger for TickerTap Scoring Learner
+
+[Timer]
+# Run every Sunday at 02:00 local time.
+OnCalendar=Sun *-*-* 02:00:00
+
+# If the system was off when the timer should have fired, run on next boot.
+Persistent=true
+
+# Add small random delay to avoid thundering herd if multiple services fire.
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

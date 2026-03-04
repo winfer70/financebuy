@@ -207,7 +207,7 @@ body::before {
 .grid-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; background: var(--border); margin-bottom: 1px; }
 .grid-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .grid-3col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
-.grid-main { display: grid; grid-template-columns: 1fr 320px; gap: 16px; }
+.grid-main { display: grid; grid-template-columns: 1fr 320px; gap: 16px; align-items: start; }
 
 /* ── Stat block ── */
 .stat-block {
@@ -346,13 +346,13 @@ body::before {
 
 /* ── Donut ── */
 .donut-wrap { display: flex; flex-direction: column; align-items: center; gap: 12px; }
-.donut-legend { width: 100%; display: flex; flex-direction: column; gap: 5px; }
+.donut-legend { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 3px 6px; }
 .donut-row {
-  display: flex; align-items: center; gap: 8px;
-  font-family: var(--font-mono); font-size: 11px;
+  display: flex; align-items: center; gap: 5px;
+  font-family: var(--font-mono); font-size: 10px;
 }
 .donut-swatch { width: 8px; height: 2px; flex-shrink: 0; }
-.donut-sym { color: var(--bright); font-weight: 500; min-width: 40px; }
+.donut-sym { color: var(--bright); font-weight: 500; min-width: 32px; }
 .donut-pct { color: var(--muted); margin-left: auto; }
 .donut-val { color: var(--amber); min-width: 70px; text-align: right; }
 

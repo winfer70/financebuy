@@ -210,12 +210,16 @@ const api = {
     apiFetch(`/chart-templates/${templateId}`, { method: "DELETE", token }),
 
   // ── News ──────────────────────────────────────────────────────────────────
-  /** @param {string} token - JWT access token */
+  /**
+   * Fetch the LLM-scored news feed from the DB.
+   * Returns articles with score (-5 to +5), reasoning, and ticker_scores.
+   * @param {string} token - JWT access token
+   */
   getNews: (token) =>
     apiFetch("/news/feed", { token }),
 
   /**
-   * On-demand deep fetch of news for a single ticker.
+   * Fetch news articles filtered by a single ticker symbol.
    * @param {string} ticker - stock ticker symbol (e.g. "AAPL")
    * @param {string} token  - JWT access token
    */
