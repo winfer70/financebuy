@@ -5,7 +5,7 @@
 Replace the current live-fetch-and-score news system with a two-server architecture:
 
 - **Server A (app server)** — Stores and serves pre-scored articles from PostgreSQL. No LLM, no live RSS fetching on request.
-- **Server B (REDACTED, i5/16GB)** — Runs Ollama + Llama 3 8B Q4. A worker script fetches news, scores with the LLM, and posts results to Server A via HTTP API. Falls back to a local SQLite queue when Server A is unreachable.
+- **Server B (<LLM_SERVER_IP>, i5/16GB)** — Runs Ollama + Llama 3 8B Q4. A worker script fetches news, scores with the LLM, and posts results to Server A via HTTP API. Falls back to a local SQLite queue when Server A is unreachable.
 
 ---
 
@@ -13,7 +13,7 @@ Replace the current live-fetch-and-score news system with a two-server architect
 
 ### 1.1 Install Ollama on Server B
 
-SSH into `REDACTED` and run:
+SSH into `<LLM_SERVER_IP>` and run:
 
 ```bash
 curl -fsSL https://ollama.com/install.sh | sh
@@ -140,7 +140,7 @@ New schema: `TickerScoreOut` with fields `ticker`, `score`, `reasoning`.
 File: `backend/app/routes/news.py` — Add new endpoint.
 
 - **Auth**: Shared secret via `X-Internal-Key` header (stored in `.env` / `.env.prod`)
-- **IP restriction**: Only accept from `REDACTED` (checked via `request.client.host`)
+- **IP restriction**: Only accept from `<LLM_SERVER_IP>` (checked via `request.client.host`)
 - **Request body**: List of articles, each with:
   ```json
   {
@@ -208,7 +208,7 @@ while True:
        a. Build LLM prompt with headline + summary
        b. Call Ollama API (http://localhost:11434/api/generate)
        c. Parse structured JSON response
-       d. POST to Server A (http://192.168.0.x:8000/api/v1/internal/news)
+       d. POST to Server A (http://<APP_SERVER_IP>:8000/api/v1/internal/news)
        e. On failure → queue to local SQLite
     5. Sleep (10 min during market hours, 30 min off-hours)
 ```
@@ -274,7 +274,7 @@ WorkingDirectory=/home/<username>/tickertap-worker
 ExecStart=/home/<username>/tickertap-worker/venv/bin/python worker.py
 Restart=always
 RestartSec=30
-Environment=TICKERTAP_API_URL=http://192.168.0.x:8000
+Environment=TICKERTAP_API_URL=http://<APP_SERVER_IP>:8000
 Environment=TICKERTAP_INTERNAL_KEY=<same key as Server A>
 
 [Install]
@@ -354,14 +354,14 @@ Allow PostgreSQL and the internal API only from Server B:
 
 ```bash
 # Allow Server B to reach the internal news endpoint (port 8000)
-sudo ufw allow from REDACTED to any port 8000 proto tcp
+sudo ufw allow from <LLM_SERVER_IP> to any port 8000 proto tcp
 ```
 
 ### 8.2 IP Check in Internal Endpoint
 
 The `POST /api/v1/internal/news` endpoint validates:
 1. `X-Internal-Key` header matches the env var
-2. `request.client.host` is `REDACTED`
+2. `request.client.host` is `<LLM_SERVER_IP>`
 
 Both must pass. Reject with 403 otherwise.
 
@@ -407,7 +407,7 @@ SERVER A (App Server):
 14. Run Alembic migration on the database
 15. Rebuild Docker image (now ~500MB without torch)
 
-SERVER B (LLM Server — REDACTED):
+SERVER B (LLM Server — <LLM_SERVER_IP>):
 16. Install Ollama
 17. Pull llama3:8b-instruct-q4_K_M model
 18. Create ~/tickertap-worker/ project directory with venv
@@ -423,7 +423,7 @@ FRONTEND:
 26. Build frontend (npx vite build)
 
 NETWORK & SECURITY:
-27. Configure firewall rule on Server A (allow REDACTED)
+27. Configure firewall rule on Server A (allow <LLM_SERVER_IP>)
 28. Verify internal endpoint rejects unauthorized requests
 
 VALIDATION:
