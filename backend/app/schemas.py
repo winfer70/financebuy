@@ -407,3 +407,47 @@ class ChartTemplateUpdate(BaseModel):
     interval: Optional[str] = Field(None, max_length=10)
     drawings_json: Optional[List[Dict[str, Any]]] = None
     overlays_json: Optional[Dict[str, Any]] = None
+
+
+# ── News schemas ─────────────────────────────────────────────────────────────
+
+class NewsArticleOut(BaseModel):
+    """Serialised news article returned by the news aggregation endpoints.
+
+    Each article is associated with zero or more ticker symbols and carries
+    a sentiment classification produced by the FinBERT model (or a neutral
+    default when the model is unavailable).
+    """
+
+    title: str = Field(..., description="Article headline text.")
+    url: str = Field(..., description="Full URL to the original article.")
+    source: str = Field(
+        ...,
+        description="Source identifier: 'yahoo', 'google', 'finviz', or 'marketwatch'.",
+    )
+    published_at: Optional[datetime] = Field(
+        None, description="UTC publication timestamp, or null if unavailable."
+    )
+    tickers: List[str] = Field(
+        default_factory=list,
+        description="Ticker symbols associated with this article.",
+    )
+    in_portfolio: bool = Field(
+        False,
+        description="True if any associated ticker belongs to the user's portfolios.",
+    )
+    sentiment: str = Field(
+        "neutral",
+        description="Sentiment label: 'positive', 'negative', or 'neutral'.",
+    )
+    sentiment_score: float = Field(
+        0.0,
+        ge=0.0,
+        le=1.0,
+        description="Sentiment confidence score (0.0–1.0).",
+    )
+    summary: Optional[str] = Field(
+        None,
+        max_length=200,
+        description="First ~200 characters of the article body, if available.",
+    )

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 import time
 import urllib.request
 from datetime import date, datetime, timedelta
@@ -168,18 +169,38 @@ _FUTURES_TO_ETF = {
     "HG=F": "CPER",  # Copper futures → US Copper Index Fund
 }
 
+
+def _safe_float(value, default: float = 0.0) -> float:
+    """Sanitize a numeric value from yfinance, replacing NaN/Inf with a default.
+
+    Args:
+        value: Raw numeric value from yfinance fast_info or history data.
+        default: Fallback value when the input is non-finite (NaN, Inf, -Inf).
+
+    Returns:
+        A finite float safe for JSON serialization.
+    """
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return default
+    return f if math.isfinite(f) else default
+
+
 def _fetch_quote(sym: str) -> QuoteOut:
     ticker = yf.Ticker(sym)
     fi = ticker.fast_info
 
     # Use fast_info for real-time quote data (faster and more reliable than
     # history() which can intermittently return empty/stale data).
-    price = round(float(fi.last_price), 2)
-    prev_close = round(float(fi.regular_market_previous_close), 2)
-    open_price = round(float(fi.open), 2)
-    high = round(float(fi.day_high), 2)
-    low = round(float(fi.day_low), 2)
-    volume = int(fi.last_volume)
+    # _safe_float guards against NaN/Inf values that yfinance can return
+    # for futures, crypto, or tickers outside trading hours.
+    price = round(_safe_float(fi.last_price), 2)
+    prev_close = round(_safe_float(fi.regular_market_previous_close), 2)
+    open_price = round(_safe_float(fi.open), 2)
+    high = round(_safe_float(fi.day_high), 2)
+    low = round(_safe_float(fi.day_low), 2)
+    volume = int(_safe_float(fi.last_volume))
 
     chg = round(price - prev_close, 2)
     chg_pct = round(chg / prev_close * 100, 2) if prev_close else 0.0
@@ -224,10 +245,10 @@ def _fetch_ohlcv(sym: str, years: int) -> OHLCVResponse:
         volume = etf_vol.get(date_str, int(row["Volume"])) if etf_vol else int(row["Volume"])
         bars.append(OHLCVBar(
             date=date_str,
-            open=round(float(row["Open"]), 2),
-            high=round(float(row["High"]), 2),
-            low=round(float(row["Low"]), 2),
-            close=round(float(row["Close"]), 2),
+            open=round(_safe_float(row["Open"]), 2),
+            high=round(_safe_float(row["High"]), 2),
+            low=round(_safe_float(row["Low"]), 2),
+            close=round(_safe_float(row["Close"]), 2),
             volume=volume,
             is_earnings=False,
         ))
@@ -287,10 +308,10 @@ def _fetch_ohlcv_interval(sym: str, interval: str, days: int) -> OHLCVResponse:
         bars.append(
             OHLCVBar(
                 date=date_str,
-                open=round(float(row["Open"]), 2),
-                high=round(float(row["High"]), 2),
-                low=round(float(row["Low"]), 2),
-                close=round(float(row["Close"]), 2),
+                open=round(_safe_float(row["Open"]), 2),
+                high=round(_safe_float(row["High"]), 2),
+                low=round(_safe_float(row["Low"]), 2),
+                close=round(_safe_float(row["Close"]), 2),
                 volume=volume,
                 is_earnings=False,
             )
@@ -313,7 +334,7 @@ def _fetch_symbols_info() -> List[dict]:
         try:
             ticker = yf.Ticker(sym)
             fi = ticker.fast_info
-            price = round(float(fi.last_price), 2)
+            price = round(_safe_float(fi.last_price), 2)
             name = _resolve_name(ticker, sym)
             results.append({"symbol": sym, "name": name, "price": price})
         except Exception:
@@ -520,12 +541,13 @@ def _fetch_price_change(sym: str, period: str) -> dict:
     hist = yf.Ticker(sym).history(start=start, auto_adjust=True)
     if len(hist) < 2:
         return {"symbol": sym, "period": period, "change_pct": 0.0}
-    first_close = float(hist.iloc[0]["Close"])
-    last_close = float(hist.iloc[-1]["Close"])
+    first_close = _safe_float(hist.iloc[0]["Close"])
+    last_close = _safe_float(hist.iloc[-1]["Close"])
     if first_close == 0:
         return {"symbol": sym, "period": period, "change_pct": 0.0}
     change_pct = round((last_close - first_close) / first_close * 100, 2)
-    return {"symbol": sym, "period": period, "change_pct": change_pct}
+    # Guard the final result in case arithmetic still produced a non-finite value
+    return {"symbol": sym, "period": period, "change_pct": _safe_float(change_pct)}
 
 
 @router.get("/price_change")
@@ -567,7 +589,8 @@ def _fetch_sma(sym: str, period: int) -> dict:
     if len(hist) < period:
         return {"symbol": sym, "period": period, "sma": None}
     closes = hist["Close"].values[-period:]
-    sma = round(float(sum(closes) / len(closes)), 2)
+    sma_val = _safe_float(sum(closes) / len(closes))
+    sma = round(sma_val, 2) if sma_val != 0.0 else None
     return {"symbol": sym, "period": period, "sma": sma}
 
 

@@ -43,11 +43,11 @@ import { ResetPasswordPage }  from "./pages/auth/ResetPasswordPage";
 /* ── App pages ────────────────────────────────────────────────────────────── */
 import { DashboardPage }          from "./pages/DashboardPage";
 import { TransactionsPage }       from "./pages/TransactionsPage";
-import { HoldingsPage }           from "./pages/HoldingsPage";
 import { OrdersPage }             from "./pages/OrdersPage";
 import { ChartsPage }             from "./pages/ChartsPage";
 import { ImportPage }             from "./pages/ImportPage";
 import { PortfolioManagerPage }   from "./pages/PortfolioManagerPage";
+import { NewsPage }               from "./pages/NewsPage";
 
 /* ── API ─────────────────────────────────────────────────────────────────── */
 import api from "./api/client";
@@ -66,6 +66,7 @@ function AppShell({ page, setPage, goBack, toasts, addToast }) {
   const { authToken, authUser, accountId, handleLogout } = useAuth();
   const [showTxModal,  setShowTxModal]  = useState(false);
   const [chartSymbol,  setChartSymbol]  = useState(null);
+  const [newsSymbol,   setNewsSymbol]   = useState(null);
   const marketStatus = useMarketStatus();
 
   /* ── Transaction submit (creates a real transaction or queues in demo) ── */
@@ -100,13 +101,19 @@ function AppShell({ page, setPage, goBack, toasts, addToast }) {
     setPage("charts");
   };
 
+  /* ── Navigate to news filtered for a specific ticker ─────────────── */
+  const navigateToNews = (symbol) => {
+    setNewsSymbol(symbol || null);
+    setPage("news");
+  };
+
   /* ── Sidebar navigation items ───────────────────────────────────────── */
   const NAV = [
     { id: "dashboard",        label: "DASHBOARD",    Icon: Ic.dashboard    },
     { id: "transactions",     label: "TRANSACTIONS", Icon: Ic.transactions },
-    { id: "holdings",         label: "HOLDINGS",     Icon: Ic.holdings     },
     { id: "orders",           label: "ORDERS",       Icon: Ic.orders       },
     { id: "charts",           label: "CHARTS",       Icon: Ic.charts       },
+    { id: "news",             label: "NEWS",         Icon: Ic.news         },
     { id: "portfolio-manager",label: "PORTFOLIO",    Icon: Ic.portfolio    },
   ];
 
@@ -197,22 +204,12 @@ function AppShell({ page, setPage, goBack, toasts, addToast }) {
           <DashboardPage
             onNewTx={() => setShowTxModal(true)}
             token={authToken}
-            accountId={accountId}
             setPage={setPage}
           />
         )}
         {page === "transactions" && (
           <TransactionsPage
             onNewTx={() => setShowTxModal(true)}
-            token={authToken}
-            accountId={accountId}
-            goBack={goBack}
-          />
-        )}
-        {page === "holdings"     && (
-          <HoldingsPage
-            onNewTx={() => setShowTxModal(true)}
-            onViewChart={navigateToChart}
             token={authToken}
             accountId={accountId}
             goBack={goBack}
@@ -233,6 +230,12 @@ function AppShell({ page, setPage, goBack, toasts, addToast }) {
             goBack={goBack}
           />
         )}
+        {page === "news"         && (
+          <NewsPage
+            token={authToken}
+            initialTicker={newsSymbol}
+          />
+        )}
         {page === "import"       && (
           <ImportPage
             addToast={addToast}
@@ -245,6 +248,7 @@ function AppShell({ page, setPage, goBack, toasts, addToast }) {
           <PortfolioManagerPage
             token={authToken}
             onViewChart={navigateToChart}
+            onViewNews={navigateToNews}
           />
         )}
 

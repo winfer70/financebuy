@@ -286,7 +286,10 @@ function squarify(items, rect) {
 
 export function Heatmap({ holdings = [] }) {
   const wrapRef = useRef(null);
-  const [dims, setDims] = useState({ w: 600, h: 220 });
+  /* Taller container (280px) gives small-cap tiles more vertical room */
+  const MAP_H = 280;
+  const LEGEND_H = 24;
+  const [dims, setDims] = useState({ w: 600, h: MAP_H });
   const [hover, setHover] = useState(null);
 
   useEffect(() => {
@@ -294,16 +297,16 @@ export function Heatmap({ holdings = [] }) {
     if (!el) return;
     const ro = new ResizeObserver(entries => {
       const cr = entries[0].contentRect;
-      if (cr.width > 0) setDims({ w: cr.width, h: 220 });
+      if (cr.width > 0) setDims({ w: cr.width, h: MAP_H });
     });
     ro.observe(el);
-    setDims({ w: el.clientWidth || 600, h: 220 });
+    setDims({ w: el.clientWidth || 600, h: MAP_H });
     return () => ro.disconnect();
   }, []);
 
   const items = useMemo(() => {
     return holdings
-      .filter(h => (h.volume || 0) > 0)
+      .filter(h => (h.volume || 0) > 0 && !h.symbol.endsWith("-USD"))
       .map(h => ({ symbol: h.symbol, chgPct: h.chgPct || 0, volume: h.volume, value: h.volume }))
       .sort((a, b) => b.value - a.value);
   }, [holdings]);
@@ -316,7 +319,7 @@ export function Heatmap({ holdings = [] }) {
 
   if (!items.length) {
     return (
-      <div ref={wrapRef} style={{ width: "100%", height: 220, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>
+      <div ref={wrapRef} style={{ width: "100%", height: MAP_H, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>
         NO VOLUME DATA
       </div>
     );
@@ -324,47 +327,103 @@ export function Heatmap({ holdings = [] }) {
 
   const fmtVol = v => v >= 1e9 ? (v / 1e9).toFixed(1) + "B" : v >= 1e6 ? (v / 1e6).toFixed(1) + "M" : v >= 1e3 ? (v / 1e3).toFixed(0) + "K" : String(v);
 
+  /**
+   * Adaptive font size for the ticker symbol based on tile dimensions.
+   * Ensures even small tiles show at least a compact label.
+   *
+   * @param {number} w - Tile width in px.
+   * @param {number} h - Tile height in px.
+   * @returns {number} Font size in px.
+   */
+  const symbolFontSize = (w, h) => {
+    const minDim = Math.min(w, h);
+    if (minDim >= 40) return 12;
+    if (minDim >= 28) return 10;
+    if (minDim >= 18) return 8;
+    return 7;
+  };
+
+  /**
+   * Build legend stops: 11 evenly-spaced values from -5% to +5%.
+   * Each stop maps to the heatColor scale for the gradient bar.
+   */
+  const legendStops = [];
+  for (let pct = -5; pct <= 5; pct += 1) {
+    const offset = ((pct + 5) / 10) * 100;
+    legendStops.push({ offset: `${offset}%`, color: heatColor(pct) });
+  }
+
   return (
     <div ref={wrapRef} style={{ width: "100%", position: "relative" }}>
+      {/* ── Treemap SVG ─────────────────────────────────────────────── */}
       <svg width={dims.w} height={dims.h} viewBox={`0 0 ${dims.w} ${dims.h}`} style={{ display: "block", background: "var(--panel)" }}>
         {tiles.map((t, i) => {
           const gap = 1.5;
           const isHovered = hover === i;
+          const cellW = Math.max(0, t.rw - gap * 2);
+          const cellH = Math.max(0, t.rh - gap * 2);
+          /* Show symbol if at least 20×14 px — covers nearly all tiles */
+          const showSymbol = cellW >= 20 && cellH >= 14;
+          /* Show change % only when there is enough vertical room for two lines */
+          const showPct = cellW >= 36 && cellH >= 32;
+          const fSize = symbolFontSize(cellW, cellH);
           return (
             <g key={t.symbol} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} style={{ cursor: "pointer" }}>
               <rect
                 x={t.rx + gap} y={t.ry + gap}
-                width={Math.max(0, t.rw - gap * 2)} height={Math.max(0, t.rh - gap * 2)}
+                width={cellW} height={cellH}
                 rx={2}
                 fill={heatColor(t.chgPct)}
                 opacity={isHovered ? 1 : 0.85}
                 stroke={isHovered ? "var(--bright)" : "var(--bg)"}
                 strokeWidth={isHovered ? 1.5 : 0.5}
               />
-              {t.rw > 40 && t.rh > 24 && (
+              {showSymbol && (
                 <text
-                  x={t.rx + t.rw / 2} y={t.ry + t.rh / 2 - (t.rh > 40 ? 6 : 0)}
+                  x={t.rx + t.rw / 2} y={t.ry + t.rh / 2 - (showPct ? fSize * 0.55 : 0)}
                   textAnchor="middle" dominantBaseline="central"
-                  fill="#fff" fontSize={t.rw > 80 ? 12 : 10} fontFamily="IBM Plex Mono" fontWeight="600"
+                  fill="#fff" fontSize={fSize} fontFamily="IBM Plex Mono" fontWeight="600"
                   style={{ pointerEvents: "none" }}
                 >
                   {t.symbol}
                 </text>
               )}
-              {t.rw > 50 && t.rh > 40 && (
+              {showPct && (
                 <text
-                  x={t.rx + t.rw / 2} y={t.ry + t.rh / 2 + 10}
+                  x={t.rx + t.rw / 2} y={t.ry + t.rh / 2 + fSize * 0.6}
                   textAnchor="middle" dominantBaseline="central"
-                  fill="rgba(255,255,255,0.8)" fontSize={9} fontFamily="IBM Plex Mono"
+                  fill="rgba(255,255,255,0.75)" fontSize={Math.max(7, fSize - 2)} fontFamily="IBM Plex Mono"
                   style={{ pointerEvents: "none" }}
                 >
-                  {t.chgPct >= 0 ? "+" : ""}{t.chgPct.toFixed(2)}%
+                  {t.chgPct >= 0 ? "+" : ""}{t.chgPct.toFixed(1)}%
                 </text>
               )}
             </g>
           );
         })}
       </svg>
+
+      {/* ── Gradient Legend ──────────────────────────────────────────── */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "center",
+        gap: 6, height: LEGEND_H, marginTop: 4,
+        fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--mid)",
+      }}>
+        <span>-5%</span>
+        <svg width={140} height={10} style={{ display: "block", borderRadius: 2, overflow: "hidden" }}>
+          <defs>
+            <linearGradient id="heatLegendGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+              {legendStops.map((s, idx) => (
+                <stop key={idx} offset={s.offset} stopColor={s.color} />
+              ))}
+            </linearGradient>
+          </defs>
+          <rect width={140} height={10} fill="url(#heatLegendGrad)" />
+        </svg>
+        <span>+5%</span>
+      </div>
+
+      {/* ── Hover Tooltip ───────────────────────────────────────────── */}
       {hover !== null && tiles[hover] && (
         <div style={{
           position: "absolute", top: 8, right: 8,
