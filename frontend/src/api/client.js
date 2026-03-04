@@ -208,6 +208,19 @@ const api = {
 
   deleteChartTemplate: (templateId, token) =>
     apiFetch(`/chart-templates/${templateId}`, { method: "DELETE", token }),
+
+  // ── News ──────────────────────────────────────────────────────────────────
+  /** @param {string} token - JWT access token */
+  getNews: (token) =>
+    apiFetch("/news/feed", { token }),
+
+  /**
+   * On-demand deep fetch of news for a single ticker.
+   * @param {string} ticker - stock ticker symbol (e.g. "AAPL")
+   * @param {string} token  - JWT access token
+   */
+  getNewsByTicker: (ticker, token) =>
+    apiFetch(`/news/tickers/${encodeURIComponent(ticker)}`, { token }),
 };
 
 export default api;

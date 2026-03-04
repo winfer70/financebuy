@@ -1,287 +1,367 @@
 /**
- * Dashboard Page
- * 
- * Main dashboard showing portfolio overview, stats, and performance charts.
+ * DashboardPage.jsx — Main dashboard for TickerTap.
+ *
+ * Displays portfolio overview sourced from the custom Portfolio Manager system.
+ * A dropdown lets the user select which portfolio drives the stats, performance
+ * chart, allocation donut, and top-positions table.
+ *
+ * When no custom portfolios exist the page shows only the market heatmap and
+ * a prominent call-to-action to create the first portfolio.
+ *
+ * Data flow:
+ *  1.  Load portfolios on mount → auto-select first
+ *  2.  Load positions when active portfolio changes
+ *  3.  Fetch live quotes via bulkQuotes after positions load
+ *  4.  Poll quotes on a market-aware interval (3s open / 300s closed)
+ *
+ * Props:
+ *  @param {Function} onNewTx    - Open transaction modal
+ *  @param {string}   token      - JWT access token
+ *  @param {string}   accountId  - Account UUID (for transaction listing)
+ *  @param {Function} setPage    - Navigate to another page
  */
 
 import { useState, useEffect, useMemo } from "react";
-import api, { useApi } from "../api/client";
+import api from "../api/client";
 import { Ic } from "../components/common/Icons";
-import { SkeletonRow, ApiError, useMarketStatus } from "../components/common";
+import { SkeletonRow, useMarketStatus } from "../components/common";
 import { Sparkline, PortfolioChart, AllocationDonut, Heatmap } from "../components/charts";
-import { HOLDINGS, TRANSACTIONS } from "../styles/globals";
 
-export function DashboardPage({ onNewTx, token, accountId, setPage }) {
+export function DashboardPage({ onNewTx, token, setPage }) {
   const mktStatus = useMarketStatus();
   const [chartPeriod, setChartPeriod] = useState("3M");
-  const [showFilter, setShowFilter] = useState(false);
-  const [dashFilter, setDashFilter] = useState("all");
-  const [quotesMap, setQuotesMap] = useState({});
 
-  // Fetch portfolio positions (includes symbol + name)
-  const { data: apiPositions, loading: hLoading } =
-    useApi(() => token ? api.getPositions(token) : Promise.resolve(null), [token]);
-  const { data: apiTxns, loading: tLoading } =
-    useApi(() => (token && accountId) ? api.listTransactions(accountId, token) : Promise.resolve(null), [token, accountId]);
-  const { data: apiSummary } =
-    useApi(() => token ? api.getPortfolioSummary(token) : Promise.resolve(null), [token]);
-  const { data: apiOrders } =
-    useApi(() => (token && accountId) ? api.listOrders(accountId, token) : Promise.resolve(null), [token, accountId]);
+  /* ── Portfolio data source ──────────────────────────────────────────────── */
+  const [portfolios,        setPortfolios]        = useState([]);
+  const [activePortfolioId, setActivePortfolioId] = useState(null);
+  const [positions,         setPositions]         = useState([]);
+  const [quotesMap,         setQuotesMap]         = useState({});
+  const [loadingPortfolios, setLoadingPortfolios] = useState(true);
+  const [loadingPositions,  setLoadingPositions]  = useState(false);
 
-  // Fetch live quotes for each held symbol
+  /* -- Load portfolios ---------------------------------------------------- */
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      setLoadingPortfolios(true);
+      try {
+        const list = await api.listPortfolios(token);
+        if (cancelled) return;
+        setPortfolios(list || []);
+        if (list && list.length) setActivePortfolioId(list[0].portfolio_id);
+      } catch { /* non-fatal */ }
+      finally { if (!cancelled) setLoadingPortfolios(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [token]);
+
+  /* -- Load positions when active portfolio changes ----------------------- */
+  useEffect(() => {
+    if (!token || !activePortfolioId) { setPositions([]); setQuotesMap({}); return; }
+    let cancelled = false;
+    (async () => {
+      setLoadingPositions(true);
+      try {
+        const list = await api.listPositions(activePortfolioId, token);
+        if (cancelled) return;
+        setPositions(list || []);
+      } catch { /* non-fatal */ }
+      finally { if (!cancelled) setLoadingPositions(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [token, activePortfolioId]);
+
+  /* -- Poll live quotes for held symbols ---------------------------------- */
   const dashPollMs = mktStatus.isOpen ? 3000 : 300000;
   useEffect(() => {
-    if (!token || !apiPositions || apiPositions.length === 0) return;
+    if (!token || positions.length === 0) return;
     let cancelled = false;
-    const symbols = [...new Set(apiPositions.map(p => p.symbol))];
-    const fetchQuotes = () => {
-      Promise.allSettled(symbols.map(s => api.getQuote(s, token)))
-        .then(results => {
-          if (cancelled) return;
-          const map = {};
-          results.forEach((r, i) => {
-            if (r.status === "fulfilled") {
-              map[symbols[i]] = { price: Number(r.value.price), change: Number(r.value.change), change_pct: Number(r.value.change_pct), volume: Number(r.value.volume || 0) };
-            }
-          });
-          setQuotesMap(map);
-        });
+    const symbols = [...new Set(positions.map(p => p.ticker))];
+    const fetchQuotes = async () => {
+      try {
+        const quoteList = await api.bulkQuotes(symbols, token);
+        if (cancelled) return;
+        const map = {};
+        quoteList.forEach(q => { map[q.symbol] = q; });
+        setQuotesMap(map);
+      } catch { /* non-fatal */ }
     };
     fetchQuotes();
     const id = setInterval(fetchQuotes, dashPollMs);
     return () => { cancelled = true; clearInterval(id); };
-  }, [token, apiPositions, dashPollMs]);
+  }, [token, positions, dashPollMs]);
 
-  // Merge API data — no mock fallback
-  const holdings = (apiPositions || []).map(p => {
-      const q = quotesMap[p.symbol];
+  /* ── Derived holdings from positions + quotes ───────────────────────────── */
+  const holdings = useMemo(() =>
+    positions.filter(p => !p.is_excluded).map(p => {
+      const q = quotesMap[p.ticker];
+      const qty = parseFloat(p.quantity) || 0;
+      const avg = parseFloat(p.purchase_price) || 0;
+      const price = q ? parseFloat(q.price) || 0 : 0;
       return {
-        symbol: p.symbol, name: p.name,
-        quantity: +p.quantity, average_cost: +(p.average_cost||0),
-        current_price: q ? q.price : +(p.current_price||0),
-        market_value: +(p.market_value||0),
-        chg: q ? q.change : 0, chgPct: q ? q.change_pct : 0,
-        volume: q ? q.volume : 0,
+        symbol: p.ticker,
+        name: q?.name || p.name || p.ticker,
+        quantity: qty,
+        average_cost: avg,
+        current_price: price,
+        market_value: qty * price,
+        chg: q ? parseFloat(q.change) || 0 : 0,
+        chgPct: q ? parseFloat(q.change_pct) || 0 : 0,
+        volume: q ? parseFloat(q.volume) || 0 : 0,
       };
-  });
-  // Unify transactions + orders into one activity feed
-  const txItems = (apiTxns || []).map(t => ({
-    id: t.transaction_id, transaction_type: t.transaction_type,
-    symbol: null, amount: +t.amount, status: t.status,
-    created_at: t.created_at, reference_number: t.reference_number,
-  }));
-  const orderItems = (apiOrders || []).map(o => ({
-    id: o.order_id, transaction_type: o.side,
-    symbol: o.symbol || null, amount: +(o.quantity||0) * +(o.price||0),
-    status: o.status, created_at: o.placed_at || null,
-    reference_number: null,
-  }));
-  const txns = [...txItems, ...orderItems]
-    .sort((a,b) => (b.created_at||"").localeCompare(a.created_at||""));
+    }),
+  [positions, quotesMap]);
 
-  const total   = holdings.reduce((s,h)=>s+(h.quantity||0)*(h.current_price||0),0);
-  const cost    = holdings.reduce((s,h)=>s+(h.quantity||0)*(h.average_cost||0),0);
-  const pnl     = total - cost;
-  const pnlPct  = cost > 0 ? (pnl/cost)*100 : 0;
-  const dayChg  = holdings.reduce((s,h)=>s+(h.chg||0)*(h.quantity||0),0);
+  /* ── Summary stats ──────────────────────────────────────────────────────── */
+  const total  = holdings.reduce((s, h) => s + h.quantity * h.current_price, 0);
+  const cost   = holdings.reduce((s, h) => s + h.quantity * h.average_cost, 0);
+  const pnl    = total - cost;
+  const pnlPct = cost > 0 ? (pnl / cost) * 100 : 0;
+  const dayChg = holdings.reduce((s, h) => s + h.chg * h.quantity, 0);
 
-  const cashBalance = apiSummary && apiSummary.accounts && apiSummary.accounts.length > 0
-    ? apiSummary.accounts.reduce((s,a) => s + Number(a.cash_balance||0), 0) : null;
-  const pendingOrders = apiOrders ? apiOrders.filter(o => o.status === "pending").length : null;
+  const hasPortfolios = portfolios.length > 0;
+  const activePortfolioName = portfolios.find(p => p.portfolio_id === activePortfolioId)?.name || "";
 
-  const filteredTxns = dashFilter === "all" ? txns : txns.filter(t => (t.transaction_type||t.type) === dashFilter);
-
+  /* ── Render ─────────────────────────────────────────────────────────────── */
   return (
     <div className="page-scroll">
+      {/* Page header */}
       <div className="page-header">
-        <div>
-          <div className="page-title">DASHBOARD</div>
-          <div className="page-sub">{mktStatus.dateStr} · {mktStatus.isOpen ? "MARKET OPEN" : "MARKET CLOSED"} · NYSE · NASDAQ</div>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 16 }}>
+          <div>
+            <div className="page-title">DASHBOARD</div>
+            <div className="page-sub">
+              {mktStatus.dateStr} · {mktStatus.isOpen ? "MARKET OPEN" : "MARKET CLOSED"} · NYSE · NASDAQ
+            </div>
+          </div>
+
+          {/* Portfolio selector dropdown */}
+          {hasPortfolios && (
+            <select
+              value={activePortfolioId || ""}
+              onChange={e => setActivePortfolioId(e.target.value)}
+              className="form-control"
+              style={{
+                width: "auto", minWidth: 180, padding: "5px 28px 5px 10px",
+                fontSize: 11, fontWeight: 600, letterSpacing: "0.04em",
+                marginBottom: 2,
+              }}
+            >
+              {portfolios.map(p => (
+                <option key={p.portfolio_id} value={p.portfolio_id}>{p.name}</option>
+              ))}
+            </select>
+          )}
         </div>
+
         <div className="page-actions">
-          <div style={{position:"relative"}}>
-            <button className="btn btn-outline" onClick={()=>setShowFilter(f=>!f)}>
-              <Ic.filter/> FILTER{dashFilter !== "all" ? ` (${dashFilter.toUpperCase()})` : ""}
-            </button>
-            {showFilter && (
+          <button className="btn btn-amber" onClick={onNewTx}><Ic.plus /> NEW TRANSACTION</button>
+        </div>
+      </div>
+
+      {/* ── No-portfolio empty state ──────────────────────────────────────── */}
+      {!loadingPortfolios && !hasPortfolios && (
+        <>
+          {/* Heatmap — always visible */}
+          <div className="page-inner">
+            <div className="panel">
+              <div className="panel-header">
+                <span className="panel-title">MARKET HEATMAP</span>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>BY VOLUME</span>
+              </div>
+              <div className="panel-body" style={{ padding: 0 }}>
+                <Heatmap holdings={[]} />
+              </div>
+            </div>
+
+            {/* Create portfolio prompt */}
+            <div style={{
+              textAlign: "center", padding: "48px 24px",
+              background: "var(--panel)", border: "1px solid var(--border)",
+            }}>
               <div style={{
-                position:"absolute",top:"100%",right:0,marginTop:4,zIndex:10,
-                background:"var(--panel)",border:"1px solid var(--border)",
-                padding:8,display:"flex",flexDirection:"column",gap:4,
-                minWidth:160,boxShadow:"0 4px 12px rgba(0,0,0,0.4)",
+                fontFamily: "var(--font-disp)", fontSize: 24, color: "var(--bright)",
+                letterSpacing: "1px", marginBottom: 8,
               }}>
-                {["all","buy","sell","deposit","withdrawal"].map(f=>(
-                  <button key={f} className={`filter-btn${dashFilter===f?" active":""}`}
-                    style={{textAlign:"left",width:"100%"}}
-                    onClick={()=>{setDashFilter(f);setShowFilter(false);}}
-                  >{f.toUpperCase()}</button>
-                ))}
+                NO PORTFOLIOS YET
               </div>
-            )}
+              <div style={{
+                fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--muted)",
+                marginBottom: 20, maxWidth: 420, margin: "0 auto 20px",
+              }}>
+                Create your first portfolio to see performance stats, allocation charts,
+                and top positions right here on the dashboard.
+              </div>
+              <button
+                className="btn btn-amber"
+                onClick={() => setPage("portfolio-manager")}
+              >
+                <Ic.plus /> CREATE PORTFOLIO
+              </button>
+            </div>
           </div>
-          <button className="btn btn-amber" onClick={onNewTx}><Ic.plus/> NEW TRANSACTION</button>
+        </>
+      )}
+
+      {/* ── Loading state ─────────────────────────────────────────────────── */}
+      {loadingPortfolios && (
+        <div style={{ textAlign: "center", padding: "48px 0" }}>
+          <span className="loading-pulse" style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--muted)" }}>
+            LOADING PORTFOLIO DATA...
+          </span>
         </div>
-      </div>
+      )}
 
-      {/* Stats row */}
-      <div className="grid-stats stagger">
-        {[
-          {lbl:"Portfolio Value",   val:`$${(total/1000).toFixed(2)}K`, cls:"amber"},
-          {lbl:"Unrealized P&L",    val:`${pnl>=0?"+":""}$${(Math.abs(pnl)/1000).toFixed(2)}K`, cls:pnl>=0?"green":"red"},
-          {lbl:"Day Change",        val:`${dayChg>=0?"+":""}$${Math.abs(dayChg).toFixed(2)}`,    cls:dayChg>=0?"green":"red"},
-          {lbl:"Cash Balance",      val: cashBalance !== null ? `$${cashBalance.toLocaleString("en-US",{minimumFractionDigits:2})}` : "$14,320.50", cls:""},
-          {lbl:"Open Orders",       val: pendingOrders !== null ? String(pendingOrders) : "—", cls:""},
-        ].map((s,i)=>(
-          <div key={i} className="stat-block">
-            <div className="stat-lbl">{s.lbl}</div>
-            <div className={`stat-val${s.cls?" "+s.cls:""}`}>{s.val}</div>
-            {i===1&&<div className={`stat-badge ${pnl>=0?"badge-green":"badge-red"}`}>
-              {pnl>=0?<Ic.up/>:<Ic.down/>} {Math.abs(pnlPct).toFixed(2)}% ALL TIME
-            </div>}
-            {i===2&&<div className={`stat-badge ${dayChg>=0?"badge-green":"badge-red"}`}>
-              {dayChg>=0?<Ic.up/>:<Ic.down/>} {total>0?Math.abs(dayChg/total*100).toFixed(2):"0.00"}% TODAY
-            </div>}
-            {i===3&&<div className="stat-badge badge-mid">AVAILABLE MARGIN</div>}
-            {i===4&&pendingOrders>0&&<div className="stat-badge badge-amber">{pendingOrders} PENDING</div>}
+      {/* ── Full dashboard (portfolio selected) ───────────────────────────── */}
+      {hasPortfolios && !loadingPortfolios && (
+        <>
+          {/* Stats row */}
+          <div className="grid-stats stagger">
+            {[
+              { lbl: "Portfolio Value", val: `$${(total / 1000).toFixed(2)}K`, cls: "amber" },
+              { lbl: "Unrealized P&L",  val: `${pnl >= 0 ? "+" : ""}$${(Math.abs(pnl) / 1000).toFixed(2)}K`, cls: pnl >= 0 ? "green" : "red" },
+              { lbl: "Day Change",      val: `${dayChg >= 0 ? "+" : ""}$${Math.abs(dayChg).toFixed(2)}`, cls: dayChg >= 0 ? "green" : "red" },
+              { lbl: "Positions",       val: String(holdings.length), cls: "" },
+              { lbl: "Portfolio",       val: activePortfolioName || "—", cls: "amber" },
+            ].map((s, i) => (
+              <div key={i} className="stat-block">
+                <div className="stat-lbl">{s.lbl}</div>
+                <div className={`stat-val${s.cls ? " " + s.cls : ""}`}>{s.val}</div>
+                {i === 1 && (
+                  <div className={`stat-badge ${pnl >= 0 ? "badge-green" : "badge-red"}`}>
+                    {pnl >= 0 ? <Ic.up /> : <Ic.down />} {Math.abs(pnlPct).toFixed(2)}% ALL TIME
+                  </div>
+                )}
+                {i === 2 && (
+                  <div className={`stat-badge ${dayChg >= 0 ? "badge-green" : "badge-red"}`}>
+                    {dayChg >= 0 ? <Ic.up /> : <Ic.down />} {total > 0 ? Math.abs((dayChg / total) * 100).toFixed(2) : "0.00"}% TODAY
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
 
-      <div className="page-inner stagger">
-        {/* Heatmap */}
-        <div className="panel">
-          <div className="panel-header">
-            <span className="panel-title">MARKET HEATMAP</span>
-            <span style={{fontFamily:"var(--font-mono)",fontSize:10,color:"var(--muted)"}}>BY VOLUME</span>
-          </div>
-          <div className="panel-body" style={{padding:0}}>
-            <Heatmap holdings={holdings}/>
-          </div>
-        </div>
-
-        {/* Main chart + allocation */}
-        <div className="grid-main">
-          <div className="panel">
-            <div className="panel-header">
-              <span className="panel-title">PORTFOLIO PERFORMANCE · {chartPeriod}</span>
-              <div style={{display:"flex",gap:1}}>
-                {["1W","1M","3M","YTD","1Y","ALL"].map(p=>(
-                  <button key={p} className={`filter-btn${p===chartPeriod?" active":""}`}
-                    style={{padding:"4px 10px",fontSize:9}}
-                    onClick={()=>setChartPeriod(p)}
-                  >{p}</button>
-                ))}
+          <div className="page-inner stagger">
+            {/* Heatmap */}
+            <div className="panel">
+              <div className="panel-header">
+                <span className="panel-title">MARKET HEATMAP</span>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>BY VOLUME</span>
+              </div>
+              <div className="panel-body" style={{ padding: 0 }}>
+                <Heatmap holdings={holdings} />
               </div>
             </div>
-            <div className="panel-body" style={{paddingBottom:8}}>
-              <PortfolioChart height={160} period={chartPeriod}/>
-            </div>
-          </div>
-          <div className="panel">
-            <div className="panel-header">
-              <span className="panel-title">ALLOCATION</span>
-              <span style={{fontFamily:"var(--font-mono)",fontSize:10,color:"var(--muted)"}}>{holdings.length} POSITIONS</span>
-            </div>
-            <div className="panel-body">
-              <AllocationDonut holdings={holdings}/>
-            </div>
-          </div>
-        </div>
 
-        {/* Holdings snapshot */}
-        <div className="panel">
-          <div className="panel-header">
-            <span className="panel-title">TOP POSITIONS</span>
-            <button className="btn btn-ghost" style={{fontSize:9,padding:"3px 10px"}} onClick={()=>setPage("holdings")}>VIEW ALL →</button>
-          </div>
-          <div style={{overflowX:"auto"}}>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>SYMBOL</th>
-                  <th className="right">LAST</th>
-                  <th className="right">CHG</th>
-                  <th className="right">QTY</th>
-                  <th className="right">MKT VALUE</th>
-                  <th className="right">P&L</th>
-                  <th className="right">RETURN</th>
-                  <th>TREND</th>
-                </tr>
-              </thead>
-              <tbody>
-                {hLoading ? (
-                  Array.from({length:3}).map((_,i)=><SkeletonRow key={i} cols={8}/>)
-                ) : holdings.length === 0 ? (
-                  <tr><td colSpan={8} style={{textAlign:"center",padding:"32px 0",fontFamily:"var(--font-mono)",fontSize:12,color:"var(--muted)"}}>
-                    No assets in portfolio
-                  </td></tr>
-                ) : holdings.slice(0,5).map(h=>{
-                  const qty = h.quantity||0, price = h.current_price||0, avg = h.average_cost||0;
-                  const val=qty*price, pl=(price-avg)*qty, ret=avg>0?((price-avg)/avg)*100:0;
-                  return (
-                    <tr key={h.symbol}>
-                      <td>
-                        <div className="cell-symbol">
-                          <div className="sym-badge">{(h.symbol||"?").slice(0,3)}</div>
-                          <div><div className="cell-main">{h.symbol}</div><div className="sym-name">{h.name}</div></div>
-                        </div>
-                      </td>
-                      <td className="right">${price.toFixed(2)}</td>
-                      <td className={`right ${(h.chgPct||0)>=0?"pnl-pos":"pnl-neg"}`}>
-                        {(h.chgPct||0)>=0?"+":""}{(h.chgPct||0).toFixed(2)}%
-                      </td>
-                      <td className="right">{qty}</td>
-                      <td className="right cell-main">${val.toFixed(2)}</td>
-                      <td className={`right ${pl>=0?"pnl-pos":"pnl-neg"}`}>
-                        {pl>=0?"+":""}${pl.toFixed(2)}
-                      </td>
-                      <td className={`right ${ret>=0?"pnl-pos":"pnl-neg"}`}>{ret>=0?"+":""}{ret.toFixed(2)}%</td>
-                      <td><Sparkline positive={(h.chgPct||0)>=0} w={72} h={22}/></td>
+            {/* Main chart + allocation */}
+            <div className="grid-main">
+              <div className="panel">
+                <div className="panel-header">
+                  <span className="panel-title">PORTFOLIO PERFORMANCE · {chartPeriod}</span>
+                  <div style={{ display: "flex", gap: 1 }}>
+                    {["1W", "1M", "3M", "YTD", "1Y", "ALL"].map(p => (
+                      <button
+                        key={p}
+                        className={`filter-btn${p === chartPeriod ? " active" : ""}`}
+                        style={{ padding: "4px 10px", fontSize: 9 }}
+                        onClick={() => setChartPeriod(p)}
+                      >{p}</button>
+                    ))}
+                  </div>
+                </div>
+                <div className="panel-body" style={{ paddingBottom: 8 }}>
+                  <PortfolioChart height={160} period={chartPeriod} />
+                </div>
+              </div>
+              <div className="panel">
+                <div className="panel-header">
+                  <span className="panel-title">ALLOCATION</span>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>{holdings.length} POSITIONS</span>
+                </div>
+                <div className="panel-body">
+                  <AllocationDonut holdings={holdings} />
+                </div>
+              </div>
+            </div>
+
+            {/* Top positions */}
+            <div className="panel">
+              <div className="panel-header">
+                <span className="panel-title">TOP POSITIONS</span>
+                <button
+                  className="btn btn-ghost"
+                  style={{ fontSize: 9, padding: "3px 10px" }}
+                  onClick={() => setPage("portfolio-manager")}
+                >VIEW ALL →</button>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>SYMBOL</th>
+                      <th className="right">LAST</th>
+                      <th className="right">CHG</th>
+                      <th className="right">QTY</th>
+                      <th className="right">MKT VALUE</th>
+                      <th className="right">P&L</th>
+                      <th className="right">RETURN</th>
+                      <th>TREND</th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  </thead>
+                  <tbody>
+                    {loadingPositions ? (
+                      Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={8} />)
+                    ) : holdings.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} style={{
+                          textAlign: "center", padding: "32px 0",
+                          fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--muted)",
+                        }}>
+                          No positions in this portfolio
+                        </td>
+                      </tr>
+                    ) : holdings.slice(0, 5).map(h => {
+                      const qty = h.quantity || 0;
+                      const price = h.current_price || 0;
+                      const avg = h.average_cost || 0;
+                      const val = qty * price;
+                      const pl = (price - avg) * qty;
+                      const ret = avg > 0 ? ((price - avg) / avg) * 100 : 0;
+                      return (
+                        <tr key={h.symbol}>
+                          <td>
+                            <div className="cell-symbol">
+                              <div className="sym-badge">{(h.symbol || "?").slice(0, 3)}</div>
+                              <div>
+                                <div className="cell-main">{h.symbol}</div>
+                                <div className="sym-name">{h.name}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="right">${price.toFixed(2)}</td>
+                          <td className={`right ${(h.chgPct || 0) >= 0 ? "pnl-pos" : "pnl-neg"}`}>
+                            {(h.chgPct || 0) >= 0 ? "+" : ""}{(h.chgPct || 0).toFixed(2)}%
+                          </td>
+                          <td className="right">{qty}</td>
+                          <td className="right cell-main">${val.toFixed(2)}</td>
+                          <td className={`right ${pl >= 0 ? "pnl-pos" : "pnl-neg"}`}>
+                            {pl >= 0 ? "+" : ""}${pl.toFixed(2)}
+                          </td>
+                          <td className={`right ${ret >= 0 ? "pnl-pos" : "pnl-neg"}`}>
+                            {ret >= 0 ? "+" : ""}{ret.toFixed(2)}%
+                          </td>
+                          <td><Sparkline positive={(h.chgPct || 0) >= 0} w={72} h={22} /></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
-        </div>
-
-        {/* Recent transactions */}
-        <div className="panel">
-          <div className="panel-header">
-            <span className="panel-title">RECENT TRANSACTIONS</span>
-            <button className="btn btn-ghost" style={{fontSize:9,padding:"3px 10px"}} onClick={()=>setPage("transactions")}>VIEW ALL →</button>
-          </div>
-          <div style={{overflowX:"auto"}}>
-            <table className="data-table">
-              <thead>
-                <tr><th>TXN ID</th><th>TYPE</th><th>SYMBOL</th><th className="right">AMOUNT</th><th>STATUS</th><th>DATE</th></tr>
-              </thead>
-              <tbody>
-                {tLoading ? (
-                  Array.from({length:3}).map((_,i)=><SkeletonRow key={i} cols={6}/>)
-                ) : filteredTxns.length === 0 ? (
-                  <tr><td colSpan={6} style={{textAlign:"center",padding:"32px 0",fontFamily:"var(--font-mono)",fontSize:12,color:"var(--muted)"}}>
-                    No transactions
-                  </td></tr>
-                ) : filteredTxns.slice(0,5).map(tx=>(
-                  <tr key={tx.transaction_id||tx.id}>
-                    <td style={{color:"var(--muted)",fontSize:11}}>{tx.reference_number||tx.id||String(tx.transaction_id||"").slice(0,8)}</td>
-                    <td><span className={`type-chip tc-${tx.transaction_type||tx.type}`}>{tx.transaction_type||tx.type}</span></td>
-                    <td>{tx.symbol ? <span style={{color:"var(--bright)"}}>{tx.symbol}</span> : <span style={{color:"var(--muted)"}}>—</span>}</td>
-                    <td className="right cell-main">${(+tx.amount||0).toLocaleString("en-US",{minimumFractionDigits:2})}</td>
-                    <td><span className={`status-pill sp-${tx.status}`}>{tx.status}</span></td>
-                    <td style={{color:"var(--muted)"}}>{tx.created_at?tx.created_at.slice(0,10):tx.date||""}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
+        </>
+      )}
     </div>
   );
 }
-
-/* ─────────────────────────────────────────────────────────────────────────────
-   PAGE: TRANSACTIONS
-───────────────────────────────────────────────────────────────────────────── */

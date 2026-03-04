@@ -31,7 +31,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from .auth import validate_jwt_config
 from .limiter import limiter
-from .routes import accounts, admin, auth_routes, chart_templates, holdings, market, orders, portfolio, portfolio_manager, transactions
+from .routes import accounts, admin, auth_routes, chart_templates, holdings, market, news, orders, portfolio, portfolio_manager, transactions
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -208,6 +208,7 @@ app.include_router(orders.router, prefix=_V1)
 app.include_router(admin.router, prefix=_V1)
 app.include_router(market.router, prefix=f"{_V1}/market", tags=["market"])
 app.include_router(holdings.router, prefix=f"{_V1}/holdings", tags=["holdings"])
+app.include_router(news.router, prefix=_V1)
 app.include_router(portfolio_manager.router, prefix=_V1)
 app.include_router(chart_templates.router, prefix=_V1)
 

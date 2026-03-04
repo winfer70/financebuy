@@ -697,7 +697,7 @@ function SortTh({ label, col, sortCol, sortDir, onSort, right }) {
 /* =========================================================================
    MAIN PAGE
 ========================================================================= */
-export function PortfolioManagerPage({ token, onViewChart }) {
+export function PortfolioManagerPage({ token, onViewChart, onViewNews }) {
   /* -- State -------------------------------------------------------------- */
   const [portfolios,         setPortfolios]         = useState([]);
   const [activePortfolioId,  setActivePortfolioId]  = useState(null);
@@ -858,9 +858,12 @@ export function PortfolioManagerPage({ token, onViewChart }) {
     });
   }, [sectionPositions, sortCol, sortDir, quotes, priceChanges, smaData, customSmaPeriod]);
 
-  /* Summary across ALL non-excluded positions (all sections) */
+  /* Summary across non-excluded positions, filtered by active section */
   const summary = useMemo(() => {
-    const active = positions.filter(p => !p.is_excluded);
+    const sectionFiltered = activeSection === "all"
+      ? positions
+      : positions.filter(p => (p.asset_type || "stock") === activeSection);
+    const active = sectionFiltered.filter(p => !p.is_excluded);
     let totalValue = 0, totalCost = 0;
     active.forEach(p => {
       const price = quotes[p.ticker]?.price;
@@ -872,7 +875,7 @@ export function PortfolioManagerPage({ token, onViewChart }) {
     const gainLoss = totalValue - totalCost;
     const gainPct  = totalCost > 0 ? (gainLoss / totalCost) * 100 : 0;
     return { totalValue, totalCost, gainLoss, gainPct, count: active.length };
-  }, [positions, quotes]);
+  }, [positions, quotes, activeSection]);
 
   /* -- Sorting ------------------------------------------------------------ */
   const handleSort = (col) => {
@@ -955,7 +958,6 @@ export function PortfolioManagerPage({ token, onViewChart }) {
     setSellPos(null);
   };
 
-  const isPhysical = activeSection === "physical";
   const showTypeCol = activeSection === "physical" || activeSection === "all";
   const showGroupCol = activeSection !== "physical";
 
@@ -1262,6 +1264,14 @@ export function PortfolioManagerPage({ token, onViewChart }) {
                                 onClick={() => onViewChart(pos.ticker)}
                                 style={{ padding: "3px 7px" }}
                               ><Ic.charts /></button>
+                            )}
+                            {onViewNews && (
+                              <button
+                                className="btn btn-ghost"
+                                title="View news"
+                                onClick={() => onViewNews(pos.ticker)}
+                                style={{ padding: "3px 7px" }}
+                              ><Ic.newsSmall /></button>
                             )}
                             <button
                               className="btn btn-ghost"
