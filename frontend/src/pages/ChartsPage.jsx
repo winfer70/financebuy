@@ -528,16 +528,18 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
   }, [isIntraday]); // eslint-disable-line
 
   // Visible slice — respects period preset OR manual zoom
-  const { visibleData, visibleStart } = useMemo(() => {
+  // totalSlots includes future empty slots when panned past data end
+  const { visibleData, visibleStart, totalSlots } = useMemo(() => {
     let start, count;
     if (zoom) {
-      start = Math.max(0, Math.min(allData.length - 1, zoom.start));
-      count = Math.max(10, Math.min(allData.length, zoom.count));
+      start = Math.max(0, zoom.start);
+      count = Math.max(10, zoom.count);
     } else {
       count = Math.min(PERIODS[period] || 252, allData.length);
       start = allData.length - count;
     }
-    return { visibleData: allData.slice(start, start + count), visibleStart: start };
+    const data = allData.slice(start, start + count);
+    return { visibleData: data, visibleStart: start, totalSlots: count };
   }, [allData, period, zoom]);
 
   // When period changes, clear manual zoom
@@ -585,7 +587,8 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
   const volTop = PAD.top + H + VOL_GAP; // y position where volume section starts
 
   const n = visibleData.length;
-  const candleGap = n > 0 ? W / n : 1;
+  /* Use totalSlots (data + future) for spacing so future zone has proper candle-width slots */
+  const candleGap = totalSlots > 0 ? W / totalSlots : 1;
   const candleW   = Math.max(1, Math.min(14, candleGap * 0.72));
 
   const priceMin = n > 0 ? Math.min(...visibleData.map(d => d.low))  : 0;
@@ -853,12 +856,23 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
       const candleShift = Math.round(-dx / candleGap);
       const base = dragRef.current.baseStart;
       const baseCount = dragRef.current.baseCount;
-      const newStart = Math.max(0, Math.min(allData.length - baseCount, base + candleShift));
+      /* Allow panning up to 25% past data end into future zone */
+      const maxFuture = Math.max(10, Math.round(baseCount * 0.25));
+      const newStart = Math.max(0, Math.min(allData.length - baseCount + maxFuture, base + candleShift));
       setZoom({ start: newStart, count: baseCount });
       return;
     }
 
     const idx     = Math.round((mx - PAD.left - candleGap / 2) / candleGap);
+
+    /* Future zone — past last data bar: show crosshair line but no tooltip */
+    if (idx >= n) {
+      const priceCross = pLo + ((PAD.top + H - my) / H) * (pHi - pLo);
+      setCrosshair({ x: xOf(Math.min(idx, totalSlots - 1)), y: my, idx: -1, priceCross });
+      setTooltip(null);
+      return;
+    }
+
     const clamped = Math.max(0, Math.min(n - 1, idx));
     const d       = visibleData[clamped];
     if (!d) return;
@@ -875,7 +889,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
       sCx: smaCustom[clamped]?.value,
       screen: { x: mx, y: my, tRight, tBottom },
     });
-  }, [visibleData, sma50, sma150, smaCustom, n, W, H, pLo, pHi, candleGap, allData.length, activeTool, pendingAnchors, pixelToAnchor]);
+  }, [visibleData, sma50, sma150, smaCustom, n, totalSlots, W, H, pLo, pHi, candleGap, allData.length, activeTool, pendingAnchors, pixelToAnchor]);
 
   const handleMouseDown = useCallback((e) => {
     if (e.button !== 0) return;
@@ -953,7 +967,9 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
     const rect = svg?.getBoundingClientRect();
     const ratio = rect ? (e.clientX - rect.left - PAD.left) / W : 0.5;
     const pivot = curStart + Math.round(curCount * ratio);
-    const newStart = Math.max(0, Math.min(allData.length - newCount, Math.round(pivot - newCount * ratio)));
+    /* Allow zooming to preserve position when panned into future zone */
+    const maxFuture = Math.max(10, Math.round(newCount * 0.25));
+    const newStart = Math.max(0, Math.min(allData.length - newCount + maxFuture, Math.round(pivot - newCount * ratio)));
 
     setZoom({ start: newStart, count: newCount });
   }, [zoom, period, allData.length, W, PAD]);

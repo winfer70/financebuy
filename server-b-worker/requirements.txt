@@ -1,0 +1,9 @@
+# requirements.txt — Python dependencies for the TickerTap news worker.
+#
+# Install inside the worker venv on Server B:
+#   cd ~/tickertap-worker
+#   source venv/bin/activate
+#   pip install -r requirements.txt
+requests>=2.31
+feedparser>=6.0
+beautifulsoup4>=4.12

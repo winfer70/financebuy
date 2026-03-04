@@ -52,24 +52,41 @@ export function PortfolioChart({ height=160, data=null, period="3M" }) {
   const [hover, setHover] = useState(null);
   const svgRef = useRef(null);
   const W=600, H=height;
+  /* Data occupies 80% of chart width; the remaining 20% is empty future space */
+  const DATA_W = W * 0.8;
   const mn=Math.min(...raw), mx=Math.max(...raw), rng=mx-mn||1;
   const pts = raw.map((v,i)=>({
-    x:(i/(raw.length-1))*W,
+    x:(i/(raw.length-1))*DATA_W,
     y:H-((v-mn)/rng)*(H-16)-8
   }));
   const line = pts.map((p,i)=>`${i===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
-  const fill = line+` L${W},${H} L0,${H} Z`;
+  /* Fill area closes down to DATA_W (not full W) so gradient doesn't bleed into future zone */
+  const fill = line+` L${DATA_W},${H} L0,${H} Z`;
   const yVals = [mx, (mx+mn)/2, mn].map(v=>"$"+(v/1000).toFixed(1)+"K");
   const xLabels = ["DEC '25","JAN '26","FEB '26"];
 
+  /**
+   * handleMouseMove — resolves cursor position to nearest data point.
+   * If cursor is in the future zone (past DATA_W), store raw x for crosshair
+   * but mark inFuture=true so tooltip/circle are suppressed.
+   */
   const handleMouseMove = useCallback((e) => {
     const svg = svgRef.current;
     if (!svg) return;
     const rect = svg.getBoundingClientRect();
     const relX = (e.clientX - rect.left) / rect.width * W;
-    const idx = Math.min(Math.max(Math.round((relX / W) * (raw.length - 1)), 0), raw.length - 1);
-    setHover({ idx, x: pts[idx].x, y: pts[idx].y, value: raw[idx] });
-  }, [raw, pts]);
+    if (relX > DATA_W) {
+      /* Future zone — show crosshair only, no data tooltip */
+      setHover({ idx: -1, x: relX, y: H / 2, value: null, inFuture: true });
+    } else {
+      const idx = Math.min(Math.max(Math.round((relX / DATA_W) * (raw.length - 1)), 0), raw.length - 1);
+      setHover({ idx, x: pts[idx].x, y: pts[idx].y, value: raw[idx], inFuture: false });
+    }
+  }, [raw, pts, DATA_W]);
+
+  /* Determine tooltip anchor: leftmost points anchor right, others center */
+  const tooltipLeft = hover && !hover.inFuture ? `${(hover.x / W) * 100}%` : "0";
+  const tooltipTransform = hover && hover.idx === 0 ? "translateX(0)" : "translateX(-50%)";
 
   return (
     <div className="chart-area" style={{position:"relative"}}>
@@ -85,16 +102,19 @@ export function PortfolioChart({ height=160, data=null, period="3M" }) {
               <stop offset="100%" stopColor="#0f7d40" stopOpacity="0"/>
             </linearGradient>
           </defs>
+          {/* Grid lines span the full width including future zone */}
           {[H*0.1,H*0.5,H*0.9].map((y,i)=>(
             <line key={i} x1="0" y1={y} x2={W} y2={y} className="chart-gridline"/>
           ))}
+          {/* Subtle separator marking where data ends and future zone begins */}
+          <line x1={DATA_W} y1={0} x2={DATA_W} y2={H} stroke="var(--border)" strokeWidth="0.5" strokeDasharray="4,4" opacity="0.5"/>
           <path d={fill} fill="url(#ag)" className="chart-fill"/>
           <path d={line} className="chart-line"/>
           {hover && (
-            <>
-              <line x1={hover.x} y1={0} x2={hover.x} y2={H} stroke="var(--muted)" strokeWidth="0.5" strokeDasharray="2,2"/>
-              <circle cx={hover.x} cy={hover.y} r="4" fill="#0f7d40" stroke="var(--panel)" strokeWidth="2"/>
-            </>
+            <line x1={hover.x} y1={0} x2={hover.x} y2={H} stroke="var(--muted)" strokeWidth="0.5" strokeDasharray="2,2"/>
+          )}
+          {hover && !hover.inFuture && (
+            <circle cx={hover.x} cy={hover.y} r="4" fill="#0f7d40" stroke="var(--panel)" strokeWidth="2"/>
           )}
           {!hover && (
             <>
@@ -103,10 +123,10 @@ export function PortfolioChart({ height=160, data=null, period="3M" }) {
             </>
           )}
         </svg>
-        {hover && (
+        {hover && !hover.inFuture && (
           <div style={{
-            position:"absolute", left:`${(hover.x/W)*100}%`, top:hover.y-36,
-            transform:"translateX(-50%)", background:"var(--bg2)", border:"1px solid var(--border)",
+            position:"absolute", left:tooltipLeft, top:hover.y-36,
+            transform:tooltipTransform, background:"var(--bg2)", border:"1px solid var(--border)",
             padding:"4px 8px", borderRadius:2, pointerEvents:"none",
             fontFamily:"var(--font-mono)", fontSize:10, color:"var(--amber)",
             whiteSpace:"nowrap", zIndex:5,
@@ -137,12 +157,25 @@ export function AllocationDonut({ holdings: holdingsProp = null }) {
       NO ALLOCATION DATA
     </div>
   );
-  const slices = data.map((h,i)=>({
-    symbol: h.symbol,
-    name: h.name || h.symbol,
-    qty: h.quantity||h.qty||0,
-    val: (h.quantity||h.qty||0)*(h.current_price||h.price||0),
-    pct: ((h.quantity||h.qty||0)*(h.current_price||h.price||0)/total)*100,
+  /* Group holdings by symbol to consolidate duplicate positions */
+  const grouped = {};
+  data.forEach(h => {
+    const sym = h.symbol;
+    const qty = h.quantity || h.qty || 0;
+    const val = qty * (h.current_price || h.price || 0);
+    if (grouped[sym]) {
+      grouped[sym].qty += qty;
+      grouped[sym].val += val;
+    } else {
+      grouped[sym] = { symbol: sym, name: h.name || sym, qty, val };
+    }
+  });
+  const slices = Object.values(grouped).map((g, i) => ({
+    symbol: g.symbol,
+    name: g.name,
+    qty: g.qty,
+    val: g.val,
+    pct: (g.val / total) * 100,
     color: PALETTE[i % PALETTE.length],
   }));
   const R=52, cx=60, cy=60, gap=0.03;
@@ -197,10 +230,7 @@ export function AllocationDonut({ holdings: holdingsProp = null }) {
           >
             <div className="donut-swatch" style={{background:s.color}}/>
             <span className="donut-sym">{s.symbol}</span>
-            <span style={{color:"var(--mid)",fontSize:10,fontFamily:"var(--font-mono)"}}>
-              {s.pct.toFixed(1)}%
-            </span>
-            <span className="donut-val">${(s.val/1000).toFixed(2)}K</span>
+            <span className="donut-pct">{s.pct.toFixed(1)}%</span>
           </div>
         ))}
       </div>

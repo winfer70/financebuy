@@ -1,0 +1,54 @@
+# tickertap-learner.service — systemd oneshot unit for the TickerTap scoring learner.
+#
+# Triggered by tickertap-learner.timer (weekly).  Analyses prediction accuracy,
+# identifies scoring biases, and generates calibration rules that the worker
+# injects into the LLM scoring prompt.
+#
+# Installation:
+#   1. Copy this file + tickertap-learner.timer to /etc/systemd/system/
+#   2. Edit the <USERNAME>, <APP_SERVER_IP>, and <INTERNAL_KEY> placeholders
+#   3. sudo systemctl daemon-reload
+#   4. sudo systemctl enable tickertap-learner.timer
+#   5. sudo systemctl start tickertap-learner.timer
+#
+# Manual run:
+#   sudo systemctl start tickertap-learner.service
+#
+# Logs:
+#   journalctl -u tickertap-learner -e
+
+[Unit]
+Description=TickerTap Scoring Learner — analyses accuracy and generates calibration rules
+After=network.target ollama.service
+Wants=ollama.service
+
+[Service]
+Type=oneshot
+User=<USERNAME>
+WorkingDirectory=/home/<USERNAME>/tickertap-worker
+ExecStart=/home/<USERNAME>/tickertap-worker/venv/bin/python learner.py
+
+# Environment variables for the learner.
+# TICKERTAP_API_URL        — Server A base URL (include port, no trailing slash)
+# TICKERTAP_INTERNAL_KEY   — must match INTERNAL_NEWS_KEY on Server A
+# OLLAMA_MODEL             — Ollama model tag to use for analysis
+# OLLAMA_URL               — Ollama API base URL (default http://localhost:11434)
+# MIN_OUTCOMES_FOR_LEARNING — minimum outcomes before generating rules (default 50)
+# MAX_OUTCOMES_FOR_PROMPT   — max outcomes to include in LLM prompt (default 200)
+Environment=TICKERTAP_API_URL=http://<APP_SERVER_IP>:8000
+Environment=TICKERTAP_INTERNAL_KEY=<INTERNAL_KEY>
+Environment=OLLAMA_MODEL=llama3:8b-instruct-q4_K_M
+Environment=OLLAMA_URL=http://localhost:11434
+
+# Resource limits — Ollama analysis can be memory-intensive.
+MemoryMax=2G
+CPUQuota=80%
+
+# Security hardening.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/<USERNAME>/tickertap-worker
+
+[Install]
+WantedBy=multi-user.target

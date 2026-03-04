@@ -31,7 +31,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from .auth import validate_jwt_config
 from .limiter import limiter
-from .routes import accounts, admin, auth_routes, chart_templates, holdings, market, news, orders, portfolio, portfolio_manager, transactions
+from .routes import accounts, admin, auth_routes, chart_templates, feedback, holdings, market, news, orders, portfolio, portfolio_manager, transactions
+from .routes.news import register_retention_task
+from .routes.feedback import register_outcome_checker
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -211,6 +213,13 @@ app.include_router(holdings.router, prefix=f"{_V1}/holdings", tags=["holdings"])
 app.include_router(news.router, prefix=_V1)
 app.include_router(portfolio_manager.router, prefix=_V1)
 app.include_router(chart_templates.router, prefix=_V1)
+app.include_router(feedback.router, prefix=_V1)
+
+# Register the 30-day news retention cleanup background task (Phase 9).
+register_retention_task(app)
+
+# Register the outcome checker that validates LLM scoring accuracy.
+register_outcome_checker(app)
 
 
 @app.get("/health", tags=["health"])

@@ -2,7 +2,8 @@
 models.py — SQLAlchemy ORM models for TickerTap.
 
 Defines all database tables: users, accounts, transactions, securities,
-holdings, orders, password_reset_tokens, and audit_log.
+holdings, orders, password_reset_tokens, audit_log, news_articles,
+news_article_tickers, score_outcomes, and scoring_rules.
 
 All foreign keys specify ondelete behaviour and nullable=False where
 a parent reference is required, ensuring referential integrity.
@@ -15,9 +16,12 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     Numeric,
+    SmallInteger,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 from sqlalchemy.sql import func
@@ -304,3 +308,155 @@ class ChartTemplate(Base):
     overlays_json = Column(JSONB, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class NewsArticle(Base):
+    """Pre-scored news article ingested by the background LLM worker.
+
+    Articles are posted by Server B via the internal ingestion API and
+    served directly from PostgreSQL — no live RSS fetching or on-request
+    LLM inference.  Each article carries a general market impact score
+    and may be linked to specific tickers via NewsArticleTicker.
+    """
+
+    __tablename__ = "news_articles"
+    __table_args__ = (
+        UniqueConstraint("url", name="uq_news_articles_url"),
+        Index("idx_news_articles_published", "published_at"),
+        Index("idx_news_articles_scored", "scored_at"),
+    )
+
+    article_id = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    url = Column(Text, nullable=False)
+    title = Column(Text, nullable=False)
+    summary = Column(Text, nullable=True)
+    source = Column(String(20), nullable=False)
+    published_at = Column(DateTime(timezone=True), nullable=True)
+    scored_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    # General market impact score: -5 (extremely bearish) to +5 (extremely bullish)
+    general_score = Column(SmallInteger, nullable=False, server_default="0")
+    general_reasoning = Column(Text, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class NewsArticleTicker(Base):
+    """Per-ticker impact score for a news article.
+
+    Junction table linking news_articles to individual ticker symbols.
+    Each row carries a ticker-specific score and reasoning produced by
+    the LLM, independent of the article's general market score.
+    """
+
+    __tablename__ = "news_article_tickers"
+    __table_args__ = (
+        UniqueConstraint("article_id", "ticker", name="uq_article_ticker"),
+        Index("idx_news_article_tickers_ticker", "ticker"),
+        Index("idx_news_article_tickers_article", "article_id"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    article_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("news_articles.article_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    ticker = Column(String(20), nullable=False)
+    # Ticker-specific impact score: -5 (extremely bearish) to +5 (extremely bullish)
+    score = Column(SmallInteger, nullable=False, server_default="0")
+    reasoning = Column(Text, nullable=True)
+
+
+class ScoreOutcome(Base):
+    """Recorded outcome comparing an LLM prediction against actual price movement.
+
+    Each row captures what happened to a stock (or SPY for general scores) after
+    the LLM scored a news article.  The accuracy_grade summarises whether the
+    prediction direction and magnitude matched real price movement.
+
+    Used by the learner to identify scoring biases and generate calibration rules.
+    """
+
+    __tablename__ = "score_outcomes"
+    __table_args__ = (
+        UniqueConstraint(
+            "article_id", "ticker", "score_type",
+            name="uq_score_outcome_article_ticker",
+        ),
+        CheckConstraint(
+            "score_type IN ('general', 'ticker')",
+            name="ck_score_outcomes_score_type",
+        ),
+        CheckConstraint(
+            "accuracy_grade IN ('correct', 'close', 'wrong', 'opposite')",
+            name="ck_score_outcomes_grade",
+        ),
+        CheckConstraint(
+            "predicted_score BETWEEN -5 AND 5",
+            name="ck_score_outcomes_predicted",
+        ),
+        Index("idx_score_outcomes_article", "article_id"),
+        Index("idx_score_outcomes_checked", "checked_at"),
+        Index("idx_score_outcomes_grade", "accuracy_grade"),
+        Index("idx_score_outcomes_ticker", "ticker"),
+    )
+
+    outcome_id = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    article_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("news_articles.article_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    ticker = Column(String(20), nullable=False)
+    score_type = Column(String(10), nullable=False)
+    predicted_score = Column(SmallInteger, nullable=False)
+    predicted_reasoning = Column(Text, nullable=True)
+    price_at_score = Column(Numeric(18, 4), nullable=True)
+    price_after = Column(Numeric(18, 4), nullable=True)
+    actual_change_pct = Column(Numeric(10, 4), nullable=True)
+    accuracy_grade = Column(String(10), nullable=False)
+    scored_at = Column(DateTime(timezone=True), nullable=False)
+    checked_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class ScoringRule(Base):
+    """Versioned set of calibration rules generated by the learner.
+
+    Only one rule set is active at any time.  When the worker fetches rules,
+    it receives the active version and injects the rules_text into the LLM
+    scoring prompt.  Historical versions are kept for accuracy tracking.
+    """
+
+    __tablename__ = "scoring_rules"
+    __table_args__ = (
+        UniqueConstraint("rule_version", name="uq_scoring_rules_version"),
+        Index(
+            "idx_scoring_rules_active",
+            "is_active",
+            postgresql_where="is_active = TRUE",
+        ),
+    )
+
+    rule_id = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    rule_version = Column(Integer, nullable=False)
+    rules_text = Column(Text, nullable=False)
+    analysis_summary = Column(Text, nullable=True)
+    sample_size = Column(Integer, nullable=True)
+    accuracy_before = Column(Numeric(5, 2), nullable=True)
+    is_active = Column(Boolean, nullable=False, server_default="FALSE")
+    generated_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

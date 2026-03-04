@@ -256,24 +256,87 @@ export function DashboardPage({ onNewTx, token, setPage }) {
 
             {/* Main chart + allocation */}
             <div className="grid-main">
-              <div className="panel">
-                <div className="panel-header">
-                  <span className="panel-title">PORTFOLIO PERFORMANCE · {chartPeriod}</span>
-                  <div style={{ display: "flex", gap: 1 }}>
-                    {["1W", "1M", "3M", "YTD", "1Y", "ALL"].map(p => (
-                      <button
-                        key={p}
-                        className={`filter-btn${p === chartPeriod ? " active" : ""}`}
-                        style={{ padding: "4px 10px", fontSize: 9 }}
-                        onClick={() => setChartPeriod(p)}
-                      >{p}</button>
-                    ))}
+              {/* Left column: Portfolio Performance + Top Positions stacked */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <div className="panel">
+                  <div className="panel-header">
+                    <span className="panel-title">PORTFOLIO PERFORMANCE · {chartPeriod}</span>
+                    <div style={{ display: "flex", gap: 1 }}>
+                      {["1W", "1M", "3M", "YTD", "1Y", "ALL"].map(p => (
+                        <button
+                          key={p}
+                          className={`filter-btn${p === chartPeriod ? " active" : ""}`}
+                          style={{ padding: "4px 10px", fontSize: 9 }}
+                          onClick={() => setChartPeriod(p)}
+                        >{p}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="panel-body" style={{ paddingBottom: 8 }}>
+                    <PortfolioChart height={160} period={chartPeriod} />
                   </div>
                 </div>
-                <div className="panel-body" style={{ paddingBottom: 8 }}>
-                  <PortfolioChart height={160} period={chartPeriod} />
+
+                {/* Top positions — same width as Portfolio Performance */}
+                <div className="panel">
+                  <div className="panel-header">
+                    <span className="panel-title">TOP POSITIONS</span>
+                    <button
+                      className="btn btn-ghost"
+                      style={{ fontSize: 9, padding: "3px 10px" }}
+                      onClick={() => setPage("portfolio-manager")}
+                    >VIEW ALL →</button>
+                  </div>
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>SYMBOL</th>
+                          <th className="right">LAST</th>
+                          <th className="right">CHG</th>
+                          <th className="right">P&L</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {loadingPositions ? (
+                          Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={4} />)
+                        ) : holdings.length === 0 ? (
+                          <tr>
+                            <td colSpan={4} style={{
+                              textAlign: "center", padding: "24px 0",
+                              fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)",
+                            }}>
+                              No positions
+                            </td>
+                          </tr>
+                        ) : holdings.slice(0, 5).map(h => {
+                          const price = h.current_price || 0;
+                          const avg = h.average_cost || 0;
+                          const pl = (price - avg) * (h.quantity || 0);
+                          return (
+                            <tr key={h.symbol}>
+                              <td>
+                                <span style={{
+                                  fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 600,
+                                  color: "var(--amber)", letterSpacing: "0.5px",
+                                }}>{h.symbol}</span>
+                              </td>
+                              <td className="right" style={{ fontSize: 11 }}>${price.toFixed(2)}</td>
+                              <td className={`right ${(h.chgPct || 0) >= 0 ? "pnl-pos" : "pnl-neg"}`} style={{ fontSize: 11 }}>
+                                {(h.chgPct || 0) >= 0 ? "+" : ""}{(h.chgPct || 0).toFixed(2)}%
+                              </td>
+                              <td className={`right ${pl >= 0 ? "pnl-pos" : "pnl-neg"}`} style={{ fontSize: 11 }}>
+                                {pl >= 0 ? "+" : ""}${Math.abs(pl).toFixed(0)}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
+              {/* Right sidebar: Allocation */}
               <div className="panel">
                 <div className="panel-header">
                   <span className="panel-title">ALLOCATION</span>
@@ -282,81 +345,6 @@ export function DashboardPage({ onNewTx, token, setPage }) {
                 <div className="panel-body">
                   <AllocationDonut holdings={holdings} />
                 </div>
-              </div>
-            </div>
-
-            {/* Top positions */}
-            <div className="panel">
-              <div className="panel-header">
-                <span className="panel-title">TOP POSITIONS</span>
-                <button
-                  className="btn btn-ghost"
-                  style={{ fontSize: 9, padding: "3px 10px" }}
-                  onClick={() => setPage("portfolio-manager")}
-                >VIEW ALL →</button>
-              </div>
-              <div style={{ overflowX: "auto" }}>
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>SYMBOL</th>
-                      <th className="right">LAST</th>
-                      <th className="right">CHG</th>
-                      <th className="right">QTY</th>
-                      <th className="right">MKT VALUE</th>
-                      <th className="right">P&L</th>
-                      <th className="right">RETURN</th>
-                      <th>TREND</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {loadingPositions ? (
-                      Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={8} />)
-                    ) : holdings.length === 0 ? (
-                      <tr>
-                        <td colSpan={8} style={{
-                          textAlign: "center", padding: "32px 0",
-                          fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--muted)",
-                        }}>
-                          No positions in this portfolio
-                        </td>
-                      </tr>
-                    ) : holdings.slice(0, 5).map(h => {
-                      const qty = h.quantity || 0;
-                      const price = h.current_price || 0;
-                      const avg = h.average_cost || 0;
-                      const val = qty * price;
-                      const pl = (price - avg) * qty;
-                      const ret = avg > 0 ? ((price - avg) / avg) * 100 : 0;
-                      return (
-                        <tr key={h.symbol}>
-                          <td>
-                            <div className="cell-symbol">
-                              <div className="sym-badge">{(h.symbol || "?").slice(0, 3)}</div>
-                              <div>
-                                <div className="cell-main">{h.symbol}</div>
-                                <div className="sym-name">{h.name}</div>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="right">${price.toFixed(2)}</td>
-                          <td className={`right ${(h.chgPct || 0) >= 0 ? "pnl-pos" : "pnl-neg"}`}>
-                            {(h.chgPct || 0) >= 0 ? "+" : ""}{(h.chgPct || 0).toFixed(2)}%
-                          </td>
-                          <td className="right">{qty}</td>
-                          <td className="right cell-main">${val.toFixed(2)}</td>
-                          <td className={`right ${pl >= 0 ? "pnl-pos" : "pnl-neg"}`}>
-                            {pl >= 0 ? "+" : ""}${pl.toFixed(2)}
-                          </td>
-                          <td className={`right ${ret >= 0 ? "pnl-pos" : "pnl-neg"}`}>
-                            {ret >= 0 ? "+" : ""}{ret.toFixed(2)}%
-                          </td>
-                          <td><Sparkline positive={(h.chgPct || 0) >= 0} w={72} h={22} /></td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
               </div>
             </div>
           </div>

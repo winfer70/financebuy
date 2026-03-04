@@ -1,69 +1,42 @@
 """
-routes/news.py — News aggregation API endpoints for TickerTap.
+routes/news.py — News API endpoints for TickerTap.
 
-Provides two endpoints:
-  GET /api/v1/news/feed     — aggregated news for the user's top portfolio tickers
-  GET /api/v1/news/tickers/{ticker} — on-demand deep fetch for a single ticker
+Provides three endpoints:
+  GET  /api/v1/news/feed              — DB-backed news feed with portfolio-aware scoring
+  GET  /api/v1/news/tickers/{ticker}  — articles filtered by a single ticker
+  POST /api/v1/internal/news          — internal ingestion API for the LLM worker (Server B)
 
-Articles are fetched from multiple RSS/HTML sources (Yahoo Finance, Google News,
-Finviz, MarketWatch), classified by FinBERT sentiment, and annotated with
-portfolio association flags.  Results are cached in memory with a 5-minute TTL
-to avoid excessive outbound traffic.
+Articles are pre-scored by a background LLM worker on Server B and pushed into
+PostgreSQL via the internal endpoint.  Read endpoints serve directly from the
+database with no external HTTP calls or LLM inference at request time.
+
+A daily retention task (30-day TTL) is registered on application startup.
 
 Route prefix: /api/v1/news  (registered in main.py)
 """
 
 import asyncio
 import logging
-import time
-from typing import Dict, List, Optional, Set, Tuple
+import os
+from datetime import datetime, timedelta, timezone
+from typing import List, Optional, Set
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..models import Portfolio, PortfolioPosition
-from ..news_sources import fetch_all_news, fetch_ticker_news
-from ..schemas import NewsArticleOut
-from ..sentiment import classify_headlines
+from ..models import NewsArticle, NewsArticleTicker, Portfolio, PortfolioPosition
+from ..schemas import NewsArticleIngest, NewsArticleOut, TickerScoreOut
 from .auth_routes import get_current_user
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/news", tags=["news"])
 
-
-# ── In-memory cache (mirrors the pattern in routes/market.py) ────────────────
-_cache: Dict[str, Tuple[float, object]] = {}
-_NEWS_FEED_TTL = 300    # 5 minutes — aggregated feed
-_TICKER_NEWS_TTL = 300  # 5 minutes — single-ticker deep fetch
-
-
-def _get_cached(key: str, ttl: float) -> Optional[object]:
-    """Return cached value if it exists and has not expired.
-
-    Args:
-        key: Cache key string.
-        ttl: Time-to-live in seconds.
-
-    Returns:
-        Cached object, or None if expired / missing.
-    """
-    entry = _cache.get(key)
-    if entry and (time.time() - entry[0]) < ttl:
-        return entry[1]
-    return None
-
-
-def _set_cached(key: str, value: object) -> None:
-    """Store a value in the in-memory cache with the current timestamp.
-
-    Args:
-        key:   Cache key string.
-        value: Object to cache.
-    """
-    _cache[key] = (time.time(), value)
+# ── Internal API configuration ───────────────────────────────────────────────
+_INTERNAL_NEWS_KEY = os.getenv("INTERNAL_NEWS_KEY", "")
+_ALLOWED_WORKER_IP = os.getenv("WORKER_IP", "")  # Optional IP restriction
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -93,80 +66,118 @@ async def _get_user_portfolio_tickers(
     return [row[0].upper() for row in result.all()]
 
 
-def _enrich_articles(
-    articles: List[Dict],
+def _build_article_response(
+    article: NewsArticle,
+    ticker_rows: List[NewsArticleTicker],
     portfolio_tickers: Set[str],
-) -> List[Dict]:
-    """Apply sentiment classification and portfolio flags to raw article dicts.
+) -> NewsArticleOut:
+    """Convert an ORM NewsArticle + its ticker rows into a response schema.
 
-    Runs FinBERT over all headlines in a single batch for efficiency, then
-    marks each article's ``in_portfolio`` flag based on ticker overlap.
+    Selects the most relevant score for display: if any ticker in the article
+    matches the user's portfolio, the highest-absolute-value portfolio ticker
+    score is used; otherwise the general market score is returned.
 
     Args:
-        articles:          List of raw article dicts from news_sources.
+        article:           The NewsArticle ORM instance.
+        ticker_rows:       All NewsArticleTicker rows for this article.
         portfolio_tickers: Set of user's portfolio ticker symbols (uppercase).
 
     Returns:
-        The same article dicts, mutated in-place with sentiment and portfolio data.
+        A NewsArticleOut instance ready for JSON serialisation.
     """
-    if not articles:
-        return articles
+    # Build per-ticker score list for the response.
+    ticker_scores = [
+        TickerScoreOut(
+            ticker=tr.ticker,
+            score=tr.score,
+            reasoning=tr.reasoning,
+        )
+        for tr in ticker_rows
+    ]
 
-    # Batch-classify all headlines at once.
-    headlines = [a["title"] for a in articles]
-    sentiments = classify_headlines(headlines)
+    # Determine portfolio overlap.
+    article_tickers = {tr.ticker.upper() for tr in ticker_rows}
+    in_portfolio = bool(article_tickers & portfolio_tickers)
 
-    for article, sent in zip(articles, sentiments):
-        article["sentiment"] = sent["label"]
-        article["sentiment_score"] = sent["score"]
-        # Mark articles that mention at least one portfolio ticker.
-        article_tickers = {t.upper() for t in article.get("tickers", [])}
-        article["in_portfolio"] = bool(article_tickers & portfolio_tickers)
+    # Select the most relevant score for the top-level ``score`` field.
+    if in_portfolio:
+        # Pick the portfolio-matching ticker with the strongest impact.
+        portfolio_matches = [
+            tr for tr in ticker_rows if tr.ticker.upper() in portfolio_tickers
+        ]
+        best = max(portfolio_matches, key=lambda tr: abs(tr.score))
+        score = best.score
+        reasoning = best.reasoning
+    else:
+        score = article.general_score
+        reasoning = article.general_reasoning
 
-    return articles
+    return NewsArticleOut(
+        title=article.title,
+        url=article.url,
+        source=article.source,
+        published_at=article.published_at,
+        score=score,
+        reasoning=reasoning,
+        ticker_scores=ticker_scores,
+        in_portfolio=in_portfolio,
+        summary=article.summary,
+    )
 
 
-# ── Endpoints ────────────────────────────────────────────────────────────────
+# ── Read Endpoints ───────────────────────────────────────────────────────────
 
 @router.get("/feed", response_model=List[NewsArticleOut])
 async def get_news_feed(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """Aggregated news feed for the authenticated user's portfolio tickers.
+    """DB-backed news feed with portfolio-aware scoring.
 
-    Fetches articles from Yahoo Finance RSS, Google News RSS, Finviz HTML
-    scrape, and MarketWatch top-stories RSS.  Results are limited to the
-    top 10 portfolio tickers per source to respect rate limits.
-
-    Articles are deduplicated by URL, classified by FinBERT sentiment,
-    sorted by publication date (newest first), and annotated with an
-    ``in_portfolio`` flag.
+    Queries the 100 most recent articles from ``news_articles``, joins with
+    ``news_article_tickers`` for per-ticker scores, and selects the most
+    relevant score based on the user's portfolio holdings.
 
     Returns:
-        List of NewsArticleOut dicts sorted by published_at descending.
+        List of NewsArticleOut sorted by published_at descending.
     """
-    # Collect the user's portfolio tickers for source targeting and flagging.
+    # 1. Get user's portfolio tickers for scoring context.
     tickers = await _get_user_portfolio_tickers(db, current_user.user_id)
-    portfolio_set: Set[str] = set(tickers)
+    portfolio_set: Set[str] = {t.upper() for t in tickers}
 
-    # Build a cache key scoped to the user's ticker set (order-independent).
-    cache_key = f"news_feed:{current_user.user_id}"
-    cached = _get_cached(cache_key, _NEWS_FEED_TTL)
-    if cached:
-        return cached
+    # 2. Fetch recent articles ordered by published_at DESC.
+    articles_result = await db.execute(
+        select(NewsArticle)
+        .order_by(NewsArticle.published_at.desc().nullslast())
+        .limit(100)
+    )
+    articles = articles_result.scalars().all()
 
-    # Fetch from all sources concurrently (I/O-bound, runs in async context).
-    raw_articles = await fetch_all_news(tickers, portfolio_set)
+    if not articles:
+        return []
 
-    # Enrich with sentiment and portfolio flags (CPU-bound FinBERT inference).
-    enriched = await asyncio.to_thread(_enrich_articles, raw_articles, portfolio_set)
+    # 3. Batch-fetch all ticker rows for these articles in one query.
+    article_ids = [a.article_id for a in articles]
+    tickers_result = await db.execute(
+        select(NewsArticleTicker)
+        .where(NewsArticleTicker.article_id.in_(article_ids))
+    )
+    all_ticker_rows = tickers_result.scalars().all()
 
-    # Convert to response schema.
-    response = [NewsArticleOut(**a) for a in enriched]
+    # 4. Group ticker rows by article_id for efficient lookup.
+    ticker_map: dict = {}
+    for tr in all_ticker_rows:
+        ticker_map.setdefault(tr.article_id, []).append(tr)
 
-    _set_cached(cache_key, response)
-    return response
+    # 5. Build response objects.
+    return [
+        _build_article_response(
+            article,
+            ticker_map.get(article.article_id, []),
+            portfolio_set,
+        )
+        for article in articles
+    ]
 
 
 @router.get("/tickers/{ticker}", response_model=List[NewsArticleOut])
@@ -175,38 +186,207 @@ async def get_ticker_news(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """On-demand deep fetch of news for a single ticker symbol.
+    """Articles filtered by a single ticker symbol, scored from the DB.
 
-    Bypasses the top-10 ticker limit used in the aggregated feed and
-    fetches from every source for the specified ticker.  Use this
-    endpoint when the user clicks "load more" on a specific stock.
+    Returns up to 50 articles that mention the specified ticker, ordered by
+    published_at descending.
 
     Args:
         ticker: Stock ticker symbol (e.g. "AAPL").
 
     Returns:
-        List of NewsArticleOut dicts sorted by published_at descending.
+        List of NewsArticleOut sorted by published_at descending.
     """
     sym = ticker.strip().upper()
     if not sym:
         raise HTTPException(status_code=400, detail="Ticker symbol is required.")
 
-    cache_key = f"ticker_news:{sym}"
-    cached = _get_cached(cache_key, _TICKER_NEWS_TTL)
-    if cached:
-        return cached
-
-    # Collect portfolio tickers for the in_portfolio flag.
+    # 1. Get user's portfolio tickers for scoring context.
     user_tickers = await _get_user_portfolio_tickers(db, current_user.user_id)
-    portfolio_set: Set[str] = set(user_tickers)
+    portfolio_set: Set[str] = {t.upper() for t in user_tickers}
 
-    # Deep fetch for this single ticker (no top-10 limit).
-    raw_articles = await fetch_ticker_news(sym)
+    # 2. Find article IDs that reference this ticker.
+    ticker_article_ids_result = await db.execute(
+        select(NewsArticleTicker.article_id)
+        .where(NewsArticleTicker.ticker == sym)
+    )
+    article_ids = [row[0] for row in ticker_article_ids_result.all()]
 
-    # Enrich with sentiment and portfolio flags.
-    enriched = await asyncio.to_thread(_enrich_articles, raw_articles, portfolio_set)
+    if not article_ids:
+        return []
 
-    response = [NewsArticleOut(**a) for a in enriched]
+    # 3. Fetch the articles ordered by published_at DESC.
+    articles_result = await db.execute(
+        select(NewsArticle)
+        .where(NewsArticle.article_id.in_(article_ids))
+        .order_by(NewsArticle.published_at.desc().nullslast())
+        .limit(50)
+    )
+    articles = articles_result.scalars().all()
 
-    _set_cached(cache_key, response)
-    return response
+    # 4. Batch-fetch all ticker rows for these articles.
+    final_article_ids = [a.article_id for a in articles]
+    tickers_result = await db.execute(
+        select(NewsArticleTicker)
+        .where(NewsArticleTicker.article_id.in_(final_article_ids))
+    )
+    all_ticker_rows = tickers_result.scalars().all()
+
+    ticker_map: dict = {}
+    for tr in all_ticker_rows:
+        ticker_map.setdefault(tr.article_id, []).append(tr)
+
+    # 5. Build response objects.
+    return [
+        _build_article_response(
+            article,
+            ticker_map.get(article.article_id, []),
+            portfolio_set,
+        )
+        for article in articles
+    ]
+
+
+# ── Internal Ingestion Endpoint ──────────────────────────────────────────────
+
+@router.post("/internal/news")
+async def ingest_news(
+    articles: List[NewsArticleIngest],
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Receive pre-scored articles from the LLM worker on Server B.
+
+    Authentication is two-factor:
+      1. ``X-Internal-Key`` header must match the ``INTERNAL_NEWS_KEY`` env var.
+      2. (Optional) ``request.client.host`` must match ``WORKER_IP`` if set.
+
+    Articles are upserted by URL — duplicates are silently skipped.
+
+    Args:
+        articles: List of NewsArticleIngest payloads from the worker.
+        request:  FastAPI request object (for IP validation).
+        db:       Async database session.
+
+    Returns:
+        dict with ``inserted`` and ``skipped`` counts.
+    """
+    # ── Auth: shared secret ──────────────────────────────────────────────────
+    provided_key = request.headers.get("X-Internal-Key", "")
+    if not _INTERNAL_NEWS_KEY or provided_key != _INTERNAL_NEWS_KEY:
+        logger.warning(
+            "Internal news endpoint: invalid key from %s", request.client.host
+        )
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    # ── Auth: optional IP restriction ────────────────────────────────────────
+    if _ALLOWED_WORKER_IP and request.client.host != _ALLOWED_WORKER_IP:
+        logger.warning(
+            "Internal news endpoint: rejected IP %s (expected %s)",
+            request.client.host,
+            _ALLOWED_WORKER_IP,
+        )
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    # ── Upsert articles ─────────────────────────────────────────────────────
+    inserted = 0
+    skipped = 0
+
+    for payload in articles:
+        # Check for duplicate URLs.
+        existing = await db.execute(
+            select(NewsArticle.article_id)
+            .where(NewsArticle.url == payload.url)
+        )
+        if existing.scalar_one_or_none() is not None:
+            skipped += 1
+            continue
+
+        # Insert the article.
+        article = NewsArticle(
+            url=payload.url,
+            title=payload.title,
+            summary=payload.summary,
+            source=payload.source,
+            published_at=payload.published_at,
+            general_score=payload.general_score,
+            general_reasoning=payload.general_reasoning,
+        )
+        db.add(article)
+        # Flush to get the article_id for ticker rows.
+        await db.flush()
+
+        # Insert per-ticker scores.
+        for ts in payload.tickers:
+            ticker_row = NewsArticleTicker(
+                article_id=article.article_id,
+                ticker=ts.ticker.upper(),
+                score=ts.score,
+                reasoning=ts.reasoning,
+            )
+            db.add(ticker_row)
+
+        inserted += 1
+
+    await db.commit()
+
+    logger.info(
+        "Internal news ingestion: inserted=%d, skipped=%d, from=%s",
+        inserted,
+        skipped,
+        request.client.host,
+    )
+    return {"inserted": inserted, "skipped": skipped}
+
+
+# ── Retention Cleanup ────────────────────────────────────────────────────────
+
+_RETENTION_DAYS = 30
+_RETENTION_CHECK_INTERVAL = 86400  # 24 hours in seconds
+
+
+async def _retention_cleanup_loop():
+    """Background task that removes articles older than 30 days once daily.
+
+    Runs indefinitely in the background.  CASCADE deletes on the foreign key
+    automatically remove associated news_article_tickers rows.
+    """
+    while True:
+        try:
+            # Import here to avoid circular import; engine is fully initialised by now.
+            from ..db import AsyncSessionLocal
+
+            cutoff = datetime.now(timezone.utc) - timedelta(days=_RETENTION_DAYS)
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    delete(NewsArticle).where(NewsArticle.created_at < cutoff)
+                )
+                await session.commit()
+                deleted = result.rowcount
+                if deleted > 0:
+                    logger.info(
+                        "Retention cleanup: deleted %d articles older than %d days.",
+                        deleted,
+                        _RETENTION_DAYS,
+                    )
+        except Exception:
+            logger.exception("Retention cleanup task failed.")
+
+        await asyncio.sleep(_RETENTION_CHECK_INTERVAL)
+
+
+def register_retention_task(app):
+    """Register the retention cleanup loop on FastAPI startup.
+
+    Call this from main.py during application initialisation:
+        from .routes.news import register_retention_task
+        register_retention_task(app)
+
+    Args:
+        app: The FastAPI application instance.
+    """
+
+    @app.on_event("startup")
+    async def _start_retention():
+        asyncio.create_task(_retention_cleanup_loop())
+        logger.info("Retention cleanup task registered (30-day TTL, daily check).")

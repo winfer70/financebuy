@@ -1,0 +1,47 @@
+# tickertap-worker.service — systemd unit for the TickerTap news worker.
+#
+# Installation:
+#   1. Copy this file to /etc/systemd/system/tickertap-worker.service
+#   2. Edit the <USERNAME>, <APP_SERVER_IP>, and <INTERNAL_KEY> placeholders
+#   3. sudo systemctl daemon-reload
+#   4. sudo systemctl enable tickertap-worker
+#   5. sudo systemctl start tickertap-worker
+#
+# Logs:
+#   journalctl -u tickertap-worker -f
+
+[Unit]
+Description=TickerTap News Worker — fetches, scores, and posts financial news
+After=network.target ollama.service
+Wants=ollama.service
+
+[Service]
+Type=simple
+User=<USERNAME>
+WorkingDirectory=/home/<USERNAME>/tickertap-worker
+ExecStart=/home/<USERNAME>/tickertap-worker/venv/bin/python worker.py
+Restart=always
+RestartSec=30
+
+# Environment variables for the worker.
+# TICKERTAP_API_URL    — Server A base URL (include port, no trailing slash)
+# TICKERTAP_INTERNAL_KEY — must match INTERNAL_NEWS_KEY on Server A
+# OLLAMA_MODEL         — Ollama model tag to use for scoring
+# OLLAMA_URL           — Ollama API base URL (default http://localhost:11434)
+Environment=TICKERTAP_API_URL=http://<APP_SERVER_IP>:8000
+Environment=TICKERTAP_INTERNAL_KEY=<INTERNAL_KEY>
+Environment=OLLAMA_MODEL=llama3:8b-instruct-q4_K_M
+Environment=OLLAMA_URL=http://localhost:11434
+
+# Resource limits — prevent runaway memory usage.
+MemoryMax=1G
+CPUQuota=80%
+
+# Security hardening.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/<USERNAME>/tickertap-worker
+
+[Install]
+WantedBy=multi-user.target
