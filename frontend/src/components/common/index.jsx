@@ -95,15 +95,47 @@ export function Clock() {
 
 /**
  * Footer: Application footer
- * Displays copyright and legal information
+ * Displays copyright, legal navigation links, and data attribution.
+ *
+ * @param {object}   props
+ * @param {Function} [props.onNavigate] - Callback to navigate to legal pages
+ *                                         (receives page ID string)
  */
-export function Footer() {
+export function Footer({ onNavigate }) {
   const year = new Date().getFullYear();
   return (
     <footer className="app-footer">
       <span>&copy; {year} Ticker-Tap. All rights reserved.</span>
-      <span>Market data provided by Yahoo Finance. Not financial advice.</span>
+      <span className="app-footer-links">
+        <a onClick={() => onNavigate && onNavigate("legal")}>Disclaimer</a>
+        <span className="app-footer-sep">&middot;</span>
+        <a onClick={() => onNavigate && onNavigate("legal-privacy")}>Privacy</a>
+        <span className="app-footer-sep">&middot;</span>
+        <a onClick={() => onNavigate && onNavigate("legal-terms")}>Terms</a>
+      </span>
+      <span>Market data provided by Yahoo Finance.</span>
     </footer>
+  );
+}
+
+/**
+ * LegalLinks: Compact legal navigation links for auth pages.
+ * Renders a centered row of Disclaimer / Privacy / Terms links
+ * styled for the login/register/forgot-password pages.
+ *
+ * @param {object}   props
+ * @param {Function} props.onNavigate - Callback receiving a page ID string
+ *                                       ("legal", "legal-privacy", "legal-terms")
+ */
+export function LegalLinks({ onNavigate }) {
+  return (
+    <div className="auth-legal-links">
+      <a onClick={() => onNavigate("legal")}>Disclaimer</a>
+      <span>&middot;</span>
+      <a onClick={() => onNavigate("legal-privacy")}>Privacy</a>
+      <span>&middot;</span>
+      <a onClick={() => onNavigate("legal-terms")}>Terms</a>
+    </div>
   );
 }
 

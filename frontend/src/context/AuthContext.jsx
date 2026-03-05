@@ -27,11 +27,13 @@ const AuthContext = createContext(null);
 /* ── Storage keys (P7.13 — renamed from fb_* to tickertap_* prefix) ─────── */
 // Old "fb_" prefix suggested Firebase; app doesn't use Firebase.
 // Migration: old keys are cleaned up automatically on first load below.
-const STORAGE_TOKEN   = "tickertap_token";
-const STORAGE_USER    = "tickertap_user";
-const STORAGE_ACCOUNT = "tickertap_account";
-const IDLE_KEY        = "tickertap_last_activity";
-const IDLE_MS         = 5 * 60 * 1000; // 5 minutes
+const STORAGE_TOKEN      = "tickertap_token";
+const STORAGE_USER       = "tickertap_user";
+const STORAGE_ACCOUNT    = "tickertap_account";
+const STORAGE_PORTFOLIOS = "tickertap_portfolios";
+const STORAGE_POSITIONS  = "tickertap_positions";
+const IDLE_KEY           = "tickertap_last_activity";
+const IDLE_MS            = 5 * 60 * 1000; // 5 minutes
 
 // Migrate old fb_* keys to new tickertap_* keys on first load
 const _OLD_KEYS = ["fb_token", "fb_user", "fb_account", "fb_last_activity"];
@@ -85,6 +87,8 @@ export function AuthProvider({ children, onToast }) {
     sessionStorage.removeItem(STORAGE_TOKEN);
     sessionStorage.removeItem(STORAGE_USER);
     sessionStorage.removeItem(STORAGE_ACCOUNT);
+    sessionStorage.removeItem(STORAGE_PORTFOLIOS);
+    sessionStorage.removeItem(STORAGE_POSITIONS);
     onToast?.("SESSION TERMINATED");
   }, [onToast]);
 
@@ -170,6 +174,19 @@ export function AuthProvider({ children, onToast }) {
         sessionStorage.setItem(STORAGE_ACCOUNT, accounts[0].account_id);
       }
     } catch (_) { /* account fetch is optional */ }
+
+    // Pre-fetch portfolio data so dashboard loads instantly (best-effort)
+    try {
+      const portfolios = await api.listPortfolios(res.access_token);
+      if (portfolios && portfolios.length) {
+        sessionStorage.setItem(STORAGE_PORTFOLIOS, JSON.stringify(portfolios));
+        // Pre-fetch positions for the first portfolio
+        const positions = await api.listPositions(portfolios[0].portfolio_id, res.access_token);
+        if (positions) {
+          sessionStorage.setItem(STORAGE_POSITIONS, JSON.stringify(positions));
+        }
+      }
+    } catch (_) { /* portfolio pre-fetch is optional */ }
 
     onToast?.(
       `AUTHENTICATION SUCCESSFUL · WELCOME BACK, ${(res.first_name || "").toUpperCase()}`

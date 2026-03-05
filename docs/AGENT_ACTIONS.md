@@ -193,6 +193,57 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod exec app alembic 
 
 ---
 
+## Session: 2026-03-05 — Auth Session Persistence & Silent Token Refresh
+
+### Summary of changes
+
+Fixed two bugs that broke authentication session persistence:
+
+#### 1. Stale Storage Key in Page Router (critical)
+
+- **`frontend/src/App.jsx`** — The initial page-state callback checked `sessionStorage.getItem("fb_token")` (a defunct key from an old naming convention) to decide whether to show the dashboard or login page on load. The correct key is `"tickertap_token"`. A migration block in `AuthContext.jsx` actively deletes all `fb_*` keys, so the check always returned `null`, forcing the login page on every refresh even though the token was valid in storage.
+  - **Fix:** Replaced `"fb_token"` with `"tickertap_token"` in the `useState` initialiser (line 309).
+
+#### 2. Missing `credentials: "include"` on Fetch Calls
+
+- **`frontend/src/api/client.js`** — The `apiFetch` wrapper did not include `credentials: "include"` in its `fetch()` options. Without this, the browser never sent the httpOnly `tickertap_refresh` cookie set by the backend on login, making the `/auth/refresh` endpoint unreachable from the client.
+  - **Fix:** Added `credentials: "include"` to the `fetch()` call inside `apiFetch`.
+
+#### 3. Silent Token Refresh on 401 (new)
+
+- **`frontend/src/api/client.js`** — Previously, any 401 response immediately dispatched a `session-expired` event, forcing a hard logout. The backend already had a fully implemented `/auth/refresh` endpoint (with httpOnly cookie rotation), and the frontend already defined an `api.refreshToken()` method — but nothing ever called it.
+  - **Fix:** Added `_refreshLock` (module-scope promise lock) and `_tryRefreshToken()` helper. When a 401 is received:
+    1. A single refresh request is made via `POST /auth/refresh` (concurrent 401s coalesce behind the same promise).
+    2. If the refresh succeeds, the new access token is persisted to `sessionStorage` and the original request is retried with the fresh token.
+    3. If the refresh fails (or the retry still 401s), `session-expired` is dispatched as before.
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `frontend/src/App.jsx` | Line 309: `"fb_token"` → `"tickertap_token"` (correct storage key for page router) |
+| `frontend/src/api/client.js` | Added `credentials: "include"` to `fetch()` options; added `_refreshLock` + `_tryRefreshToken()` at module scope; replaced immediate `session-expired` dispatch with refresh-then-retry logic on 401 |
+
+### Behaviour before / after
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| Page refresh after login | Redirected to login page | Stays on dashboard |
+| JWT expires (60 min) | Hard logout, `session-expired` event | Silent refresh via httpOnly cookie, session continues |
+| Refresh cookie also expired | N/A (never attempted) | `session-expired` dispatched, redirect to login |
+| Multiple API calls 401 simultaneously | N/A | Single refresh request, all callers await the same promise |
+
+### Deployment
+
+```bash
+cd /home/REDACTED420/projects/finance/tickerTap/frontend
+npm run build
+```
+
+No backend changes required — the `/auth/refresh` endpoint was already fully implemented and operational.
+
+---
+
 ## Session: 2026-01-09 — CI, Linting, Agent Guidance
 
 ### Summary of changes

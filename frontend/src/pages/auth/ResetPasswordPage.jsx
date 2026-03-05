@@ -10,8 +10,9 @@ import api from "../../api/client";
 import { Ic } from "../../components/common/Icons";
 import { Sparkline } from "../../components/charts";
 import { TICKER_DATA } from "../../styles/globals";
+import { LegalLinks } from "../../components/common";
 
-export function ResetPasswordPage({ resetToken, onBack, onSuccess }) {
+export function ResetPasswordPage({ resetToken, onBack, onSuccess, onNavigate }) {
   const [pwd, setPwd]   = useState("");
   const [pwd2, setPwd2] = useState("");
   const [show, setShow] = useState(false);
@@ -106,6 +107,7 @@ export function ResetPasswordPage({ resetToken, onBack, onSuccess }) {
           <div className="security-item"><Ic.lock/> TLS 1.3 Encrypted</div>
           <div className="security-item"><Ic.shield/> SOC 2 Compliant</div>
         </div>
+        {onNavigate && <LegalLinks onNavigate={onNavigate} />}
       </div>
     </div>
   );
