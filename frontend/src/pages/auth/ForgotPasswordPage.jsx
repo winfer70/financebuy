@@ -10,8 +10,9 @@ import api from "../../api/client";
 import { Ic } from "../../components/common/Icons";
 import { Sparkline } from "../../components/charts";
 import { TICKER_DATA } from "../../styles/globals";
+import { LegalLinks } from "../../components/common";
 
-export function ForgotPasswordPage({ onBack, backendOk }) {
+export function ForgotPasswordPage({ onBack, backendOk, onNavigate }) {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
@@ -111,6 +112,7 @@ export function ForgotPasswordPage({ onBack, backendOk }) {
             {backendOk===null?"Checking API...":backendOk?"API Connected":"Demo Mode (API Offline)"}
           </div>
         </div>
+        {onNavigate && <LegalLinks onNavigate={onNavigate} />}
       </div>
     </div>
   );

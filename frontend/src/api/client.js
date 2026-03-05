@@ -18,6 +18,40 @@ const _ORIGIN = import.meta.env.VITE_API_URL || window.location.origin;
 // All business API routes are versioned under /api/v1 (P7.18 — API versioning).
 const API_BASE = `${_ORIGIN}/api/v1`;
 
+/* ── Token refresh lock ───────────────────────────────────────────────────
+ * When a 401 is received, we attempt a silent token refresh via the httpOnly
+ * refresh cookie. _refreshLock ensures that if multiple API calls 401 at the
+ * same time, only ONE refresh request is made; the others await the same
+ * promise. Resets to null after the refresh completes (success or failure).
+ */
+let _refreshLock = null;
+
+/**
+ * _tryRefreshToken — Attempt to obtain a new access token using the
+ * httpOnly refresh cookie. Returns the new token on success, null on failure.
+ *
+ * @returns {Promise<string|null>} New access token or null
+ */
+async function _tryRefreshToken() {
+  try {
+    const res = await fetch(`${API_BASE}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",   // Browser sends the httpOnly tickertap_refresh cookie
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    // Persist the new token so AuthContext and page router stay in sync
+    if (data.access_token) {
+      sessionStorage.setItem("tickertap_token", data.access_token);
+      return data.access_token;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * apiFetch — low-level fetch wrapper.
  *
@@ -36,12 +70,37 @@ export async function apiFetch(path, { method = "GET", body, token } = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
     method,
     headers,
+    credentials: "include",   // Send httpOnly refresh cookie on /auth/refresh
     body: body ? JSON.stringify(body) : undefined,
   });
 
-  // 401 while authenticated → session expired; surface via custom event so
-  // AuthContext can respond without a direct import cycle.
+  // 401 while authenticated → attempt a silent token refresh before giving up.
+  // If the refresh succeeds, retry the original request with the new token.
+  // If it fails, dispatch session-expired so AuthContext redirects to login.
   if (res.status === 401 && token) {
+    // Coalesce concurrent refresh attempts behind a single promise
+    if (!_refreshLock) {
+      _refreshLock = _tryRefreshToken().finally(() => { _refreshLock = null; });
+    }
+    const newToken = await _refreshLock;
+
+    if (newToken) {
+      // Retry the original request with the fresh token (non-recursive to
+      // avoid infinite loops — if this retry 401s, we fall through below).
+      const retryHeaders = { ...headers, Authorization: `Bearer ${newToken}` };
+      const retry = await fetch(`${API_BASE}${path}`, {
+        method,
+        headers: retryHeaders,
+        credentials: "include",
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      if (retry.ok) {
+        if (retry.status === 204) return null;
+        return retry.json();
+      }
+    }
+
+    // Refresh failed or retried request still 401 — session is truly expired
     window.dispatchEvent(new Event("session-expired"));
     throw new Error("Session expired");
   }

@@ -48,6 +48,7 @@ import { ChartsPage }             from "./pages/ChartsPage";
 import { ImportPage }             from "./pages/ImportPage";
 import { PortfolioManagerPage }   from "./pages/PortfolioManagerPage";
 import { NewsPage }               from "./pages/NewsPage";
+import { LegalPage }              from "./pages/LegalPage";
 
 /* ── API ─────────────────────────────────────────────────────────────────── */
 import api from "./api/client";
@@ -177,7 +178,7 @@ function AppShell({ page, setPage, goBack, toasts, addToast }) {
           <div className="topbar-breadcrumb">
             <span>TICKER-TAP</span>
             <span className="topbar-sep">/</span>
-            <span className="current">{page.toUpperCase()}</span>
+            <span className="current">{page.startsWith("legal") ? "LEGAL" : page.toUpperCase()}</span>
           </div>
 
           <TickerStrip token={authToken} />
@@ -251,8 +252,18 @@ function AppShell({ page, setPage, goBack, toasts, addToast }) {
             onViewNews={navigateToNews}
           />
         )}
+        {page.startsWith("legal") && (
+          <LegalPage
+            initialTab={
+              page === "legal-privacy" ? "privacy"
+              : page === "legal-terms" ? "terms"
+              : "disclaimer"
+            }
+            onBack={goBack}
+          />
+        )}
 
-        <Footer />
+        <Footer onNavigate={setPage} />
       </div>
 
       {/* Transaction modal */}
@@ -295,7 +306,7 @@ export default function App() {
   const [page, setPageRaw] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("reset_token")) return "reset-password";
-    return sessionStorage.getItem("fb_token") ? "dashboard" : "login";
+    return sessionStorage.getItem("tickertap_token") ? "dashboard" : "login";
   });
   const [pageHistory, setPageHistory] = useState([]);
 
@@ -374,6 +385,7 @@ function PageRouter({ page, setPage, goBack, resetToken, toasts, addToast }) {
       <ForgotPasswordPage
         onBack={() => setPage("login")}
         backendOk={backendOk}
+        onNavigate={setPage}
       />
     );
   }
@@ -391,6 +403,7 @@ function PageRouter({ page, setPage, goBack, resetToken, toasts, addToast }) {
           setPage("login");
           addToast("PASSWORD UPDATED · PLEASE SIGN IN");
         }}
+        onNavigate={setPage}
       />
     );
   }
@@ -401,6 +414,21 @@ function PageRouter({ page, setPage, goBack, resetToken, toasts, addToast }) {
         onLogin={onLogin}
         onBack={() => setPage("login")}
         backendOk={backendOk}
+        onNavigate={setPage}
+      />
+    );
+  }
+
+  /* Legal pages — accessible without authentication */
+  if (page.startsWith("legal") && !authToken) {
+    const tab = page === "legal-privacy" ? "privacy"
+              : page === "legal-terms"   ? "terms"
+              : "disclaimer";
+    return (
+      <LegalPage
+        initialTab={tab}
+        onBack={() => setPage("login")}
+        standalone
       />
     );
   }
@@ -412,6 +440,7 @@ function PageRouter({ page, setPage, goBack, resetToken, toasts, addToast }) {
         onRegister={() => setPage("register")}
         onForgotPassword={() => setPage("forgot-password")}
         backendOk={backendOk}
+        onNavigate={setPage}
       />
     );
   }

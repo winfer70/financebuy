@@ -32,31 +32,48 @@ export function DashboardPage({ onNewTx, token, setPage }) {
   const [chartPeriod, setChartPeriod] = useState("3M");
 
   /* ── Portfolio data source ──────────────────────────────────────────────── */
-  const [portfolios,        setPortfolios]        = useState([]);
-  const [activePortfolioId, setActivePortfolioId] = useState(null);
-  const [positions,         setPositions]         = useState([]);
+  const [portfolios,        setPortfolios]        = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem("tickertap_portfolios") || "null") || []; }
+    catch { return []; }
+  });
+  const [activePortfolioId, setActivePortfolioId] = useState(() => {
+    try {
+      const cached = JSON.parse(sessionStorage.getItem("tickertap_portfolios") || "null");
+      return cached && cached.length ? cached[0].portfolio_id : null;
+    } catch { return null; }
+  });
+  const [positions,         setPositions]         = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem("tickertap_positions") || "null") || []; }
+    catch { return []; }
+  });
   const [quotesMap,         setQuotesMap]         = useState({});
-  const [loadingPortfolios, setLoadingPortfolios] = useState(true);
+  /* Skip loading state if cache is available — dashboard renders instantly */
+  const hasCachedPortfolios = portfolios.length > 0;
+  const [loadingPortfolios, setLoadingPortfolios] = useState(!hasCachedPortfolios);
   const [loadingPositions,  setLoadingPositions]  = useState(false);
 
-  /* -- Load portfolios ---------------------------------------------------- */
+  /* -- Load portfolios (stale-while-revalidate: cache renders instantly,
+        fresh fetch updates in background) --------------------------------- */
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
     (async () => {
-      setLoadingPortfolios(true);
+      if (!hasCachedPortfolios) setLoadingPortfolios(true);
       try {
         const list = await api.listPortfolios(token);
         if (cancelled) return;
         setPortfolios(list || []);
-        if (list && list.length) setActivePortfolioId(list[0].portfolio_id);
+        sessionStorage.setItem("tickertap_portfolios", JSON.stringify(list || []));
+        if (list && list.length) {
+          setActivePortfolioId(prev => prev || list[0].portfolio_id);
+        }
       } catch { /* non-fatal */ }
       finally { if (!cancelled) setLoadingPortfolios(false); }
     })();
     return () => { cancelled = true; };
   }, [token]);
 
-  /* -- Load positions when active portfolio changes ----------------------- */
+  /* -- Load positions when active portfolio changes (caches to sessionStorage) */
   useEffect(() => {
     if (!token || !activePortfolioId) { setPositions([]); setQuotesMap({}); return; }
     let cancelled = false;
@@ -66,6 +83,7 @@ export function DashboardPage({ onNewTx, token, setPage }) {
         const list = await api.listPositions(activePortfolioId, token);
         if (cancelled) return;
         setPositions(list || []);
+        sessionStorage.setItem("tickertap_positions", JSON.stringify(list || []));
       } catch { /* non-fatal */ }
       finally { if (!cancelled) setLoadingPositions(false); }
     })();

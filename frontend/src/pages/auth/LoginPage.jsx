@@ -8,6 +8,7 @@ import { useState } from "react";
 import { Ic } from "../../components/common/Icons";
 import { Sparkline } from "../../components/charts";
 import { TICKER_DATA } from "../../styles/globals";
+import { LegalLinks } from "../../components/common";
 
 // Demo credentials are supplied via build-time env vars (VITE_DEMO_EMAIL /
 // VITE_DEMO_PWD).  Both default to empty string so the form starts blank in
@@ -16,7 +17,7 @@ import { TICKER_DATA } from "../../styles/globals";
 const DEMO_EMAIL = import.meta.env.VITE_DEMO_EMAIL || "";
 const DEMO_PWD   = import.meta.env.VITE_DEMO_PWD   || "";
 
-export function LoginPage({ onLogin, onRegister, onForgotPassword, backendOk }) {
+export function LoginPage({ onLogin, onRegister, onForgotPassword, backendOk, onNavigate }) {
   const [email, setEmail] = useState(DEMO_EMAIL);
   const [pwd, setPwd] = useState(DEMO_PWD);
   const [show, setShow] = useState(false);
@@ -130,6 +131,7 @@ export function LoginPage({ onLogin, onRegister, onForgotPassword, backendOk }) 
             {backendOk===null ? "Checking API..." : backendOk ? "API Connected" : "Demo Mode (API Offline)"}
           </div>
         </div>
+        {onNavigate && <LegalLinks onNavigate={onNavigate} />}
       </div>
     </div>
   );
