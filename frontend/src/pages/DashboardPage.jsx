@@ -11,8 +11,8 @@
  * Data flow:
  *  1.  Load portfolios on mount → auto-select first
  *  2.  Load positions when active portfolio changes
- *  3.  Fetch live quotes via bulkQuotes after positions load
- *  4.  Poll quotes on a market-aware interval (3s open / 300s closed)
+ *  3.  Register held symbols with shared QuotesContext
+ *  4.  QuotesContext polls bulkQuotes on a market-aware interval (3s open / 300s closed)
  *
  * Props:
  *  @param {Function} onNewTx    - Open transaction modal
@@ -21,15 +21,33 @@
  *  @param {Function} setPage    - Navigate to another page
  */
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import api from "../api/client";
 import { Ic } from "../components/common/Icons";
 import { SkeletonRow, useMarketStatus } from "../components/common";
 import { Sparkline, PortfolioChart, AllocationDonut, Heatmap } from "../components/charts";
+import { useCurrency } from "../context/CurrencyContext";
+import { useI18n } from "../context/I18nContext";
+import { useQuotes } from "../context/QuotesContext";
 
-export function DashboardPage({ onNewTx, token, setPage }) {
+/* -- Category filter IDs for Top Positions panel (labels resolved via t()) -- */
+
+export function DashboardPage({ onNewTx, token, setPage, onViewChart }) {
   const mktStatus = useMarketStatus();
+  const { formatValue, currencySymbol } = useCurrency();
+  const { t } = useI18n();
+  /* ── Category filter config for Top Positions panel (i18n-aware) ──────── */
+  const POSITION_CATEGORIES = useMemo(() => [
+    { id: "all",      label: t("watchlist.all") },
+    { id: "stock",    label: t("watchlist.stocks") },
+    { id: "crypto",   label: t("watchlist.crypto") },
+    { id: "etf",      label: t("watchlist.etfs") },
+    { id: "physical", label: t("watchlist.physical") },
+  ], [t]);
+  const { quotesMap: sharedQuotesMap, registerSymbols, unregisterSymbols } = useQuotes();
   const [chartPeriod, setChartPeriod] = useState("3M");
+  const [positionCategory, setPositionCategory] = useState("all");
+  const [loserCategory, setLoserCategory] = useState("all");
 
   /* ── Portfolio data source ──────────────────────────────────────────────── */
   const [portfolios,        setPortfolios]        = useState(() => {
@@ -46,7 +64,8 @@ export function DashboardPage({ onNewTx, token, setPage }) {
     try { return JSON.parse(sessionStorage.getItem("tickertap_positions") || "null") || []; }
     catch { return []; }
   });
-  const [quotesMap,         setQuotesMap]         = useState({});
+  /* quotesMap is now derived from the shared QuotesContext */
+  const quotesMap = sharedQuotesMap;
   /* Skip loading state if cache is available — dashboard renders instantly */
   const hasCachedPortfolios = portfolios.length > 0;
   const [loadingPortfolios, setLoadingPortfolios] = useState(!hasCachedPortfolios);
@@ -75,7 +94,7 @@ export function DashboardPage({ onNewTx, token, setPage }) {
 
   /* -- Load positions when active portfolio changes (caches to sessionStorage) */
   useEffect(() => {
-    if (!token || !activePortfolioId) { setPositions([]); setQuotesMap({}); return; }
+    if (!token || !activePortfolioId) { setPositions([]); return; }
     let cancelled = false;
     (async () => {
       setLoadingPositions(true);
@@ -90,46 +109,100 @@ export function DashboardPage({ onNewTx, token, setPage }) {
     return () => { cancelled = true; };
   }, [token, activePortfolioId]);
 
-  /* -- Poll live quotes for held symbols ---------------------------------- */
-  const dashPollMs = mktStatus.isOpen ? 3000 : 300000;
+  /* -- Register held symbols with shared QuotesContext -------------------- */
   useEffect(() => {
-    if (!token || positions.length === 0) return;
-    let cancelled = false;
     const symbols = [...new Set(positions.map(p => p.ticker))];
-    const fetchQuotes = async () => {
-      try {
-        const quoteList = await api.bulkQuotes(symbols, token);
-        if (cancelled) return;
-        const map = {};
-        quoteList.forEach(q => { map[q.symbol] = q; });
-        setQuotesMap(map);
-      } catch { /* non-fatal */ }
-    };
-    fetchQuotes();
-    const id = setInterval(fetchQuotes, dashPollMs);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [token, positions, dashPollMs]);
+    if (symbols.length > 0) registerSymbols("dashboard", symbols);
+    return () => unregisterSymbols("dashboard");
+  }, [positions, registerSymbols, unregisterSymbols]);
 
-  /* ── Derived holdings from positions + quotes ───────────────────────────── */
-  const holdings = useMemo(() =>
-    positions.filter(p => !p.is_excluded).map(p => {
-      const q = quotesMap[p.ticker];
+  /* ── Compute portfolio performance time-series via backend endpoint ──── */
+  const [perfData, setPerfData] = useState([]);
+  const [perfLoading, setPerfLoading] = useState(false);
+
+  useEffect(() => {
+    if (!token || positions.length === 0 || !activePortfolioId) { setPerfData([]); return; }
+    let cancelled = false;
+
+    (async () => {
+      setPerfLoading(true);
+      try {
+        /* The backend handles OHLCV fetching, forward-fill, and dynamic
+           ALL range computation — no local PERIOD_DAYS map needed. */
+        const series = await api.getPortfolioPerformance(activePortfolioId, chartPeriod, token);
+        if (!cancelled) setPerfData(series);
+      } catch { /* non-fatal */ }
+      finally { if (!cancelled) setPerfLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [token, activePortfolioId, positions, chartPeriod]);
+
+  /* ── Derived holdings from positions + quotes (consolidated by symbol) ─── */
+  const holdings = useMemo(() => {
+    /* Group positions by symbol, then consolidate qty + cost */
+    const grouped = {};
+    positions.filter(p => !p.is_excluded).forEach(p => {
+      const key = p.ticker;
+      if (!grouped[key]) {
+        grouped[key] = { symbol: key, name: p.name, totalQty: 0, totalCost: 0, asset_type: p.asset_type || "stock" };
+      }
       const qty = parseFloat(p.quantity) || 0;
       const avg = parseFloat(p.purchase_price) || 0;
+      grouped[key].totalQty += qty;
+      grouped[key].totalCost += qty * avg;
+    });
+
+    return Object.values(grouped).map(g => {
+      const q = quotesMap[g.symbol];
       const price = q ? parseFloat(q.price) || 0 : 0;
+      const avg = g.totalQty > 0 ? g.totalCost / g.totalQty : 0;
       return {
-        symbol: p.ticker,
-        name: q?.name || p.name || p.ticker,
-        quantity: qty,
+        id: g.symbol,
+        symbol: g.symbol,
+        name: q?.name || g.name || g.symbol,
+        quantity: g.totalQty,
         average_cost: avg,
         current_price: price,
-        market_value: qty * price,
+        market_value: g.totalQty * price,
         chg: q ? parseFloat(q.change) || 0 : 0,
         chgPct: q ? parseFloat(q.change_pct) || 0 : 0,
         volume: q ? parseFloat(q.volume) || 0 : 0,
+        asset_type: g.asset_type,
       };
-    }),
-  [positions, quotesMap]);
+    });
+  }, [positions, quotesMap]);
+
+  /* ── Category-filtered holdings for Top Positions panel ───────────────── */
+  const filteredHoldings = useMemo(() =>
+    positionCategory === "all"
+      ? holdings
+      : holdings.filter(h => h.asset_type === positionCategory),
+  [holdings, positionCategory]);
+
+  /* ── Category-filtered holdings for Biggest Losers panel ─────────────── */
+  const filteredLosersHoldings = useMemo(() =>
+    loserCategory === "all"
+      ? holdings
+      : holdings.filter(h => h.asset_type === loserCategory),
+  [holdings, loserCategory]);
+
+  /* ── Top gainers: sorted by P&L descending, top 5 with positive gain ─── */
+  const topGainers = useMemo(() => {
+    return [...filteredHoldings]
+      .map(h => ({ ...h, pl: (h.current_price - h.average_cost) * h.quantity }))
+      .filter(h => h.pl > 0)
+      .sort((a, b) => b.pl - a.pl)
+      .slice(0, 5);
+  }, [filteredHoldings]);
+
+  /* ── Biggest losers: sorted by P&L ascending, top 5 with negative P&L ── */
+  const topLosers = useMemo(() => {
+    return [...filteredLosersHoldings]
+      .map(h => ({ ...h, pl: (h.current_price - h.average_cost) * h.quantity }))
+      .filter(h => h.pl < 0)
+      .sort((a, b) => a.pl - b.pl)
+      .slice(0, 5);
+  }, [filteredLosersHoldings]);
 
   /* ── Summary stats ──────────────────────────────────────────────────────── */
   const total  = holdings.reduce((s, h) => s + h.quantity * h.current_price, 0);
@@ -137,6 +210,29 @@ export function DashboardPage({ onNewTx, token, setPage }) {
   const pnl    = total - cost;
   const pnlPct = cost > 0 ? (pnl / cost) * 100 : 0;
   const dayChg = holdings.reduce((s, h) => s + h.chg * h.quantity, 0);
+
+  /* ── Heatmap click popup state ───────────────────────────────────────── */
+  const [heatmapPopup, setHeatmapPopup] = useState(null);
+
+  /**
+   * handleHeatmapClick — opens a context popup on a heatmap tile click.
+   * Captures symbol + mouse coords for absolute positioning.
+   *
+   * @param {string} symbol - ticker symbol from the clicked tile
+   * @param {MouseEvent} e  - click event for positioning
+   */
+  const handleHeatmapClick = useCallback((symbol, e) => {
+    e.stopPropagation();
+    setHeatmapPopup({ symbol, x: e.clientX, y: e.clientY });
+  }, []);
+
+  /* Dismiss popup on outside click */
+  useEffect(() => {
+    if (!heatmapPopup) return;
+    const dismiss = () => setHeatmapPopup(null);
+    document.addEventListener("click", dismiss);
+    return () => document.removeEventListener("click", dismiss);
+  }, [heatmapPopup]);
 
   const hasPortfolios = portfolios.length > 0;
   const activePortfolioName = portfolios.find(p => p.portfolio_id === activePortfolioId)?.name || "";
@@ -148,9 +244,9 @@ export function DashboardPage({ onNewTx, token, setPage }) {
       <div className="page-header">
         <div style={{ display: "flex", alignItems: "flex-end", gap: 16 }}>
           <div>
-            <div className="page-title">DASHBOARD</div>
+            <div className="page-title">{t("nav.dashboard")}</div>
             <div className="page-sub">
-              {mktStatus.dateStr} · {mktStatus.isOpen ? "MARKET OPEN" : "MARKET CLOSED"} · NYSE · NASDAQ
+              {mktStatus.dateStr} · {mktStatus.isOpen ? t("dashboard.marketOpen") : t("dashboard.marketClosed")} · NYSE · NASDAQ
             </div>
           </div>
 
@@ -174,7 +270,7 @@ export function DashboardPage({ onNewTx, token, setPage }) {
         </div>
 
         <div className="page-actions">
-          <button className="btn btn-amber" onClick={onNewTx}><Ic.plus /> NEW TRANSACTION</button>
+          <button className="btn btn-amber" onClick={onNewTx}><Ic.plus /> {t("dashboard.newTransaction")}</button>
         </div>
       </div>
 
@@ -185,11 +281,11 @@ export function DashboardPage({ onNewTx, token, setPage }) {
           <div className="page-inner">
             <div className="panel">
               <div className="panel-header">
-                <span className="panel-title">MARKET HEATMAP</span>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>BY VOLUME</span>
+                <span className="panel-title">{t("dashboard.heatmap")}</span>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>{t("dashboard.byVolume")}</span>
               </div>
               <div className="panel-body" style={{ padding: 0 }}>
-                <Heatmap holdings={[]} />
+                <Heatmap holdings={[]} onTileAction={handleHeatmapClick} />
               </div>
             </div>
 
@@ -202,20 +298,19 @@ export function DashboardPage({ onNewTx, token, setPage }) {
                 fontFamily: "var(--font-disp)", fontSize: 24, color: "var(--bright)",
                 letterSpacing: "1px", marginBottom: 8,
               }}>
-                NO PORTFOLIOS YET
+                {t("dashboard.noPortfolios")}
               </div>
               <div style={{
                 fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--muted)",
                 marginBottom: 20, maxWidth: 420, margin: "0 auto 20px",
               }}>
-                Create your first portfolio to see performance stats, allocation charts,
-                and top positions right here on the dashboard.
+                {t("dashboard.createFirst")}
               </div>
               <button
                 className="btn btn-amber"
                 onClick={() => setPage("portfolio-manager")}
               >
-                <Ic.plus /> CREATE PORTFOLIO
+                <Ic.plus /> {t("dashboard.createPortfolio")}
               </button>
             </div>
           </div>
@@ -226,7 +321,7 @@ export function DashboardPage({ onNewTx, token, setPage }) {
       {loadingPortfolios && (
         <div style={{ textAlign: "center", padding: "48px 0" }}>
           <span className="loading-pulse" style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--muted)" }}>
-            LOADING PORTFOLIO DATA...
+            {t("dashboard.loadingPortfolio")}
           </span>
         </div>
       )}
@@ -237,23 +332,23 @@ export function DashboardPage({ onNewTx, token, setPage }) {
           {/* Stats row */}
           <div className="grid-stats stagger">
             {[
-              { lbl: "Portfolio Value", val: `$${(total / 1000).toFixed(2)}K`, cls: "amber" },
-              { lbl: "Unrealized P&L",  val: `${pnl >= 0 ? "+" : ""}$${(Math.abs(pnl) / 1000).toFixed(2)}K`, cls: pnl >= 0 ? "green" : "red" },
-              { lbl: "Day Change",      val: `${dayChg >= 0 ? "+" : ""}$${Math.abs(dayChg).toFixed(2)}`, cls: dayChg >= 0 ? "green" : "red" },
-              { lbl: "Positions",       val: String(holdings.length), cls: "" },
-              { lbl: "Portfolio",       val: activePortfolioName || "—", cls: "amber" },
+              { lbl: t("dashboard.portfolioValue"), val: formatValue(total, { compact: true }), cls: "amber" },
+              { lbl: t("dashboard.unrealizedPnl"),  val: formatValue(pnl, { compact: true, showSign: true }), cls: pnl >= 0 ? "green" : "red" },
+              { lbl: t("dashboard.dayChange"),      val: formatValue(dayChg, { showSign: true }), cls: dayChg >= 0 ? "green" : "red" },
+              { lbl: t("dashboard.positions"),       val: String(holdings.length), cls: "" },
+              { lbl: t("dashboard.portfolio"),       val: activePortfolioName || "—", cls: "amber" },
             ].map((s, i) => (
               <div key={i} className="stat-block">
                 <div className="stat-lbl">{s.lbl}</div>
                 <div className={`stat-val${s.cls ? " " + s.cls : ""}`}>{s.val}</div>
                 {i === 1 && (
                   <div className={`stat-badge ${pnl >= 0 ? "badge-green" : "badge-red"}`}>
-                    {pnl >= 0 ? <Ic.up /> : <Ic.down />} {Math.abs(pnlPct).toFixed(2)}% ALL TIME
+                    {pnl >= 0 ? <Ic.up /> : <Ic.down />} {Math.abs(pnlPct).toFixed(2)}% {t("dashboard.allTime")}
                   </div>
                 )}
                 {i === 2 && (
                   <div className={`stat-badge ${dayChg >= 0 ? "badge-green" : "badge-red"}`}>
-                    {dayChg >= 0 ? <Ic.up /> : <Ic.down />} {total > 0 ? Math.abs((dayChg / total) * 100).toFixed(2) : "0.00"}% TODAY
+                    {dayChg >= 0 ? <Ic.up /> : <Ic.down />} {total > 0 ? Math.abs((dayChg / total) * 100).toFixed(2) : "0.00"}% {t("dashboard.today")}
                   </div>
                 )}
               </div>
@@ -264,87 +359,183 @@ export function DashboardPage({ onNewTx, token, setPage }) {
             {/* Heatmap */}
             <div className="panel">
               <div className="panel-header">
-                <span className="panel-title">MARKET HEATMAP</span>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>BY VOLUME</span>
+                <span className="panel-title">{t("dashboard.heatmap")}</span>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>{t("dashboard.byVolume")}</span>
               </div>
               <div className="panel-body" style={{ padding: 0 }}>
-                <Heatmap holdings={holdings} />
+                <Heatmap holdings={holdings} onTileAction={handleHeatmapClick} />
               </div>
             </div>
 
-            {/* Main chart + allocation */}
-            <div className="grid-main">
-              {/* Left column: Portfolio Performance + Top Positions stacked */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                <div className="panel">
-                  <div className="panel-header">
-                    <span className="panel-title">PORTFOLIO PERFORMANCE · {chartPeriod}</span>
-                    <div style={{ display: "flex", gap: 1 }}>
-                      {["1W", "1M", "3M", "YTD", "1Y", "ALL"].map(p => (
-                        <button
-                          key={p}
-                          className={`filter-btn${p === chartPeriod ? " active" : ""}`}
-                          style={{ padding: "4px 10px", fontSize: 9 }}
-                          onClick={() => setChartPeriod(p)}
-                        >{p}</button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="panel-body" style={{ paddingBottom: 8 }}>
-                    <PortfolioChart height={160} period={chartPeriod} />
-                  </div>
-                </div>
-
-                {/* Top positions — same width as Portfolio Performance */}
-                <div className="panel">
-                  <div className="panel-header">
-                    <span className="panel-title">TOP POSITIONS</span>
+            {/* Portfolio Performance — full-width panel above grid */}
+            <div className="panel">
+              <div className="panel-header">
+                <span className="panel-title">{t("dashboard.perfChart")} · {chartPeriod}</span>
+                <div style={{ display: "flex", gap: 1 }}>
+                  {["1W", "1M", "3M", "YTD", "1Y", "ALL"].map(p => (
                     <button
-                      className="btn btn-ghost"
-                      style={{ fontSize: 9, padding: "3px 10px" }}
-                      onClick={() => setPage("portfolio-manager")}
-                    >VIEW ALL →</button>
+                      key={p}
+                      className={`filter-btn${p === chartPeriod ? " active" : ""}`}
+                      style={{ padding: "4px 10px", fontSize: 9 }}
+                      onClick={() => setChartPeriod(p)}
+                    >{p}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="panel-body" style={{ paddingBottom: 8 }}>
+                <PortfolioChart key={activePortfolioId + chartPeriod} height={160} data={perfData} period={chartPeriod} currencySymbol={currencySymbol} />
+              </div>
+            </div>
+
+            {/* Main grid: Gainers/Losers + Allocation sidebar */}
+            <div className="grid-main">
+              {/* Left column: Top Positions stacked */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                {/* Top gainers — most profitable positions */}
+                <div className="panel">
+                  <div className="panel-header">
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                      <span className="panel-title" style={{ color: "var(--green)" }}>{t("dashboard.topGainers")}</span>
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
+                        {filteredHoldings.length} {t("dashboard.held")}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ display: "flex", gap: 1 }}>
+                        {POSITION_CATEGORIES.map(c => (
+                          <button
+                            key={c.id}
+                            className={`filter-btn${c.id === positionCategory ? " active" : ""}`}
+                            style={{ padding: "4px 10px", fontSize: 9 }}
+                            onClick={() => setPositionCategory(c.id)}
+                          >{c.label}</button>
+                        ))}
+                      </div>
+                      <button
+                        className="btn btn-ghost"
+                        style={{ fontSize: 9, padding: "3px 10px" }}
+                        onClick={() => setPage("portfolio-manager", { sortCol: "gainloss", sortDir: "desc" })}
+                      >{t("dashboard.viewAll")} →</button>
+                    </div>
                   </div>
                   <div style={{ overflowX: "auto" }}>
                     <table className="data-table">
                       <thead>
                         <tr>
-                          <th>SYMBOL</th>
-                          <th className="right">LAST</th>
-                          <th className="right">CHG</th>
-                          <th className="right">P&L</th>
+                          <th>{t("dashboard.symbol")}</th>
+                          <th className="right">{t("portfolioManager.breakeven")}</th>
+                          <th className="right">{t("portfolioManager.price")}</th>
+                          <th className="right">{t("dashboard.chg")}</th>
+                          <th className="right">{t("portfolioManager.gainLoss")}</th>
                         </tr>
                       </thead>
                       <tbody>
                         {loadingPositions ? (
-                          Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={4} />)
-                        ) : holdings.length === 0 ? (
+                          Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={5} />)
+                        ) : topGainers.length === 0 ? (
                           <tr>
-                            <td colSpan={4} style={{
+                            <td colSpan={5} style={{
                               textAlign: "center", padding: "24px 0",
                               fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)",
                             }}>
-                              No positions
+                              {t("dashboard.noGainers")}
                             </td>
                           </tr>
-                        ) : holdings.slice(0, 5).map(h => {
-                          const price = h.current_price || 0;
-                          const avg = h.average_cost || 0;
-                          const pl = (price - avg) * (h.quantity || 0);
+                        ) : topGainers.map(h => {
+                          const chgColor = (h.chgPct || 0) >= 0 ? "var(--green)" : "var(--red)";
+                          const gainPct = h.average_cost > 0 ? ((h.current_price - h.average_cost) / h.average_cost * 100).toFixed(2) : "0.00";
                           return (
-                            <tr key={h.symbol}>
+                            <tr key={h.id}>
                               <td>
                                 <span style={{
                                   fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 600,
-                                  color: "var(--amber)", letterSpacing: "0.5px",
+                                  color: "var(--green)", letterSpacing: "0.5px",
                                 }}>{h.symbol}</span>
                               </td>
-                              <td className="right" style={{ fontSize: 11 }}>${price.toFixed(2)}</td>
-                              <td className={`right ${(h.chgPct || 0) >= 0 ? "pnl-pos" : "pnl-neg"}`} style={{ fontSize: 11 }}>
-                                {(h.chgPct || 0) >= 0 ? "+" : ""}{(h.chgPct || 0).toFixed(2)}%
+                              <td className="right" style={{ fontSize: 11, color: "var(--muted)" }}>{formatValue(h.average_cost)}</td>
+                              <td className="right" style={{ fontSize: 11, color: "var(--green)" }}>{formatValue(h.current_price)}</td>
+                              <td className="right" style={{ fontSize: 11, color: chgColor }}>
+                                {formatValue(h.chg, { showSign: true })} ({(h.chgPct || 0).toFixed(2)}%)
                               </td>
-                              <td className={`right ${pl >= 0 ? "pnl-pos" : "pnl-neg"}`} style={{ fontSize: 11 }}>
-                                {pl >= 0 ? "+" : ""}${Math.abs(pl).toFixed(0)}
+                              <td className="right" style={{ fontSize: 11, color: "var(--green)" }}>
+                                {formatValue(h.pl, { showSign: true })} ({gainPct}%)
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Biggest losers — worst performing positions */}
+                <div className="panel">
+                  <div className="panel-header">
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                      <span className="panel-title" style={{ color: "var(--red)" }}>{t("dashboard.biggestLosers")}</span>
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
+                        {filteredLosersHoldings.length} {t("dashboard.held")}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ display: "flex", gap: 1 }}>
+                        {POSITION_CATEGORIES.map(c => (
+                          <button
+                            key={c.id}
+                            className={`filter-btn${c.id === loserCategory ? " active" : ""}`}
+                            style={{ padding: "4px 10px", fontSize: 9 }}
+                            onClick={() => setLoserCategory(c.id)}
+                          >{c.label}</button>
+                        ))}
+                      </div>
+                      <button
+                        className="btn btn-ghost"
+                        style={{ fontSize: 9, padding: "3px 10px" }}
+                        onClick={() => setPage("portfolio-manager", { sortCol: "gainloss", sortDir: "asc" })}
+                      >{t("dashboard.viewAll")} →</button>
+                    </div>
+                  </div>
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>{t("dashboard.symbol")}</th>
+                          <th className="right">{t("portfolioManager.breakeven")}</th>
+                          <th className="right">{t("portfolioManager.price")}</th>
+                          <th className="right">{t("dashboard.chg")}</th>
+                          <th className="right">{t("portfolioManager.gainLoss")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {loadingPositions ? (
+                          Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={5} />)
+                        ) : topLosers.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} style={{
+                              textAlign: "center", padding: "24px 0",
+                              fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)",
+                            }}>
+                              {t("dashboard.noLosers")}
+                            </td>
+                          </tr>
+                        ) : topLosers.map(h => {
+                          const chgColor = (h.chgPct || 0) >= 0 ? "var(--green)" : "var(--red)";
+                          const lossPct = h.average_cost > 0 ? ((h.current_price - h.average_cost) / h.average_cost * 100).toFixed(2) : "0.00";
+                          return (
+                            <tr key={h.id}>
+                              <td>
+                                <span style={{
+                                  fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 600,
+                                  color: "var(--red)", letterSpacing: "0.5px",
+                                }}>{h.symbol}</span>
+                              </td>
+                              <td className="right" style={{ fontSize: 11, color: "var(--muted)" }}>{formatValue(h.average_cost)}</td>
+                              <td className="right" style={{ fontSize: 11, color: "var(--red)" }}>{formatValue(h.current_price)}</td>
+                              <td className="right" style={{ fontSize: 11, color: chgColor }}>
+                                {formatValue(h.chg, { showSign: true })} ({(h.chgPct || 0).toFixed(2)}%)
+                              </td>
+                              <td className="right" style={{ fontSize: 11, color: "var(--red)" }}>
+                                {formatValue(h.pl, { showSign: true })} ({lossPct}%)
                               </td>
                             </tr>
                           );
@@ -357,16 +548,46 @@ export function DashboardPage({ onNewTx, token, setPage }) {
               {/* Right sidebar: Allocation */}
               <div className="panel">
                 <div className="panel-header">
-                  <span className="panel-title">ALLOCATION</span>
-                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>{holdings.length} POSITIONS</span>
+                  <span className="panel-title">{t("dashboard.allocation")}</span>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>{holdings.length} {t("dashboard.positions")}</span>
                 </div>
                 <div className="panel-body">
-                  <AllocationDonut holdings={holdings} />
+                  <AllocationDonut holdings={holdings} currencySymbol={currencySymbol} />
                 </div>
               </div>
             </div>
           </div>
         </>
+      )}
+
+      {/* ── Heatmap click popup ────────────────────────────────────────── */}
+      {heatmapPopup && (
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{
+            position: "fixed", left: heatmapPopup.x, top: heatmapPopup.y,
+            background: "var(--panel)", border: "1px solid var(--border)",
+            borderRadius: 3, padding: "8px 0", zIndex: 1000, minWidth: 140,
+            boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+            fontFamily: "var(--font-mono)", fontSize: 11,
+          }}
+        >
+          <div style={{ padding: "4px 14px 6px", color: "var(--bright)", fontWeight: 600, letterSpacing: "0.5px", borderBottom: "1px solid var(--border)" }}>
+            {heatmapPopup.symbol}
+          </div>
+          <button
+            onClick={() => { onViewChart && onViewChart(heatmapPopup.symbol); setHeatmapPopup(null); }}
+            style={{
+              display: "block", width: "100%", padding: "7px 14px", background: "none",
+              border: "none", color: "var(--amber)", cursor: "pointer", textAlign: "left",
+              fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: "0.5px",
+            }}
+            onMouseOver={e => e.currentTarget.style.background = "var(--bg3)"}
+            onMouseOut={e => e.currentTarget.style.background = "none"}
+          >
+            {t("dashboard.viewChart")} →
+          </button>
+        </div>
       )}
     </div>
   );

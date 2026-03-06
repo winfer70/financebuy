@@ -87,6 +87,7 @@ services:
       REDIS_URL:       redis://redis:6379/0
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173,https://ticker-tap.com}
       SMTP_HOST:       ${SMTP_HOST:-smtp.example.com}
+      OLLAMA_URL:      ${OLLAMA_URL:-http://localhost:11434}
     # Bind to localhost only; nginx (or your reverse proxy) handles external traffic.
     ports:
       - "127.0.0.1:8000:8000"
@@ -99,6 +100,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend/app:/app/app:ro
+      - ./backend/alembic:/app/alembic:ro
     # Resource limits (P6.6)
     deploy:
       resources:

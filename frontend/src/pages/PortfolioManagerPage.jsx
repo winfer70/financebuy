@@ -18,6 +18,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import api from "../api/client";
 import { Ic } from "../components/common/Icons";
+import { useCurrency } from "../context/CurrencyContext";
 
 /* -- Formatters ----------------------------------------------------------- */
 const fmtUSD  = (n) => n == null ? "\u2014" : `$${parseFloat(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -534,7 +535,7 @@ function CSVImportModal({ portfolioId, onClose, onImported, token, assetType }) 
                       <td><span className="amber">{r.ticker}</span></td>
                       <td>{r.name || "\u2014"}</td>
                       <td className="right">{fmtQty(r.quantity)}</td>
-                      <td className="right">{fmtUSD(r.purchase_price)}</td>
+                      <td className="right">{formatValue(r.purchase_price)}</td>
                       <td>{fmtDate(r.purchase_date)}</td>
                       <td>{r.group_tag || "\u2014"}</td>
                     </tr>
@@ -565,6 +566,7 @@ function ModifyPositionModal({ position, onClose, onModified, token }) {
     quantity:       String(parseFloat(position.quantity)),
     purchase_price: String(parseFloat(position.purchase_price)),
     group_tag:      position.group_tag || "",
+    stop_loss:      position.stop_loss ? String(parseFloat(position.stop_loss)) : "",
   });
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -573,12 +575,14 @@ function ModifyPositionModal({ position, onClose, onModified, token }) {
   const submit = async () => {
     if (!form.quantity || isNaN(+form.quantity) || +form.quantity <= 0) { setErr("Quantity must be a positive number."); return; }
     if (!form.purchase_price || isNaN(+form.purchase_price) || +form.purchase_price <= 0) { setErr("Purchase price must be a positive number."); return; }
+    if (form.stop_loss && (isNaN(+form.stop_loss) || +form.stop_loss < 0)) { setErr("Stop loss must be a non-negative number."); return; }
     setLoading(true); setErr("");
     try {
       const updated = await api.modifyPosition(position.position_id, {
         quantity:       parseFloat(form.quantity),
         purchase_price: parseFloat(form.purchase_price),
         group_tag:      form.group_tag.trim() || null,
+        stop_loss:      form.stop_loss ? parseFloat(form.stop_loss) : null,
       }, token);
       onModified(updated);
     } catch (e) { setErr(e.message || "Failed to modify position."); }
@@ -603,9 +607,15 @@ function ModifyPositionModal({ position, onClose, onModified, token }) {
               <input className="form-control" type="number" min="0.01" step="any" value={form.purchase_price} onChange={e => set("purchase_price", e.target.value)} />
             </div>
           </div>
-          <div className="form-field">
-            <label className="form-label">Group / Tag</label>
-            <input className="form-control" placeholder="Core, Speculative..." value={form.group_tag} onChange={e => set("group_tag", e.target.value)} maxLength={64} />
+          <div className="form-row">
+            <div className="form-field">
+              <label className="form-label">Stop Loss (optional)</label>
+              <input className="form-control" type="number" min="0" step="any" placeholder="e.g. 145.00" value={form.stop_loss} onChange={e => set("stop_loss", e.target.value)} />
+            </div>
+            <div className="form-field">
+              <label className="form-label">Group / Tag</label>
+              <input className="form-control" placeholder="Core, Speculative..." value={form.group_tag} onChange={e => set("group_tag", e.target.value)} maxLength={64} />
+            </div>
           </div>
         </div>
         {err && <div style={{ padding: "8px 20px", fontSize: 11, color: "var(--red)", background: "rgba(239,68,68,.06)", borderTop: "1px solid rgba(239,68,68,.2)" }}>{err}</div>}
@@ -697,8 +707,9 @@ function SortTh({ label, col, sortCol, sortDir, onSort, right }) {
 /* =========================================================================
    MAIN PAGE
 ========================================================================= */
-export function PortfolioManagerPage({ token, onViewChart, onViewNews }) {
+export function PortfolioManagerPage({ token, onViewChart, onViewNews, pageParams }) {
   /* -- State -------------------------------------------------------------- */
+  const { formatValue } = useCurrency();
   const [portfolios,         setPortfolios]         = useState([]);
   const [activePortfolioId,  setActivePortfolioId]  = useState(null);
   const [positions,          setPositions]          = useState([]);
@@ -707,6 +718,15 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews }) {
   const [changePeriod,       setChangePeriod]       = useState("1D");
   const [sortCol,            setSortCol]            = useState(null);
   const [sortDir,            setSortDir]            = useState("asc");
+
+  /* -- Apply sort params passed from parent (e.g. Dashboard VIEW ALL) ----- */
+  useEffect(() => {
+    if (pageParams?.sortCol) {
+      setSortCol(pageParams.sortCol);
+      setSortDir(pageParams.sortDir || "desc");
+    }
+  }, [pageParams]);
+
   const [loadingPortfolios,  setLoadingPortfolios]  = useState(false);
   const [loadingPositions,   setLoadingPositions]   = useState(false);
   const [globalErr,          setGlobalErr]          = useState("");
@@ -921,6 +941,62 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews }) {
     } catch (e) { setGlobalErr(e.message || "Failed to update stop loss."); }
   };
 
+  /**
+   * handleExportCSV — generates a CSV from current positions + live quotes
+   * and triggers a browser download.
+   *
+   * Columns: Name, Ticker, Type, Date, Qty, BEP, Price, Value, Gain/Loss,
+   *          Gain%, Stop Loss, Group
+   *
+   * Uses sortedPositions (respects current section filter + sort) and the
+   * quotes map for live pricing. No backend call required.
+   */
+  const handleExportCSV = () => {
+    const header = ["Name","Ticker","Type","Date","Qty","BEP","Price","Value","Gain/Loss","Gain%","Stop Loss","Group"];
+    const rows = sortedPositions.map(pos => {
+      const q = quotes[pos.ticker];
+      const price = q?.price;
+      const qty = parseFloat(pos.quantity);
+      const bep = parseFloat(pos.purchase_price);
+      const value = price != null ? price * qty : null;
+      const gainLoss = price != null ? (price - bep) * qty : null;
+      const gainPct = gainLoss != null && bep * qty !== 0 ? (gainLoss / (bep * qty)) * 100 : null;
+      const displayName = (pos.asset_type === "physical"
+        ? (pos.name || METALS.find(m => m.symbol === pos.ticker)?.name || q?.name || pos.ticker)
+        : (q?.name || pos.name || pos.ticker));
+      return [
+        displayName,
+        pos.ticker,
+        pos.asset_type || "stock",
+        pos.purchase_date || "",
+        qty,
+        bep.toFixed(2),
+        price != null ? price.toFixed(2) : "",
+        value != null ? value.toFixed(2) : "",
+        gainLoss != null ? gainLoss.toFixed(2) : "",
+        gainPct != null ? gainPct.toFixed(2) + "%" : "",
+        pos.stop_loss ? parseFloat(pos.stop_loss).toFixed(2) : "",
+        pos.group_tag || "",
+      ];
+    });
+    /* Escape CSV fields that contain commas, quotes, or newlines */
+    const esc = (v) => {
+      const s = String(v);
+      return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const csv = [header.map(esc).join(","), ...rows.map(r => r.map(esc).join(","))].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const pName = (activePortfolio?.name || "portfolio").replace(/[^a-zA-Z0-9_-]/g, "_");
+    a.href = url;
+    a.download = `${pName}_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   const handlePortfolioCreated = (p) => {
     const next = [...portfolios, p];
     setPortfolios(next);
@@ -1035,6 +1111,9 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews }) {
                 <button className="btn btn-outline" onClick={() => setShowImport(true)}>
                   <Ic.upload /> IMPORT CSV
                 </button>
+                <button className="btn btn-outline" onClick={handleExportCSV} disabled={sortedPositions.length === 0}>
+                  <Ic.download /> EXPORT CSV
+                </button>
               </div>
             </div>
           )}
@@ -1042,9 +1121,9 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews }) {
           {/* Summary strip (total across all sections) */}
           <div className="grid-stats stagger" style={{ marginBottom: 16 }}>
             {[
-              { lbl: "TOTAL VALUE",     val: fmtUSD(summary.totalValue),  cls: "" },
-              { lbl: "TOTAL COST",      val: fmtUSD(summary.totalCost),   cls: "" },
-              { lbl: "GAIN / LOSS",     val: fmtUSD(summary.gainLoss),    cls: summary.gainLoss >= 0 ? "green" : "red" },
+              { lbl: "TOTAL VALUE",     val: formatValue(summary.totalValue),  cls: "" },
+              { lbl: "TOTAL COST",      val: formatValue(summary.totalCost),   cls: "" },
+              { lbl: "GAIN / LOSS",     val: formatValue(summary.gainLoss, { showSign: true }),    cls: summary.gainLoss >= 0 ? "green" : "red" },
               { lbl: "RETURN",          val: fmtPct(summary.gainPct),     cls: summary.gainPct >= 0 ? "green" : "red" },
               { lbl: "ACTIVE POS.",     val: summary.count,               cls: "" },
             ].map((s, i) => (
@@ -1119,13 +1198,17 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews }) {
                       />
                     </th>
                     <SortTh label="STOP LOSS" col="stoploss"    sortCol={sortCol} sortDir={sortDir} onSort={handleSort} right />
-                    <th className="right" style={{ whiteSpace: "nowrap", cursor: "default" }}>
+                    <th className="right" onClick={() => handleSort("change")}
+                      style={{ whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }}>
                       CHG
+                      {sortCol === "change"
+                        ? <span style={{ marginLeft: 4, opacity: .8 }}>{sortDir === "asc" ? "\u25B2" : "\u25BC"}</span>
+                        : <span style={{ marginLeft: 4, opacity: .25 }}>{"\u21C5"}</span>}
                       <select
                         value={changePeriod}
                         onChange={e => setChangePeriod(e.target.value)}
                         onClick={e => e.stopPropagation()}
-                        style={{ marginLeft: 6, background: "var(--c-surface)", border: "1px solid var(--c-border)", color: "var(--c-text)", fontFamily: "var(--font-mono)", fontSize: 10, borderRadius: 2, padding: "1px 3px", cursor: "pointer" }}
+                        style={{ marginLeft: 4, background: "var(--c-surface)", border: "1px solid var(--c-border)", color: "var(--c-text)", fontFamily: "var(--font-mono)", fontSize: 10, borderRadius: 2, padding: "1px 3px", cursor: "pointer" }}
                       >
                         {["1D","1W","1M","3M","1Y"].map(p => <option key={p}>{p}</option>)}
                       </select>
@@ -1191,18 +1274,18 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews }) {
 
                         <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>{fmtQty(qty)}</td>
 
-                        <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>{fmtUSD(bep)}</td>
+                        <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>{formatValue(bep)}</td>
 
                         <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
-                          {price != null ? fmtUSD(price) : <span className="loading-pulse" style={{ color: "var(--c-muted)", fontSize: 11 }}>...</span>}
+                          {price != null ? formatValue(price) : <span className="loading-pulse" style={{ color: "var(--c-muted)", fontSize: 11 }}>...</span>}
                         </td>
 
                         <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
-                          {smaData[pos.ticker]?.[50] != null ? fmtUSD(smaData[pos.ticker][50]) : <span style={{ color: "var(--c-muted)", fontSize: 11 }}>...</span>}
+                          {smaData[pos.ticker]?.[50] != null ? formatValue(smaData[pos.ticker][50]) : <span style={{ color: "var(--c-muted)", fontSize: 11 }}>...</span>}
                         </td>
 
                         <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
-                          {smaData[pos.ticker]?.[customSmaPeriod] != null ? fmtUSD(smaData[pos.ticker][customSmaPeriod]) : <span style={{ color: "var(--c-muted)", fontSize: 11 }}>...</span>}
+                          {smaData[pos.ticker]?.[customSmaPeriod] != null ? formatValue(smaData[pos.ticker][customSmaPeriod]) : <span style={{ color: "var(--c-muted)", fontSize: 11 }}>...</span>}
                         </td>
 
                         <td className="right" style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
@@ -1225,25 +1308,28 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews }) {
                               style={{ cursor: "pointer", color: pos.stop_loss && price != null && price <= parseFloat(pos.stop_loss) ? "var(--red)" : undefined, fontWeight: pos.stop_loss && price != null && price <= parseFloat(pos.stop_loss) ? 700 : undefined }}
                               title="Click to edit stop loss"
                             >
-                              {pos.stop_loss ? fmtUSD(parseFloat(pos.stop_loss)) : <span style={{ color: "var(--c-muted)" }}>{"\u2014"}</span>}
+                              {pos.stop_loss ? formatValue(parseFloat(pos.stop_loss)) : <span style={{ color: "var(--c-muted)" }}>{"\u2014"}</span>}
                             </span>
                           )}
                         </td>
 
                         <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
                           {changePct != null
-                            ? <span className={changePct >= 0 ? "green" : "red"}>{fmtPct(changePct)}</span>
+                            ? <span className={changePct >= 0 ? "green" : "red"}>
+                                {formatValue(price * qty * (changePct / 100), { showSign: true })}
+                                <span style={{ marginLeft: 4, fontSize: 10, opacity: .75 }}>({fmtPct(changePct)})</span>
+                              </span>
                             : <span style={{ color: "var(--c-muted)", fontSize: 11 }}>...</span>}
                         </td>
 
                         <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
-                          {value != null ? fmtUSD(value) : "\u2014"}
+                          {value != null ? formatValue(value) : "\u2014"}
                         </td>
 
                         <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
                           {gainLoss != null
                             ? <span className={gainLoss >= 0 ? "green" : "red"}>
-                                {fmtUSD(gainLoss)}
+                                {formatValue(gainLoss, { showSign: true })}
                                 <span style={{ marginLeft: 4, fontSize: 10, opacity: .75 }}>({fmtPct(gainPct)})</span>
                               </span>
                             : "\u2014"}

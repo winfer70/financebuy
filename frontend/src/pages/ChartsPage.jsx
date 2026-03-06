@@ -8,6 +8,8 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import api from "../api/client";
 import { Ic } from "../components/common/Icons";
 import { useMarketStatus } from "../components/common";
+import { useI18n } from "../context/I18nContext";
+import { useCurrency } from "../context/CurrencyContext";
 
 export function generateOHLCV(basePrice, years = 5) {
   const days = years * 365;
@@ -162,16 +164,16 @@ const INTERVAL_DAYS = {
 };
 const INTRADAY_INTERVALS = new Set(["1m","2m","3m","5m","10m","15m","30m","45m","1h","2h","3h","4h"]);
 
-/* ─── DRAWING TOOLS CONFIG ─────────────────────────────────────────────────── */
-const DRAWING_TOOLS = {
-  trendLine:      { label: "TREND LINE",      anchors: 2, icon: "trendLine" },
-  horizontalLine: { label: "HORIZONTAL LINE", anchors: 1, icon: "hLine" },
-  ray:            { label: "RAY",             anchors: 2, icon: "ray" },
-  rectangle:      { label: "RECTANGLE",       anchors: 2, icon: "rectangle" },
-  fibonacci:      { label: "FIBONACCI",       anchors: 2, icon: "fibonacci" },
-  pitchfork:      { label: "PITCHFORK",       anchors: 3, icon: "pitchfork" },
-  text:           { label: "TEXT",            anchors: 1, icon: "textTool" },
-  arrow:          { label: "ARROW",           anchors: 2, icon: "arrowTool" },
+/* ─── DRAWING TOOLS CONFIG (base structure — labels translated inside component) */
+const DRAWING_TOOLS_BASE = {
+  trendLine:      { anchors: 2, icon: "trendLine",   labelKey: "charts.trendLine" },
+  horizontalLine: { anchors: 1, icon: "hLine",       labelKey: "charts.horizontalLine" },
+  ray:            { anchors: 2, icon: "ray",          labelKey: "charts.ray" },
+  rectangle:      { anchors: 2, icon: "rectangle",    labelKey: "charts.rectangle" },
+  fibonacci:      { anchors: 2, icon: "fibonacci",    labelKey: "charts.fibonacci" },
+  pitchfork:      { anchors: 3, icon: "pitchfork",    labelKey: "charts.pitchfork" },
+  text:           { anchors: 1, icon: "textTool",     labelKey: "charts.text" },
+  arrow:          { anchors: 2, icon: "arrowTool",    labelKey: "charts.arrow" },
 };
 
 const DEFAULT_DRAW_STYLE = { color: "#f59e0b", lineWidth: 1.5, lineStyle: "solid", fontSize: 12, text: "" };
@@ -225,7 +227,7 @@ function pointToSegmentDist(px, py, x1, y1, x2, y2) {
 }
 
 /* ─── DRAWING RENDERERS ───────────────────────────────────────────────────── */
-function renderDrawing(drawing, visibleData, visibleStart, allData, xOf, yOf, PAD, H, W, pLo, pHi, dims, isSelected) {
+function renderDrawing(drawing, visibleData, visibleStart, allData, xOf, yOf, PAD, H, W, pLo, pHi, dims, isSelected, currSym) {
   const { type, anchors, style } = drawing;
   const col = style.color || "#f59e0b";
   const lw = style.lineWidth || 1.5;
@@ -259,7 +261,7 @@ function renderDrawing(drawing, visibleData, visibleStart, allData, xOf, yOf, PA
             stroke={col} strokeWidth={lw} strokeDasharray={dash} />
           <rect x={PAD.left} y={y - 8} width={60} height={16} rx={1} fill={col} opacity="0.85" />
           <text x={PAD.left + 4} y={y + 4} fontFamily="IBM Plex Mono" fontSize="9" fontWeight="600" fill="#060f08">
-            ${price.toFixed(2)}
+            {currSym}{price.toFixed(2)}
           </text>
         </g>
       );
@@ -327,7 +329,7 @@ function renderDrawing(drawing, visibleData, visibleStart, allData, xOf, yOf, PA
                   stroke={col} strokeWidth={lv === 0 || lv === 1 ? lw : lw * 0.7}
                   strokeDasharray={lv === 0.5 ? "4,3" : "none"} opacity={0.7} />
                 <text x={right + 4} y={y + 3} fontFamily="IBM Plex Mono" fontSize="8" fill={col} opacity="0.8">
-                  {pctLabel} ${price.toFixed(2)}
+                  {pctLabel} {currSym}{price.toFixed(2)}
                 </text>
               </g>
             );
@@ -459,6 +461,18 @@ function renderPreview(toolType, anchors, previewPoint, visibleData, visibleStar
 
 /* ─── CHART COMPONENT ───────────────────────────────────────────────────────── */
 function StockChart({ symbol, stockInfo, onClose, token }) {
+  const { t } = useI18n();
+  const { formatValue, currencySymbol } = useCurrency();
+
+  /* Build translated DRAWING_TOOLS from the base config */
+  const DRAWING_TOOLS = useMemo(() => {
+    const tools = {};
+    for (const [key, def] of Object.entries(DRAWING_TOOLS_BASE)) {
+      tools[key] = { ...def, label: t(def.labelKey) };
+    }
+    return tools;
+  }, [t]);
+
   const svgRef = useRef(null);
   const containerRef = useRef(null);
   const wrapRef = useRef(null);
@@ -477,6 +491,45 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
   const isIntraday = INTRADAY_INTERVALS.has(interval);
   // Zoom/pan state: offset = index offset from right, zoom = candles visible
   const [zoom, setZoom] = useState(null); // null = use period preset
+
+  /* ── Hover data toggle (session-persistent) ────────────────────────────── */
+  const [showHoverData, setShowHoverData] = useState(() =>
+    sessionStorage.getItem("tt_showHoverData") !== "0"
+  );
+  const toggleHoverData = useCallback(() => {
+    setShowHoverData(prev => {
+      const next = !prev;
+      sessionStorage.setItem("tt_showHoverData", next ? "1" : "0");
+      return next;
+    });
+  }, []);
+
+  /* ── Purchase points from portfolio positions ──────────────────────────── */
+  const [purchasePoints, setPurchasePoints] = useState([]);
+  useEffect(() => {
+    if (!token || !symbol) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const portfolios = await api.listPortfolios(token);
+        if (cancelled || !portfolios?.length) return;
+        const allPos = await Promise.all(
+          portfolios.map(p => api.listPositions(p.portfolio_id, token).catch(() => []))
+        );
+        const points = allPos.flat()
+          .filter(pos => pos.ticker === symbol && pos.purchase_date)
+          .map(pos => ({
+            date: pos.purchase_date?.slice(0, 10),
+            price: parseFloat(pos.purchase_price),
+            qty: parseFloat(pos.quantity),
+          }));
+        if (!cancelled) setPurchasePoints(points);
+      } catch {
+        /* silent */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token, symbol]);
 
   // Fetch OHLCV from backend; fall back to local generation if backend offline
   const [allData, setAllData] = useState(() => generateOHLCV(stockInfo.price, 5));
@@ -1013,7 +1066,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
           <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, fontWeight: 600, color: "#0f7d40", background: "rgba(15,125,64,0.1)", border: "1px solid rgba(15,125,64,0.2)", padding: "2px 8px", borderRadius: 2, letterSpacing: "0.8px" }}>
             {interval.toUpperCase()}
           </div>
-          {dataLoading && <span className="loading-pulse" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: "#4a5568" }}>LOADING...</span>}
+          {dataLoading && <span className="loading-pulse" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: "#4a5568" }}>{t("charts.loading")}</span>}
           {onClose && (
             <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#4a5568", padding: 4 }}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
@@ -1025,25 +1078,25 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
 
         {/* OPEN */}
         <div className="stock-stat">
-          <div className="ss-label">OPEN</div>
-          <div className="ss-value">${last.open?.toFixed(2) ?? "—"}</div>
-          <div className="ss-sub">TODAY</div>
+          <div className="ss-label">{t("charts.open")}</div>
+          <div className="ss-value">{currencySymbol}{last.open?.toFixed(2) ?? "—"}</div>
+          <div className="ss-sub">{t("dashboard.today")}</div>
         </div>
 
         <div className="stat-sep" />
 
         {/* CLOSE */}
         <div className="stock-stat">
-          <div className="ss-label">CLOSE</div>
-          <div className="ss-value amber">${last.close?.toFixed(2) ?? "—"}</div>
-          <div className="ss-sub">LAST PRICE</div>
+          <div className="ss-label">{t("charts.close")}</div>
+          <div className="ss-value amber">{currencySymbol}{last.close?.toFixed(2) ?? "—"}</div>
+          <div className="ss-sub">{t("charts.lastPrice")}</div>
         </div>
 
         <div className="stat-sep" />
 
         {/* VOLUME TODAY */}
         <div className="stock-stat">
-          <div className="ss-label">VOLUME TODAY</div>
+          <div className="ss-label">{t("charts.volumeToday")}</div>
           <div className="ss-value" style={{ fontSize: 16 }}>{fmtVol(last.volume ?? 0)}</div>
           <div className="ss-sub">AVG: {fmtVol(Math.round(visibleData.slice(-20).reduce((s, d) => s + d.volume, 0) / Math.max(1, visibleData.slice(-20).length)))}</div>
         </div>
@@ -1052,9 +1105,9 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
 
         {/* GAIN TODAY */}
         <div className="stock-stat">
-          <div className="ss-label">GAIN TODAY</div>
+          <div className="ss-label">{t("charts.gainToday")}</div>
           <div className={`ss-value ${dayGain >= 0 ? "pos" : "neg"}`} style={{ fontSize: 20 }}>
-            {dayGain >= 0 ? "+" : ""}{dayGain.toFixed(2)}
+            {dayGain >= 0 ? "+" : ""}{currencySymbol}{Math.abs(dayGain).toFixed(2)}
           </div>
           <div className={`ss-badge ${dayGain >= 0 ? "pos" : "neg"}`} style={{ marginTop: 3 }}>
             {dayGainPct >= 0 ? "▲" : "▼"} {Math.abs(dayGainPct).toFixed(2)}%
@@ -1065,13 +1118,13 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
 
         {/* HIGH / LOW */}
         <div className="stock-stat">
-          <div className="ss-label">HIGH · LOW</div>
+          <div className="ss-label">{t("charts.highLow")}</div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <span className="ss-value" style={{ color: "#00d97e", fontSize: 15 }}>${last.high?.toFixed(2) ?? "—"}</span>
+            <span className="ss-value" style={{ color: "#00d97e", fontSize: 15 }}>{currencySymbol}{last.high?.toFixed(2) ?? "—"}</span>
             <span style={{ color: "#1e2535", fontFamily: "var(--font-mono)", fontSize: 11 }}>·</span>
-            <span className="ss-value" style={{ color: "#f04438", fontSize: 15 }}>${last.low?.toFixed(2)  ?? "—"}</span>
+            <span className="ss-value" style={{ color: "#f04438", fontSize: 15 }}>{currencySymbol}{last.low?.toFixed(2)  ?? "—"}</span>
           </div>
-          <div className="ss-sub">INTRADAY RANGE</div>
+          <div className="ss-sub">{t("charts.intradayRange")}</div>
         </div>
 
         <div className="stat-sep" />
@@ -1084,15 +1137,15 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
           const pos52 = hi52 > lo52 ? ((last.close - lo52) / (hi52 - lo52)) * 100 : 50;
           return (
             <div className="stock-stat" style={{ minWidth: 160 }}>
-              <div className="ss-label">52-WEEK RANGE</div>
+              <div className="ss-label">{t("charts.weekRange")}</div>
               <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4 }}>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "#718096" }}>${lo52.toFixed(0)}</span>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "#718096" }}>{currencySymbol}{lo52.toFixed(0)}</span>
                 <div style={{ flex: 1, height: 4, background: "#1e2535", borderRadius: 2, position: "relative" }}>
                   <div style={{ position: "absolute", left: 0, top: 0, height: "100%", width: `${Math.min(100, Math.max(0, pos52))}%`, background: "var(--amber)", borderRadius: 2 }} />
                 </div>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "#718096" }}>${hi52.toFixed(0)}</span>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "#718096" }}>{currencySymbol}{hi52.toFixed(0)}</span>
               </div>
-              <div className="ss-sub">{pos52.toFixed(0)}% FROM 52W LOW</div>
+              <div className="ss-sub">{pos52.toFixed(0)}% {t("charts.from52wLow")}</div>
             </div>
           );
         })()}
@@ -1100,15 +1153,15 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
         {/* Spacer */}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "#4a5568", textAlign: "right" }}>
-            <div style={{ letterSpacing: "0.5px" }}>SCROLL TO ZOOM</div>
-            <div style={{ color: "#263045" }}>DRAG TO PAN</div>
+            <div style={{ letterSpacing: "0.5px" }}>{t("charts.scrollZoom")}</div>
+            <div style={{ color: "#263045" }}>{t("charts.dragPan")}</div>
           </div>
         </div>
       </div>
 
       {/* ── CONTROLS ── */}
       <div className="chart-controls">
-        <span className="ctrl-label">INTERVAL:</span>
+        <span className="ctrl-label">{t("charts.interval")}</span>
         <div className="ctrl-group">
           {["1m","5m","15m","1h","4h","1d","1wk","1mo"].map(iv => (
             <button key={iv} className={`ctrl-btn${interval===iv ? " active" : ""}`}
@@ -1119,21 +1172,21 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
             style={{ fontSize: 11, letterSpacing: 0 }}>···</button>
         </div>
         <div className="ctrl-sep" />
-        <span className="ctrl-label">RANGE:</span>
+        <span className="ctrl-label">{t("charts.range")}</span>
         <div className="ctrl-group">
           {Object.keys(PERIODS).map(p => (
             <button key={p} className={`ctrl-btn${!zoom && period===p ? " active" : ""}`} onClick={() => handlePeriod(p)}>{p}</button>
           ))}
         </div>
         <div className="ctrl-sep" />
-        <span className="ctrl-label">TYPE:</span>
+        <span className="ctrl-label">{t("charts.type")}</span>
         <div className="ctrl-group">
-          {[["candle","CANDLE"],["line","LINE"]].map(([v,l]) => (
+          {[["candle", t("charts.candle")],["line", t("charts.line")]].map(([v,l]) => (
             <button key={v} className={`ctrl-btn${chartType===v ? " active" : ""}`} onClick={() => setChartType(v)}>{l}</button>
           ))}
         </div>
         <div className="ctrl-sep" />
-        <span className="ctrl-label">OVERLAYS:</span>
+        <span className="ctrl-label">{t("charts.overlays")}</span>
         <div className="overlay-toggles">
           {OVERLAY_DEFS.map(od => (
             <div key={od.key} className={`overlay-toggle${overlays[od.key] ? " on" : ""}`}
@@ -1153,9 +1206,14 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
             </div>
           ))}
         </div>
+        <div className="ctrl-sep" />
+        <div className="overlay-toggle" style={showHoverData ? { borderColor: "rgba(255,178,56,0.3)", color: "var(--amber)" } : {}}
+          onClick={toggleHoverData}>
+          <Ic.eye /> {t("charts.hoverData")}
+        </div>
         {zoom && (
           <button className="ctrl-btn active" style={{ marginLeft: "auto", borderLeft: "1px solid #1e2535" }}
-            onClick={() => setZoom(null)}>✕ RESET</button>
+            onClick={() => setZoom(null)}>✕ {t("charts.reset")}</button>
         )}
       </div>
 
@@ -1165,7 +1223,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
           background: "#0e1117", borderBottom: "1px solid #1e2535",
           padding: "10px 24px", display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", flexShrink: 0,
         }}>
-          <span className="ctrl-label" style={{ minWidth: 55 }}>MINUTES:</span>
+          <span className="ctrl-label" style={{ minWidth: 55 }}>{t("charts.minutes")}</span>
           <div className="ctrl-group">
             {["1m","2m","3m","5m","10m","15m","30m","45m"].map(iv => (
               <button key={iv} className={`ctrl-btn${interval===iv ? " active" : ""}`}
@@ -1173,7 +1231,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
             ))}
           </div>
           <div className="ctrl-sep" />
-          <span className="ctrl-label" style={{ minWidth: 40 }}>HOURS:</span>
+          <span className="ctrl-label" style={{ minWidth: 40 }}>{t("charts.hours")}</span>
           <div className="ctrl-group">
             {["1h","2h","3h","4h"].map(iv => (
               <button key={iv} className={`ctrl-btn${interval===iv ? " active" : ""}`}
@@ -1181,7 +1239,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
             ))}
           </div>
           <div className="ctrl-sep" />
-          <span className="ctrl-label" style={{ minWidth: 40 }}>D/W/M:</span>
+          <span className="ctrl-label" style={{ minWidth: 40 }}>{t("charts.dwm")}</span>
           <div className="ctrl-group">
             {["1d","1wk","1mo","3mo","6mo","12mo"].map(iv => (
               <button key={iv} className={`ctrl-btn${interval===iv ? " active" : ""}`}
@@ -1216,7 +1274,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
             {overlays.sma50     && <div className="legend-item"><div className="legend-line" style={{ background: "#3d7ef5" }}/>SMA50</div>}
             {overlays.sma150    && <div className="legend-item"><div className="legend-line" style={{ background: "#0fc0d0" }}/>SMA150</div>}
             {overlays.smaCustom && <div className="legend-item"><div className="legend-line" style={{ background: "#a78bfa" }}/>SMA{customPeriod}</div>}
-            {overlays.breakouts && <div className="legend-item"><div style={{ width: 8, height: 8, background: "#00d97e", clipPath: "polygon(50% 0,100% 100%,0 100%)", flexShrink: 0 }}/>BREAKOUT</div>}
+            {overlays.breakouts && <div className="legend-item"><div style={{ width: 8, height: 8, background: "#00d97e", clipPath: "polygon(50% 0,100% 100%,0 100%)", flexShrink: 0 }}/>{t("charts.breakout")}</div>}
           </div>
 
           {/* ── DRAWING TOOLBAR ── */}
@@ -1310,9 +1368,9 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
               </button>
               {showLoadDropdown && (
                 <div className="tpl-dropdown">
-                  <div className="tpl-dropdown-header">TEMPLATES</div>
+                  <div className="tpl-dropdown-header">{t("charts.templates")}</div>
                   {templates.length === 0 && (
-                    <div className="tpl-dropdown-empty">No saved templates</div>
+                    <div className="tpl-dropdown-empty">{t("charts.noTemplates")}</div>
                   )}
                   {templates.map(tpl => (
                     <div key={tpl.template_id} className="tpl-dropdown-item"
@@ -1350,14 +1408,14 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
             )}
             {selectedDrawingId && !activeTool && (
               <div className="draw-active-label" style={{ color: "#f04438" }}>
-                SELECTED · DEL TO REMOVE
+                {t("charts.selectedDel")}
               </div>
             )}
           </div>
 
           {/* Date range info */}
           <div style={{ position: "absolute", bottom: 18, left: 46, fontFamily: "var(--font-mono)", fontSize: 9, color: "#263045", pointerEvents: "none", zIndex: 2 }}>
-            {visibleData[0]?.date && visibleData[n-1]?.date ? `${visibleData[0].date} → ${visibleData[n-1].date}  ·  ${n} SESSIONS` : ""}
+            {visibleData[0]?.date && visibleData[n-1]?.date ? `${visibleData[0].date} → ${visibleData[n-1].date}  ·  ${n} ${t("charts.sessions")}` : ""}
           </div>
 
           <svg ref={svgRef} style={{ display: "block", width: "100%", height: "100%", userSelect: "none" }}>
@@ -1372,8 +1430,8 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
             </defs>
 
             {/* Grid lines */}
-            {yTicks.map((t, i) => {
-              const y = yOf(t);
+            {yTicks.map((tick, i) => {
+              const y = yOf(tick);
               if (y < PAD.top || y > PAD.top + H) return null;
               return (
                 <g key={i}>
@@ -1381,7 +1439,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
                     stroke="#1a2030" strokeWidth="1" strokeDasharray="2,5" />
                   <text x={dims.w - PAD.right + 5} y={y + 3.5}
                     fontFamily="IBM Plex Mono" fontSize="10" fill="#4a5568">
-                    {t >= 1000 ? `$${(t/1000).toFixed(1)}K` : t >= 100 ? `$${t.toFixed(0)}` : `$${t.toFixed(2)}`}
+                    {tick >= 1000 ? `${currencySymbol}${(tick/1000).toFixed(1)}K` : tick >= 100 ? `${currencySymbol}${tick.toFixed(0)}` : `${currencySymbol}${tick.toFixed(2)}`}
                   </text>
                 </g>
               );
@@ -1454,7 +1512,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
                     fill={col} opacity={isHov ? 1 : 0.8}
                   />
                   {(isHov || b.label) && (() => {
-                    const lbl = b.label || (b.type === "bull" ? "BREAKOUT ▲" : "BREAKDOWN ▼");
+                    const lbl = b.label || (b.type === "bull" ? `${t("charts.breakout")} ▲` : `${t("charts.breakdown")} ▼`);
                     const bx = x - 36;
                     const by = b.type === "bull" ? py - 30 : py + 18;
                     return (
@@ -1469,10 +1527,86 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
               );
             })}
 
+            {/* ── PURCHASE POINT INDICATORS ── */}
+            {(() => {
+              if (!purchasePoints.length || !visibleData.length) return null;
+
+              /* Pre-compute timestamps for each visible bar for efficient lookup */
+              const barTimestamps = visibleData.map(bar => new Date(bar.date).getTime());
+
+              /* Maximum time gap allowed: 7 days in milliseconds */
+              const MAX_GAP_MS = 7 * 24 * 60 * 60 * 1000;
+
+              /**
+               * For each purchase point, find the closest matching bar index
+               * in visibleData based on smallest absolute time difference.
+               * Groups purchase points that map to the same bar index.
+               *
+               * matchMap: { barIndex -> [{ price, qty }] }
+               */
+              const matchMap = {};
+              for (const pp of purchasePoints) {
+                const ppTime = new Date(pp.date).getTime();
+                let bestIdx = -1;
+                let bestDiff = Infinity;
+                for (let i = 0; i < barTimestamps.length; i++) {
+                  const diff = Math.abs(barTimestamps[i] - ppTime);
+                  if (diff < bestDiff) {
+                    bestDiff = diff;
+                    bestIdx = i;
+                  }
+                }
+                /* Skip if no bar within 7-day range */
+                if (bestIdx < 0 || bestDiff > MAX_GAP_MS) continue;
+
+                /* If the purchase date is date-only (no "T"), verify the bar's
+                   OHLC range includes the purchase price for better Y alignment */
+                const isDateOnly = !pp.date.includes("T");
+                if (isDateOnly) {
+                  const bar = visibleData[bestIdx];
+                  if (bar.low != null && bar.high != null) {
+                    if (pp.price < bar.low || pp.price > bar.high) {
+                      /* Price outside bar range — still show at nearest bar,
+                         the weighted average will adjust the Y position */
+                    }
+                  }
+                }
+
+                if (!matchMap[bestIdx]) matchMap[bestIdx] = [];
+                matchMap[bestIdx].push({ price: pp.price, qty: pp.qty });
+              }
+
+              /* Render diamond markers for each matched bar index */
+              return Object.entries(matchMap).map(([viStr, matches]) => {
+                const vi = parseInt(viStr, 10);
+                const totalQty = matches.reduce((s, m) => s + m.qty, 0);
+                const avgPrice = matches.reduce((s, m) => s + m.price * m.qty, 0) / totalQty;
+                const px = xOf(vi);
+                const py = yOf(avgPrice);
+                return (
+                  <g key={`pp-${vi}`} clipPath="url(#chartClip)">
+                    {/* Diamond marker */}
+                    <polygon
+                      points={`${px},${py-7} ${px+5},${py} ${px},${py+7} ${px-5},${py}`}
+                      fill="var(--amber)" stroke="#0d0e11" strokeWidth="0.8" opacity="0.9"
+                    />
+                    {/* Dashed vertical line */}
+                    <line x1={px} y1={py+7} x2={px} y2={PAD.top + H}
+                      stroke="var(--amber)" strokeWidth="0.5" strokeDasharray="2,4" opacity="0.35" />
+                    {/* Label */}
+                    <rect x={px - 30} y={py - 22} width={60} height={14} rx={1}
+                      fill="var(--amber)" opacity="0.85" />
+                    <text x={px - 26} y={py - 12} fontFamily="IBM Plex Mono" fontSize="8" fontWeight="700"
+                      fill="#0d0e11">BUY {currencySymbol}{avgPrice.toFixed(2)}</text>
+                  </g>
+                );
+              });
+            })()}
+
             {/* ── DRAWING LAYER ── */}
             <g clipPath="url(#chartClip)">
               {drawings.filter(d => d.visible).map(d =>
-                renderDrawing(d, visibleData, visibleStart, allData, xOf, yOf, PAD, H, W, pLo, pHi, dims, d.id === selectedDrawingId)
+                renderDrawing(d, visibleData, visibleStart, allData, xOf, yOf, PAD, H, W, pLo, pHi, dims, d.id === selectedDrawingId, currencySymbol)
               )}
               {activeTool && renderPreview(activeTool, pendingAnchors, previewPoint, visibleData, visibleStart, allData, xOf, yOf, PAD, H, W, pLo, pHi, dims, drawingStyle)}
             </g>
@@ -1515,7 +1649,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
                     <rect x={dims.w - PAD.right} y={crosshair.y - 9} width={PAD.right - 1} height={18} fill="#0f7d40" />
                     <text x={dims.w - PAD.right + 4} y={crosshair.y + 4}
                       fontFamily="IBM Plex Mono" fontSize="10" fontWeight="700" fill="#e8f0fa">
-                      ${crosshair.priceCross?.toFixed(2)}
+                      {currencySymbol}{crosshair.priceCross?.toFixed(2)}
                     </text>
                   </>
                 )}
@@ -1543,7 +1677,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
         </div>
 
         {/* ── TOOLTIP ── */}
-        {tooltip && !dragRef.current && (
+        {showHoverData && tooltip && !dragRef.current && (
           <div className="crosshair-tooltip" style={{
             position: "absolute",
             left: tooltip.screen.tRight ? tooltip.screen.x - 210 : tooltip.screen.x + 16,
@@ -1555,12 +1689,12 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
               {new Date(tooltip.d.date).toLocaleDateString("en-US", { weekday: "short", year: "numeric", month: "short", day: "numeric" })}
               {tooltip.d.isEarnings && <span style={{ marginLeft: 8, color: "#0f7d40", fontSize: 9, background: "rgba(15,125,64,0.1)", padding: "1px 5px", border: "1px solid rgba(15,125,64,0.2)" }}>EARNINGS</span>}
             </div>
-            <div className="tt-row"><span className="tt-key">OPEN</span>  <span className="tt-val">${tooltip.d.open.toFixed(2)}</span></div>
-            <div className="tt-row"><span className="tt-key">HIGH</span>  <span className="tt-val" style={{ color: "#00d97e" }}>${tooltip.d.high.toFixed(2)}</span></div>
-            <div className="tt-row"><span className="tt-key">LOW</span>   <span className="tt-val" style={{ color: "#f04438" }}>${tooltip.d.low.toFixed(2)}</span></div>
+            <div className="tt-row"><span className="tt-key">{t("charts.open")}</span>  <span className="tt-val">{currencySymbol}{tooltip.d.open.toFixed(2)}</span></div>
+            <div className="tt-row"><span className="tt-key">HIGH</span>  <span className="tt-val" style={{ color: "#00d97e" }}>{currencySymbol}{tooltip.d.high.toFixed(2)}</span></div>
+            <div className="tt-row"><span className="tt-key">LOW</span>   <span className="tt-val" style={{ color: "#f04438" }}>{currencySymbol}{tooltip.d.low.toFixed(2)}</span></div>
             <div className="tt-row">
-              <span className="tt-key">CLOSE</span>
-              <span className={`tt-val ${tooltip.d.close >= tooltip.d.open ? "pos" : "neg"}`}>${tooltip.d.close.toFixed(2)}</span>
+              <span className="tt-key">{t("charts.close")}</span>
+              <span className={`tt-val ${tooltip.d.close >= tooltip.d.open ? "pos" : "neg"}`}>{currencySymbol}{tooltip.d.close.toFixed(2)}</span>
             </div>
             <div className="tt-row">
               <span className="tt-key">CHANGE</span>
@@ -1572,9 +1706,9 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
             {(tooltip.s50 || tooltip.s150 || tooltip.sCx) && (
               <>
                 <div className="tt-divider" />
-                {overlays.sma50     && tooltip.s50  && <div className="tt-sma"><div className="tt-sma-dot" style={{ background: "#3d7ef5" }}/><span className="tt-sma-key">SMA 50</span><span className="tt-sma-val">${tooltip.s50.toFixed(2)}</span></div>}
-                {overlays.sma150    && tooltip.s150 && <div className="tt-sma"><div className="tt-sma-dot" style={{ background: "#0fc0d0" }}/><span className="tt-sma-key">SMA 150</span><span className="tt-sma-val">${tooltip.s150.toFixed(2)}</span></div>}
-                {overlays.smaCustom && tooltip.sCx  && <div className="tt-sma"><div className="tt-sma-dot" style={{ background: "#a78bfa" }}/><span className="tt-sma-key">SMA {customPeriod}</span><span className="tt-sma-val">${tooltip.sCx.toFixed(2)}</span></div>}
+                {overlays.sma50     && tooltip.s50  && <div className="tt-sma"><div className="tt-sma-dot" style={{ background: "#3d7ef5" }}/><span className="tt-sma-key">SMA 50</span><span className="tt-sma-val">{currencySymbol}{tooltip.s50.toFixed(2)}</span></div>}
+                {overlays.sma150    && tooltip.s150 && <div className="tt-sma"><div className="tt-sma-dot" style={{ background: "#0fc0d0" }}/><span className="tt-sma-key">SMA 150</span><span className="tt-sma-val">{currencySymbol}{tooltip.s150.toFixed(2)}</span></div>}
+                {overlays.smaCustom && tooltip.sCx  && <div className="tt-sma"><div className="tt-sma-dot" style={{ background: "#a78bfa" }}/><span className="tt-sma-key">SMA {customPeriod}</span><span className="tt-sma-val">{currencySymbol}{tooltip.sCx.toFixed(2)}</span></div>}
               </>
             )}
           </div>
@@ -1724,6 +1858,8 @@ function ChartSearchBar({ watchlist, onAdd, onSelect, onRemove, activeSymbol, to
 
 /* ─── PORTFOLIO SIDE PANEL ──────────────────────────────────────────────────── */
 function PortfolioSidePanel({ token, onSelectSymbol, activeSymbol }) {
+  const { t } = useI18n();
+  const { currencySymbol } = useCurrency();
   const [portfolios, setPortfolios] = useState([]);
   const [activePortfolioId, setActivePortfolioId] = useState(null);
   const [positions, setPositions] = useState([]);
@@ -1779,14 +1915,14 @@ function PortfolioSidePanel({ token, onSelectSymbol, activeSymbol }) {
     return { totalValue, totalCost, gainLoss: totalValue - totalCost, gainPct: totalCost > 0 ? ((totalValue - totalCost) / totalCost) * 100 : 0 };
   }, [positions, quotes]);
 
-  const fmtUSD = (n) => `$${parseFloat(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const fmtUSD = (n) => `${currencySymbol}${parseFloat(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const fmtPct = (n) => `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
 
   return (
     <div className="portfolio-panel">
       {/* Header */}
       <div className="pp-header">
-        <div className="pp-title">PORTFOLIO</div>
+        <div className="pp-title">{t("charts.portfolio")}</div>
         {portfolios.length > 1 ? (
           <select className="pp-select"
             value={activePortfolioId || ""}
@@ -1814,7 +1950,7 @@ function PortfolioSidePanel({ token, onSelectSymbol, activeSymbol }) {
 
       {/* Positions list */}
       <div className="pp-positions">
-        {loading && <div className="pp-loading loading-pulse">LOADING...</div>}
+        {loading && <div className="pp-loading loading-pulse">{t("charts.loading")}</div>}
         {!loading && positions.length === 0 && (
           <div className="pp-empty">No positions</div>
         )}
@@ -1854,6 +1990,8 @@ function PortfolioSidePanel({ token, onSelectSymbol, activeSymbol }) {
 
 /* ─── MAIN CHARTS PAGE ──────────────────────────────────────────────────────── */
 export function ChartsPage({ initialSymbol, goBack, token }) {
+  const { t } = useI18n();
+  const { formatValue, currencySymbol } = useCurrency();
   const [watchlist, setWatchlist] = useState(["AAPL", "NVDA", "TSLA"]);
   const [activeSymbol, setActiveSymbol] = useState(initialSymbol || "AAPL");
   const [panelOpen, setPanelOpen] = useState(() => localStorage.getItem("tt_chart_panel") !== "0");
@@ -1922,22 +2060,22 @@ export function ChartsPage({ initialSymbol, goBack, token }) {
         <div>
           <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 28, color: "#e8f0fa", letterSpacing: 1, lineHeight: 1, display:"flex", alignItems:"center" }}>
             <button className="btn btn-ghost" onClick={goBack} style={{padding:"4px 6px",marginRight:8}}><Ic.back/></button>
-            CHARTS
+            {t("charts.title")}
           </div>
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: "#4a5568", marginTop: 4 }}>
-            INTERACTIVE ANALYSIS · SMA OVERLAYS · BREAKOUT DETECTION
+            {t("charts.subtitle")}
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <button className={`btn btn-ghost`} onClick={togglePanel}
             style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, letterSpacing: "0.5px", padding: "4px 10px",
               color: panelOpen ? "#0f7d40" : "#4a5568", border: `1px solid ${panelOpen ? "rgba(15,125,64,0.3)" : "#1e2535"}` }}>
-            {panelOpen ? "◁ PORTFOLIO" : "PORTFOLIO ▷"}
+            {panelOpen ? `◁ ${t("charts.portfolio")}` : `${t("charts.portfolio")} ▷`}
           </button>
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4a5568", textAlign: "right" }}>
             <div style={{ color: mktStatus.isOpen ? "#00d97e" : "var(--red)", display: "flex", alignItems: "center", gap: 5, justifyContent: "flex-end" }}>
               <span style={{ width: 5, height: 5, borderRadius: "50%", background: mktStatus.isOpen ? "#00d97e" : "var(--red)", display: "inline-block", animation: "blink 2s infinite" }} />
-              {mktStatus.isOpen ? "NYSE OPEN" : `CLOSED · OPENS IN ${mktStatus.countdown}`}
+              {mktStatus.isOpen ? t("charts.nyseOpen") : `${t("charts.closedOpensIn")} ${mktStatus.countdown}`}
             </div>
             <div style={{ marginTop: 2 }}>{mktStatus.dateStr} · {mktStatus.timeStr}</div>
           </div>

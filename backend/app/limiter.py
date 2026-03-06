@@ -6,12 +6,21 @@ and exception handler; route modules decorate endpoints with @limiter.limit().
 
 Key-function: client IP address (X-Forwarded-For respected by SlowAPI when
 the app sits behind a trusted proxy such as nginx).
+
+Storage backend: Redis (via REDIS_URL env var) for persistence across worker
+restarts and correct counting in multi-process deployments.
 """
+
+import os
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-# Single application-wide limiter instance.
-# Storage defaults to in-memory; set RATELIMIT_STORAGE_URL=redis://... in .env
-# to use Redis for persistence across worker restarts / multiple processes.
-limiter = Limiter(key_func=get_remote_address)
+# Redis-backed storage so rate limits survive worker restarts and are
+# shared across multiple uvicorn processes / container replicas.
+_redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+limiter = Limiter(
+    key_func=get_remote_address,
+    storage_uri=_redis_url,
+)

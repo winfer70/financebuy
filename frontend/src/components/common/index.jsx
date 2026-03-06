@@ -15,6 +15,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import api from "../../api/client";
 import { Ic } from "./Icons";
 import { TICKER_DATA } from "../../styles/globals";
+import { useQuotes } from "../../context/QuotesContext";
 
 /**
  * SkeletonRow: Animated loading placeholder for table rows
@@ -95,13 +96,14 @@ export function Clock() {
 
 /**
  * Footer: Application footer
- * Displays copyright, legal navigation links, and data attribution.
+ * Displays copyright, legal navigation links, optional guide link, and data attribution.
  *
  * @param {object}   props
  * @param {Function} [props.onNavigate] - Callback to navigate to legal pages
  *                                         (receives page ID string)
+ * @param {boolean}  [props.showGuide]  - When true, show "User Guide" link
  */
-export function Footer({ onNavigate }) {
+export function Footer({ onNavigate, showGuide }) {
   const year = new Date().getFullYear();
   return (
     <footer className="app-footer">
@@ -112,6 +114,12 @@ export function Footer({ onNavigate }) {
         <a onClick={() => onNavigate && onNavigate("legal-privacy")}>Privacy</a>
         <span className="app-footer-sep">&middot;</span>
         <a onClick={() => onNavigate && onNavigate("legal-terms")}>Terms</a>
+        {showGuide && (
+          <>
+            <span className="app-footer-sep">&middot;</span>
+            <a onClick={() => onNavigate && onNavigate("guide")}>User Guide</a>
+          </>
+        )}
       </span>
       <span>Market data provided by Yahoo Finance.</span>
     </footer>
@@ -141,39 +149,62 @@ export function LegalLinks({ onNavigate }) {
 
 /**
  * TickerStrip: Live market ticker with auto-refresh
- * Displays scrolling ticker with market quotes
- * Refreshes every 3s during market hours, 5m outside hours
+ * Displays scrolling ticker with market quotes.
+ * Fetches portfolio tickers if user has positions; falls back to defaults.
+ * Quotes are consumed from the shared QuotesContext (single polling loop).
  */
 export function TickerStrip({ token }) {
-  const SYMBOLS = ["AAPL","MSFT","NVDA","TSLA","AMZN","GOOGL","META","SPY","QQQ","AMD"];
-  const [quotes, setQuotes] = useState(TICKER_DATA);
-  const mktStatus = useMarketStatus();
-  const pollMs = mktStatus.isOpen ? 3000 : 300000;
+  const DEFAULT_SYMBOLS = ["AAPL","MSFT","NVDA","TSLA","AMZN","GOOGL","META","SPY","QQQ","AMD"];
+  const [symbols, setSymbols] = useState(DEFAULT_SYMBOLS);
+  const { quotesMap, registerSymbols, unregisterSymbols } = useQuotes();
 
+  /* ── Fetch portfolio tickers on mount, fall back to defaults ────────── */
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
-    const fetchQuotes = () => {
-      Promise.allSettled(SYMBOLS.map(s => api.getQuote(s, token)))
-        .then(results => {
-          if (cancelled) return;
-          const live = results
-            .filter(r => r.status === "fulfilled")
-            .map(r => ({
-              sym: r.value.symbol,
-              price: Number(r.value.price).toFixed(2),
-              chg: `${r.value.change_pct >= 0 ? "+" : ""}${Number(r.value.change_pct).toFixed(2)}%`,
-              pos: r.value.change_pct >= 0,
-            }));
-          if (live.length > 0) setQuotes(live);
-        });
-    };
-    fetchQuotes();
-    const id = setInterval(fetchQuotes, pollMs);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [token, pollMs]);
 
-  const doubled = [...quotes,...quotes];
+    (async () => {
+      try {
+        /** Fetch all portfolios, then collect unique tickers from positions */
+        const portfolios = await api.listPortfolios(token);
+        if (cancelled || !portfolios || portfolios.length === 0) return;
+
+        const allPositions = await Promise.all(
+          portfolios.map(p => api.listPositions(p.portfolio_id, token).catch(() => []))
+        );
+        const tickers = [...new Set(allPositions.flat().map(pos => pos.ticker))];
+        if (!cancelled && tickers.length > 0) setSymbols(tickers);
+      } catch {
+        /* Keep defaults on error */
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [token]);
+
+  /* ── Register symbols with the shared QuotesContext ─────────────────── */
+  useEffect(() => {
+    registerSymbols("tickerstrip", symbols);
+    return () => unregisterSymbols("tickerstrip");
+  }, [symbols, registerSymbols, unregisterSymbols]);
+
+  /* ── Derive display data from shared quotesMap ─────────────────────── */
+  const quotes = symbols
+    .filter(s => quotesMap[s])
+    .map(s => {
+      const q = quotesMap[s];
+      return {
+        sym: q.symbol,
+        price: Number(q.price).toFixed(2),
+        chg: `${q.change_pct >= 0 ? "+" : ""}${Number(q.change_pct).toFixed(2)}%`,
+        pos: q.change_pct >= 0,
+      };
+    });
+
+  /* Fall back to static TICKER_DATA when no live data yet */
+  const displayQuotes = quotes.length > 0 ? quotes : TICKER_DATA;
+  const doubled = [...displayQuotes,...displayQuotes];
+
   return (
     <div className="ticker-strip">
       <div className="ticker-inner">

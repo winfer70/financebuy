@@ -2,9 +2,14 @@
 routes/news.py — News API endpoints for TickerTap.
 
 Provides three endpoints:
-  GET  /api/v1/news/feed              — DB-backed news feed with portfolio-aware scoring
-  GET  /api/v1/news/tickers/{ticker}  — articles filtered by a single ticker
-  POST /api/v1/internal/news          — internal ingestion API for the LLM worker (Server B)
+  GET  /api/v1/news/feed              — Paginated, DB-backed news feed with portfolio-aware scoring
+  GET  /api/v1/news/tickers/{ticker}  — Paginated articles filtered by a single ticker
+  POST /api/v1/internal/news          — Internal ingestion API for the LLM worker (Server B)
+
+Both read endpoints support server-side pagination via ``limit`` and ``offset``
+query parameters. The default page size is 25 articles; the maximum is 100.
+Responses use the PaginatedNewsResponse schema which includes a ``total`` field
+so the frontend can render page navigation controls.
 
 Articles are pre-scored by a background LLM worker on Server B and pushed into
 PostgreSQL via the internal endpoint.  Read endpoints serve directly from the
@@ -16,18 +21,19 @@ Route prefix: /api/v1/news  (registered in main.py)
 """
 
 import asyncio
+import hmac
 import logging
 import os
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Set
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import delete, select
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..models import NewsArticle, NewsArticleTicker, Portfolio, PortfolioPosition
-from ..schemas import NewsArticleIngest, NewsArticleOut, TickerScoreOut
+from ..schemas import NewsArticleIngest, NewsArticleOut, PaginatedNewsResponse, TickerScoreOut
 from .auth_routes import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -127,36 +133,131 @@ def _build_article_response(
 
 # ── Read Endpoints ───────────────────────────────────────────────────────────
 
-@router.get("/feed", response_model=List[NewsArticleOut])
+@router.get("/feed", response_model=PaginatedNewsResponse)
 async def get_news_feed(
+    limit: int = Query(25, ge=25, le=100, description="Articles per page (25, 50, 75, or 100)."),
+    offset: int = Query(0, ge=0, description="Number of articles to skip."),
+    portfolio_tickers: Optional[str] = Query(None, description="Comma-separated portfolio ticker symbols for filtering."),
+    portfolio_only: bool = Query(False, description="If true, filter to articles matching the user's portfolio tickers."),
+    sentiment: Optional[str] = Query(None, description="Filter by sentiment: bullish or bearish."),
+    ticker_search: Optional[str] = Query(None, description="Search articles by ticker symbol or title text."),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """DB-backed news feed with portfolio-aware scoring.
+    """Paginated, DB-backed news feed with portfolio-aware scoring and
+    server-side filtering.
 
-    Queries the 100 most recent articles from ``news_articles``, joins with
+    Queries articles from ``news_articles``, joins with
     ``news_article_tickers`` for per-ticker scores, and selects the most
     relevant score based on the user's portfolio holdings.
 
+    Pagination is controlled via ``limit`` (page size, default 25, max 100)
+    and ``offset`` (number of articles to skip, default 0).  The response
+    includes a ``total`` field with the overall article count so the frontend
+    can calculate page numbers.
+
+    Server-side filters are applied BEFORE pagination so that total counts
+    and page offsets stay consistent:
+
+      - ``portfolio_tickers``: Comma-separated ticker symbols.  Only articles
+        mentioning at least one of these tickers are returned.
+      - ``portfolio_only``: When true, automatically filters to articles
+        mentioning the authenticated user's portfolio tickers (derived from
+        the database).  Takes effect only when ``portfolio_tickers`` is not
+        explicitly provided.
+      - ``sentiment``: ``"bullish"`` (general_score > 0) or ``"bearish"``
+        (general_score < 0).
+      - ``ticker_search``: Free-text search against ticker symbols and
+        article titles (case-insensitive partial match).
+
+    Args:
+        limit:              Page size — articles per page (25-100, default 25).
+        offset:             Number of articles to skip (default 0).
+        portfolio_tickers:  Comma-separated ticker symbols for filtering (optional).
+        portfolio_only:     Use the user's portfolio tickers for filtering (optional).
+        sentiment:          Filter by sentiment: "bullish" or "bearish" (optional).
+        ticker_search:      Search articles by ticker or title (optional).
+        db:                 Async database session.
+        current_user:       Authenticated user (injected via dependency).
+
     Returns:
-        List of NewsArticleOut sorted by published_at descending.
+        PaginatedNewsResponse with articles, total, limit, and offset.
     """
     # 1. Get user's portfolio tickers for scoring context.
     tickers = await _get_user_portfolio_tickers(db, current_user.user_id)
     portfolio_set: Set[str] = {t.upper() for t in tickers}
 
-    # 2. Fetch recent articles ordered by published_at DESC.
+    # 2. Build the base query and count query, applying server-side filters.
+    base_query = select(NewsArticle)
+    count_query = select(func.count(NewsArticle.article_id))
+
+    # ── Filter: portfolio_tickers OR portfolio_only ──────────────────────
+    # If explicit portfolio_tickers are provided, use those; otherwise, if
+    # portfolio_only is true, use the user's own portfolio tickers.
+    filter_tickers: Optional[List[str]] = None
+    if portfolio_tickers:
+        filter_tickers = [t.strip().upper() for t in portfolio_tickers.split(",") if t.strip()]
+    elif portfolio_only:
+        filter_tickers = list(portfolio_set)
+
+    if filter_tickers:
+        # Use an EXISTS subquery to avoid duplicates from the join.
+        # Returns articles where at least one associated ticker matches.
+        ticker_exists = (
+            select(NewsArticleTicker.article_id)
+            .where(
+                NewsArticleTicker.article_id == NewsArticle.article_id,
+                NewsArticleTicker.ticker.in_(filter_tickers),
+            )
+            .exists()
+        )
+        base_query = base_query.where(ticker_exists)
+        count_query = count_query.where(ticker_exists)
+
+    # ── Filter: sentiment (bullish / bearish) ────────────────────────────
+    if sentiment == "bullish":
+        base_query = base_query.where(NewsArticle.general_score > 0)
+        count_query = count_query.where(NewsArticle.general_score > 0)
+    elif sentiment == "bearish":
+        base_query = base_query.where(NewsArticle.general_score < 0)
+        count_query = count_query.where(NewsArticle.general_score < 0)
+
+    # ── Filter: ticker_search (ticker symbol OR title, case-insensitive) ─
+    if ticker_search:
+        search_pattern = f"%{ticker_search.strip()}%"
+        # Use an EXISTS subquery for ticker match to avoid duplicates.
+        ticker_search_exists = (
+            select(NewsArticleTicker.article_id)
+            .where(
+                NewsArticleTicker.article_id == NewsArticle.article_id,
+                NewsArticleTicker.ticker.ilike(search_pattern),
+            )
+            .exists()
+        )
+        base_query = base_query.where(
+            ticker_search_exists | NewsArticle.title.ilike(search_pattern)
+        )
+        count_query = count_query.where(
+            ticker_search_exists | NewsArticle.title.ilike(search_pattern)
+        )
+
+    # 3. Execute the filtered count query for pagination metadata.
+    count_result = await db.execute(count_query)
+    total = count_result.scalar() or 0
+
+    # 4. Fetch the requested page of articles ordered by published_at DESC.
     articles_result = await db.execute(
-        select(NewsArticle)
+        base_query
         .order_by(NewsArticle.published_at.desc().nullslast())
-        .limit(100)
+        .offset(offset)
+        .limit(limit)
     )
     articles = articles_result.scalars().all()
 
     if not articles:
-        return []
+        return PaginatedNewsResponse(articles=[], total=total, limit=limit, offset=offset)
 
-    # 3. Batch-fetch all ticker rows for these articles in one query.
+    # 5. Batch-fetch all ticker rows for these articles in one query.
     article_ids = [a.article_id for a in articles]
     tickers_result = await db.execute(
         select(NewsArticleTicker)
@@ -164,13 +265,13 @@ async def get_news_feed(
     )
     all_ticker_rows = tickers_result.scalars().all()
 
-    # 4. Group ticker rows by article_id for efficient lookup.
+    # 6. Group ticker rows by article_id for efficient lookup.
     ticker_map: dict = {}
     for tr in all_ticker_rows:
         ticker_map.setdefault(tr.article_id, []).append(tr)
 
-    # 5. Build response objects.
-    return [
+    # 7. Build response objects.
+    response_articles = [
         _build_article_response(
             article,
             ticker_map.get(article.article_id, []),
@@ -179,23 +280,36 @@ async def get_news_feed(
         for article in articles
     ]
 
+    return PaginatedNewsResponse(
+        articles=response_articles,
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
 
-@router.get("/tickers/{ticker}", response_model=List[NewsArticleOut])
+
+@router.get("/tickers/{ticker}", response_model=PaginatedNewsResponse)
 async def get_ticker_news(
     ticker: str,
+    limit: int = Query(25, ge=25, le=100, description="Articles per page (25, 50, 75, or 100)."),
+    offset: int = Query(0, ge=0, description="Number of articles to skip."),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """Articles filtered by a single ticker symbol, scored from the DB.
+    """Paginated articles filtered by a single ticker symbol, scored from the DB.
 
-    Returns up to 50 articles that mention the specified ticker, ordered by
-    published_at descending.
+    Returns articles that mention the specified ticker, ordered by
+    published_at descending.  Pagination via ``limit`` and ``offset``.
 
     Args:
         ticker: Stock ticker symbol (e.g. "AAPL").
+        limit:  Page size — articles per page (25-100, default 25).
+        offset: Number of articles to skip (default 0).
+        db:     Async database session.
+        current_user: Authenticated user (injected via dependency).
 
     Returns:
-        List of NewsArticleOut sorted by published_at descending.
+        PaginatedNewsResponse with articles, total, limit, and offset.
     """
     sym = ticker.strip().upper()
     if not sym:
@@ -213,18 +327,22 @@ async def get_ticker_news(
     article_ids = [row[0] for row in ticker_article_ids_result.all()]
 
     if not article_ids:
-        return []
+        return PaginatedNewsResponse(articles=[], total=0, limit=limit, offset=offset)
 
-    # 3. Fetch the articles ordered by published_at DESC.
+    # 3. Total count of articles referencing this ticker.
+    total = len(article_ids)
+
+    # 4. Fetch the requested page of articles ordered by published_at DESC.
     articles_result = await db.execute(
         select(NewsArticle)
         .where(NewsArticle.article_id.in_(article_ids))
         .order_by(NewsArticle.published_at.desc().nullslast())
-        .limit(50)
+        .offset(offset)
+        .limit(limit)
     )
     articles = articles_result.scalars().all()
 
-    # 4. Batch-fetch all ticker rows for these articles.
+    # 5. Batch-fetch all ticker rows for these articles.
     final_article_ids = [a.article_id for a in articles]
     tickers_result = await db.execute(
         select(NewsArticleTicker)
@@ -236,8 +354,8 @@ async def get_ticker_news(
     for tr in all_ticker_rows:
         ticker_map.setdefault(tr.article_id, []).append(tr)
 
-    # 5. Build response objects.
-    return [
+    # 6. Build response objects.
+    response_articles = [
         _build_article_response(
             article,
             ticker_map.get(article.article_id, []),
@@ -245,6 +363,13 @@ async def get_ticker_news(
         )
         for article in articles
     ]
+
+    return PaginatedNewsResponse(
+        articles=response_articles,
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
 
 
 # ── Internal Ingestion Endpoint ──────────────────────────────────────────────
@@ -273,7 +398,7 @@ async def ingest_news(
     """
     # ── Auth: shared secret ──────────────────────────────────────────────────
     provided_key = request.headers.get("X-Internal-Key", "")
-    if not _INTERNAL_NEWS_KEY or provided_key != _INTERNAL_NEWS_KEY:
+    if not _INTERNAL_NEWS_KEY or not hmac.compare_digest(provided_key, _INTERNAL_NEWS_KEY):
         logger.warning(
             "Internal news endpoint: invalid key from %s", request.client.host
         )

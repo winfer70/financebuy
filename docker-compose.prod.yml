@@ -1,56 +1,101 @@
+# docker-compose.prod.yml — TickerTap production service definitions
+#
+# Key differences from docker-compose.yml (dev):
+#   - Port 8000 bound to 0.0.0.0 (LAN-accessible for Server B worker)
+#   - restart: always (auto-restart on reboot)
+#   - No bind-mount volumes on app (runs from built image only)
+#
+# Usage:
+#   POSTGRES_USER=REDACTED_admin POSTGRES_PASSWORD=REDACTED \
+#     docker compose -f docker-compose.prod.yml up -d --build
+
+networks:
+  tickertap_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: REDACTED/16
+
 services:
   db:
     image: postgres:15
     restart: always
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_USER:     ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      POSTGRES_DB: tickerTap
+      POSTGRES_DB:       ${POSTGRES_DB:-tickerTap}
     volumes:
       - db_data:/var/lib/postgresql/data
+    # No 'ports:' section — db is only reachable within tickertap_net.
     networks:
-      - finance_net
+      - tickertap_net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      test:     ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
-      timeout: 5s
-      retries: 5
+      timeout:  5s
+      retries:  5
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
 
   redis:
     image: redis:7-alpine
     restart: always
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    # No 'ports:' section — redis is only reachable within tickertap_net.
     networks:
-      - finance_net
+      - tickertap_net
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test:     ["CMD", "redis-cli", "ping"]
       interval: 10s
-      timeout: 5s
-      retries: 5
+      timeout:  5s
+      retries:  5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+        reservations:
+          cpus: "0.1"
+          memory: 32M
 
   app:
     build:
-      context: .
+      context:    .
       dockerfile: backend/Dockerfile
     restart: always
+    env_file:
+      - ./backend/.env
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/tickerTap
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://api.yourdomain.com}
-      INTERNAL_NEWS_KEY: ${INTERNAL_NEWS_KEY:?INTERNAL_NEWS_KEY is required}
-    # Bind to all interfaces — nginx proxies via 127.0.0.1, REDACTED_HOST worker via LAN IP
+      # Use Docker service hostnames — not host networking.
+      DATABASE_URL:    postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-tickerTap}
+      REDIS_URL:       redis://redis:6379/0
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173,https://ticker-tap.com}
+      SMTP_HOST:       ${SMTP_HOST:-smtp.example.com}
+      OLLAMA_URL:      ${OLLAMA_URL:-http://localhost:11434}
+    # Bind to all interfaces — Server B worker connects via LAN IP.
     ports:
       - "0.0.0.0:8000:8000"
+    networks:
+      - tickertap_net
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
-    networks:
-      - finance_net
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
 
 volumes:
   db_data:
-
-networks:
-  finance_net:
-    driver: bridge

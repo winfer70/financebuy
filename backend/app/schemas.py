@@ -12,10 +12,11 @@ Conventions:
 
 from datetime import datetime
 from decimal import Decimal
+import re
 from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, validator
 
 
 # ── User schemas ─────────────────────────────────────────────────────────────
@@ -40,6 +41,20 @@ class UserCreate(UserBase):
         example="Str0ng!Pass",
     )
 
+    @validator("password")
+    @classmethod
+    def password_complexity(cls, v: str) -> str:
+        """Enforce at least 1 uppercase, 1 lowercase, 1 digit, and 1 special character."""
+        if not re.search(r"[A-Z]", v):
+            raise ValueError("Password must contain at least one uppercase letter.")
+        if not re.search(r"[a-z]", v):
+            raise ValueError("Password must contain at least one lowercase letter.")
+        if not re.search(r"\d", v):
+            raise ValueError("Password must contain at least one digit.")
+        if not re.search(r"[^A-Za-z0-9]", v):
+            raise ValueError("Password must contain at least one special character.")
+        return v
+
 
 class UserOut(UserBase):
     """Serialised user returned by the API — no password hash included."""
@@ -57,6 +72,53 @@ class UserLogin(BaseModel):
 
     email: EmailStr = Field(..., description="Registered email address.", example="alice@example.com")
     password: str = Field(..., description="Account password.", example="Str0ng!Pass")
+
+
+# ── Supported currencies and languages ────────────────────────────────────────
+SUPPORTED_CURRENCIES = {"USD", "EUR", "GBP", "PLN", "CHF", "JPY", "CAD", "AUD"}
+SUPPORTED_LANGUAGES = {"en", "pl", "de", "zh", "es", "pt", "fr", "ja", "it"}
+
+
+class UserPreferences(BaseModel):
+    """User preference values stored as JSON in the preferences column.
+
+    Attributes:
+        currency: ISO 4217 currency code for display conversion.
+        language: ISO 639-1 language code for UI translations.
+    """
+    currency: str = Field("USD", description="Display currency code.")
+    language: str = Field("en", description="UI language code.")
+
+
+class UserPreferencesUpdate(BaseModel):
+    """Partial update payload for user preferences. All fields optional.
+
+    Attributes:
+        currency: New currency code (must be in SUPPORTED_CURRENCIES).
+        language: New language code (must be in SUPPORTED_LANGUAGES).
+        sidebar_collapsed: Whether the sidebar is collapsed by default.
+    """
+    currency: Optional[str] = Field(None, description="Display currency code.")
+    language: Optional[str] = Field(None, description="UI language code.")
+    sidebar_collapsed: Optional[bool] = Field(None, description="Whether sidebar is collapsed.")
+
+
+class UserProfileOut(UserBase):
+    """Full user profile including preferences, returned by GET /auth/me.
+
+    Attributes:
+        user_id: Unique user identifier.
+        kyc_status: KYC verification status.
+        is_active: Whether the account is active.
+        preferences: User preferences (currency, language).
+    """
+    user_id: UUID = Field(..., description="Unique user identifier.")
+    kyc_status: str = Field(..., description="KYC verification status.")
+    is_active: bool = Field(..., description="Whether the account is active.")
+    preferences: UserPreferences = Field(default_factory=UserPreferences)
+
+    class Config:
+        orm_mode = True
 
 
 # ── Account schemas ───────────────────────────────────────────────────────────
@@ -163,6 +225,9 @@ class TokenResponse(BaseModel):
     email: Optional[str] = Field(None, description="Authenticated user's email.")
     first_name: Optional[str] = Field(None, description="Authenticated user's first name.")
     last_name: Optional[str] = Field(None, description="Authenticated user's last name.")
+    preferences: Optional[Dict[str, Any]] = Field(None, description="User preferences (currency, language).")
+    account_deactivated: Optional[bool] = Field(None, description="True if account is deactivated.")
+    deletion_scheduled_at: Optional[str] = Field(None, description="ISO-8601 timestamp when account will be purged.")
 
 
 # ── Portfolio / Holdings schemas ──────────────────────────────────────────────
@@ -277,6 +342,114 @@ class ResetPasswordRequest(BaseModel):
         description="New plaintext password (8–128 characters).",
         example="NewStr0ng!Pass",
     )
+
+    @validator("new_password")
+    @classmethod
+    def password_complexity(cls, v: str) -> str:
+        """Enforce at least 1 uppercase, 1 lowercase, 1 digit, and 1 special character."""
+        if not re.search(r"[A-Z]", v):
+            raise ValueError("Password must contain at least one uppercase letter.")
+        if not re.search(r"[a-z]", v):
+            raise ValueError("Password must contain at least one lowercase letter.")
+        if not re.search(r"\d", v):
+            raise ValueError("Password must contain at least one digit.")
+        if not re.search(r"[^A-Za-z0-9]", v):
+            raise ValueError("Password must contain at least one special character.")
+        return v
+
+
+# ── Profile / Account management schemas ────────────────────────────────────
+
+class ProfileUpdateRequest(BaseModel):
+    """Payload to update user profile fields (name only)."""
+
+    first_name: Optional[str] = Field(None, max_length=100, description="Updated first name.")
+    last_name: Optional[str] = Field(None, max_length=100, description="Updated last name.")
+
+
+class EmailChangeRequest(BaseModel):
+    """Payload to request an email address change."""
+
+    new_email: EmailStr = Field(..., description="New email address to switch to.")
+    password: str = Field(..., description="Current password for verification.")
+
+
+class AccountDeleteRequest(BaseModel):
+    """Payload to request account deletion."""
+
+    mode: Literal["permanent", "soft"] = Field(
+        ..., description="Deletion mode: 'permanent' (immediate) or 'soft' (30-day grace period)."
+    )
+    password: str = Field(..., description="Current password for verification.")
+
+
+class DeactivateRequest(BaseModel):
+    """Payload to deactivate an account."""
+
+    password: str = Field(..., description="Current password for verification.")
+
+
+class TokenActionRequest(BaseModel):
+    """Payload for token-based actions (verify email, reactivate, etc.)."""
+
+    token: str = Field(..., description="Raw one-time token received via email link.")
+
+
+class ResendVerificationRequest(BaseModel):
+    """Payload to request a new verification email."""
+
+    email: EmailStr = Field(..., description="Email address to resend verification to.")
+
+
+class ReactivationRequest(BaseModel):
+    """Payload to request an account reactivation email."""
+
+    email: EmailStr = Field(..., description="Email address of the deactivated account.")
+
+
+# ── User Report schemas ─────────────────────────────────────────────────────
+
+class UserReportCreate(BaseModel):
+    """Payload to submit a bug report or improvement suggestion."""
+
+    report_type: Literal["bug", "suggestion", "activation_bug"] = Field(
+        ..., description="Report type: bug, suggestion, or activation_bug."
+    )
+    category: Optional[str] = Field(
+        None, max_length=50,
+        description="Bug category: UI, Data, Performance, Authentication, Other."
+    )
+    subject: str = Field(..., min_length=1, max_length=200, description="Report subject line.")
+    body: str = Field(..., min_length=1, max_length=5000, description="Detailed description.")
+    reporter_email: Optional[EmailStr] = Field(
+        None, description="Email for unauthenticated reports (activation bugs only)."
+    )
+    website: Optional[str] = Field(
+        None, max_length=200,
+        description="Honeypot field for bot detection — must be left empty by real users.",
+    )
+
+
+class UserReportOut(BaseModel):
+    """Serialised user report returned by the API."""
+
+    report_id: UUID
+    report_type: str
+    category: Optional[str] = None
+    subject: str
+    body: str
+    status: str
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+
+class UserReportAdminUpdate(BaseModel):
+    """Admin payload to update a report's status and notes."""
+
+    status: Optional[Literal["new", "reviewed", "resolved", "dismissed"]] = None
+    admin_notes: Optional[str] = Field(None, max_length=5000)
 
 
 # ── Audit log schema ──────────────────────────────────────────────────────────
@@ -511,6 +684,37 @@ class NewsArticleOut(BaseModel):
     )
 
 
+class PaginatedNewsResponse(BaseModel):
+    """Paginated wrapper for news feed responses.
+
+    Wraps a page of NewsArticleOut objects alongside pagination metadata
+    so the frontend can render page controls and display totals.
+
+    Fields:
+        articles: The current page of scored news articles.
+        total:    Total number of articles matching the query (before pagination).
+        limit:    Number of articles requested per page.
+        offset:   Number of articles skipped (0-indexed).
+    """
+
+    articles: List[NewsArticleOut] = Field(
+        default_factory=list,
+        description="Current page of news articles.",
+    )
+    total: int = Field(
+        0,
+        description="Total number of articles matching the query.",
+    )
+    limit: int = Field(
+        25,
+        description="Page size used for this response.",
+    )
+    offset: int = Field(
+        0,
+        description="Offset (number of articles skipped).",
+    )
+
+
 # ── Feedback loop schemas ────────────────────────────────────────────────────
 
 
@@ -588,3 +792,101 @@ class TrainingPairOut(BaseModel):
     corrected_output: Dict[str, Any] = Field(..., description="Score derived from actual price data.")
     actual_change_pct: Optional[Decimal] = None
     accuracy_grade: str
+
+
+# ── Watchlist schemas ────────────────────────────────────────────────────────
+
+
+class WatchlistCreate(BaseModel):
+    """Create a new watchlist."""
+
+    name: str = Field(..., min_length=1, max_length=128, description="Watchlist name.")
+
+
+class WatchlistUpdate(BaseModel):
+    """Rename a watchlist."""
+
+    name: str = Field(..., min_length=1, max_length=128, description="New watchlist name.")
+
+
+class WatchlistItemOut(BaseModel):
+    """Serialised watchlist item."""
+
+    item_id: UUID
+    symbol: str
+    asset_type: str
+    notes: Optional[str] = None
+    position_order: int = 0
+    price_when_added: Optional[float] = None
+    added_at: Optional[datetime] = None
+
+    class Config:
+        orm_mode = True
+
+
+class WatchlistOut(BaseModel):
+    """Serialised watchlist (without items)."""
+
+    watchlist_id: UUID
+    name: str
+    item_count: int = 0
+    created_at: Optional[datetime] = None
+
+    class Config:
+        orm_mode = True
+
+
+class WatchlistDetailOut(BaseModel):
+    """Serialised watchlist with items."""
+
+    watchlist_id: UUID
+    name: str
+    items: List[WatchlistItemOut] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
+
+    class Config:
+        orm_mode = True
+
+
+class WatchlistItemCreate(BaseModel):
+    """Add an item to a watchlist."""
+
+    symbol: str = Field(..., min_length=1, max_length=20, description="Ticker symbol.")
+    asset_type: str = Field(
+        "stock", max_length=20, description="Asset type: stock, crypto, etf, physical."
+    )
+    notes: Optional[str] = Field(None, max_length=500, description="Optional note.")
+    price_when_added: Optional[float] = Field(
+        None, description="Snapshot price at time of adding."
+    )
+
+
+class WatchlistItemUpdate(BaseModel):
+    """Update a watchlist item."""
+
+    notes: Optional[str] = Field(None, max_length=500)
+    position_order: Optional[int] = Field(None, ge=0)
+
+
+class WatchlistBuyRequest(BaseModel):
+    """Buy an asset from watchlist into a portfolio."""
+
+    portfolio_id: UUID = Field(..., description="Target portfolio ID.")
+    purchase_date: Optional[datetime] = Field(None, description="Purchase date.")
+    quantity: float = Field(..., gt=0, description="Quantity to buy.")
+    purchase_price: float = Field(..., gt=0, description="Purchase price per unit.")
+    name: Optional[str] = Field(None, max_length=256, description="Asset display name.")
+
+
+# ── Portfolio performance schemas ────────────────────────────────────────────
+
+class PerformancePointOut(BaseModel):
+    """Single data point in a portfolio performance time series.
+
+    Attributes:
+        date:  ISO date string (YYYY-MM-DD).
+        value: Total portfolio value on that date.
+    """
+
+    date: str = Field(..., description="Date in YYYY-MM-DD format.")
+    value: float = Field(..., description="Total portfolio value on this date.")

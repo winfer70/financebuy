@@ -246,6 +246,19 @@ const api = {
   sellPosition: (positionId, quantity, token) =>
     apiFetch(`/portfolio-manager/positions/${positionId}/sell`, { method: "POST", body: { quantity }, token }),
 
+  /**
+   * Fetch portfolio performance time series from the backend.
+   * The backend computes daily portfolio value with forward-fill for
+   * missing dates (weekends/holidays) and dynamic "ALL" range.
+   *
+   * @param {string} portfolioId - Portfolio UUID
+   * @param {string} period      - Time range: 1W, 1M, 3M, YTD, 1Y, ALL
+   * @param {string} token       - JWT auth token
+   * @returns {Promise<Array<{date: string, value: number}>>} Time series data points
+   */
+  getPortfolioPerformance: (portfolioId, period, token) =>
+    apiFetch(`/portfolio-manager/${portfolioId}/performance?period=${encodeURIComponent(period)}`, { token }),
+
   bulkQuotes: (symbols, token) =>
     apiFetch(`/market/bulk_quotes?symbols=${symbols.join(",")}`, { token }),
 
@@ -270,20 +283,271 @@ const api = {
 
   // ── News ──────────────────────────────────────────────────────────────────
   /**
-   * Fetch the LLM-scored news feed from the DB.
-   * Returns articles with score (-5 to +5), reasoning, and ticker_scores.
-   * @param {string} token - JWT access token
+   * Fetch a paginated, LLM-scored news feed from the DB with optional
+   * server-side filters.  Filters are applied before pagination so that
+   * total counts and page offsets stay consistent.
+   *
+   * Returns { articles, total, limit, offset }.
+   *
+   * @param {string} token   - JWT access token
+   * @param {object} [opts]  - Optional filter / pagination parameters
+   * @param {number} [opts.limit=25]             - Articles per page (25, 50, 75, or 100)
+   * @param {number} [opts.offset=0]             - Number of articles to skip
+   * @param {string|null} [opts.portfolio_tickers=null] - Comma-separated portfolio ticker symbols
+   * @param {boolean} [opts.portfolio_only=false] - Filter to user's portfolio tickers (server-derived)
+   * @param {string|null} [opts.sentiment=null]   - "bullish" or "bearish"
+   * @param {string|null} [opts.ticker_search=null] - Search by ticker or title
    */
-  getNews: (token) =>
-    apiFetch("/news/feed", { token }),
+  getNews: (token, { limit = 25, offset = 0, portfolio_tickers = null, portfolio_only = false, sentiment = null, ticker_search = null } = {}) => {
+    /* Build URL with pagination and optional filter query parameters. */
+    let url = `/news/feed?limit=${limit}&offset=${offset}`;
+    if (portfolio_tickers) url += `&portfolio_tickers=${encodeURIComponent(portfolio_tickers)}`;
+    if (portfolio_only) url += `&portfolio_only=true`;
+    if (sentiment) url += `&sentiment=${encodeURIComponent(sentiment)}`;
+    if (ticker_search) url += `&ticker_search=${encodeURIComponent(ticker_search)}`;
+    return apiFetch(url, { token });
+  },
 
   /**
-   * Fetch news articles filtered by a single ticker symbol.
-   * @param {string} ticker - stock ticker symbol (e.g. "AAPL")
+   * Fetch paginated news articles filtered by a single ticker symbol.
+   * Returns { articles, total, limit, offset }.
+   * @param {string} ticker - Stock ticker symbol (e.g. "AAPL")
    * @param {string} token  - JWT access token
+   * @param {number} limit  - Articles per page (25, 50, 75, or 100)
+   * @param {number} offset - Number of articles to skip
    */
-  getNewsByTicker: (ticker, token) =>
-    apiFetch(`/news/tickers/${encodeURIComponent(ticker)}`, { token }),
+  getNewsByTicker: (ticker, token, limit = 25, offset = 0) =>
+    apiFetch(`/news/tickers/${encodeURIComponent(ticker)}?limit=${limit}&offset=${offset}`, { token }),
+
+  // ── Guide ──────────────────────────────────────────────────────────────────
+  /**
+   * Submit a question to the AI guide (Ollama proxy).
+   * @param {string} question - User question text (1-500 chars)
+   * @param {string} token    - JWT access token
+   * @returns {Promise<{answer: string, model: string}>}
+   */
+  askGuide: (question, token) =>
+    apiFetch("/guide/ask", { method: "POST", body: { question }, token }),
+
+  // ── User Profile & Preferences ────────────────────────────────────────────
+  /**
+   * Fetch the authenticated user's profile including preferences.
+   * @param {string} token - JWT access token
+   * @returns {Promise<{email, first_name, last_name, phone, user_id, kyc_status, is_active, preferences}>}
+   */
+  getProfile: (token) =>
+    apiFetch("/auth/me", { token }),
+
+  /**
+   * Update the authenticated user's display preferences (currency, language).
+   * Only provided fields are merged into the existing preferences.
+   * @param {object} payload  - { currency?: string, language?: string }
+   * @param {string} token    - JWT access token
+   * @returns {Promise<{currency: string, language: string}>}
+   */
+  updatePreferences: (payload, token) =>
+    apiFetch("/auth/preferences", { method: "PATCH", body: payload, token }),
+
+  // ── Exchange Rates ────────────────────────────────────────────────────────
+  /**
+   * Fetch current exchange rates from the backend (ECB data, 1h cache).
+   * Base currency is always USD, returns rates for all supported currencies.
+   * @param {string} token - JWT access token
+   * @returns {Promise<{base: string, rates: object, timestamp: string}>}
+   */
+  getExchangeRates: (token) =>
+    apiFetch("/market/exchange-rates", { token }),
+
+  // ── Reports ──────────────────────────────────────────────────────────────
+  /**
+   * Submit a new report. Authentication is optional.
+   * @param {object}      payload      - Report data
+   * @param {string|null} [token=null] - JWT access token (optional)
+   * @returns {Promise<object>} Created report
+   */
+  submitReport: (payload, token = null) =>
+    apiFetch("/reports", { method: "POST", body: payload, token }),
+
+  // ── Email Verification ─────────────────────────────────────────────────
+  /**
+   * Verify a user's email address using the token from the verification link.
+   * @param {string} token - Email verification token
+   * @returns {Promise<object>}
+   */
+  verifyEmail: (token) =>
+    apiFetch("/auth/verify-email", { method: "POST", body: { token } }),
+
+  /**
+   * Resend the email verification link to the given address.
+   * @param {string} email - User's email address
+   * @returns {Promise<object>}
+   */
+  resendVerification: (email) =>
+    apiFetch("/auth/resend-verification", { method: "POST", body: { email } }),
+
+  // ── Account Lifecycle ──────────────────────────────────────────────────
+  /**
+   * Deactivate the authenticated user's account.
+   * @param {string} password - Current password for confirmation
+   * @param {string} token    - JWT access token
+   * @returns {Promise<object>}
+   */
+  deactivateAccount: (password, token) =>
+    apiFetch("/auth/deactivate", { method: "POST", body: { password }, token }),
+
+  /**
+   * Request a reactivation link for a deactivated account.
+   * @param {string} email - Email of the deactivated account
+   * @returns {Promise<object>}
+   */
+  requestReactivation: (email) =>
+    apiFetch("/auth/request-reactivation", { method: "POST", body: { email } }),
+
+  /**
+   * Reactivate a deactivated account using the token from the reactivation link.
+   * @param {string} token - Reactivation token
+   * @returns {Promise<object>}
+   */
+  reactivateAccount: (token) =>
+    apiFetch("/auth/reactivate", { method: "POST", body: { token } }),
+
+  /**
+   * Request permanent deletion of the authenticated user's account.
+   * @param {string} mode     - Deletion mode (e.g. "soft", "hard")
+   * @param {string} password - Current password for confirmation
+   * @param {string} token    - JWT access token
+   * @returns {Promise<object>}
+   */
+  deleteAccount: (mode, password, token) =>
+    apiFetch("/auth/delete-account", { method: "POST", body: { mode, password }, token }),
+
+  /**
+   * Cancel a pending account deletion using the token from the cancellation link.
+   * @param {string} token - Deletion cancellation token
+   * @returns {Promise<object>}
+   */
+  cancelDeletion: (token) =>
+    apiFetch("/auth/cancel-deletion", { method: "POST", body: { token } }),
+
+  // ── Watchlists ────────────────────────────────────────────────────────────
+
+  /**
+   * Create a new watchlist for the authenticated user.
+   * @param {object} body  - Watchlist data (e.g. { name: "Tech Stocks" })
+   * @param {string} token - JWT access token
+   * @returns {Promise<object>} Created watchlist
+   */
+  createWatchlist: (body, token) =>
+    apiFetch("/watchlists", { method: "POST", body, token }),
+
+  /**
+   * List all watchlists belonging to the authenticated user.
+   * @param {string} token - JWT access token
+   * @returns {Promise<Array<object>>} Array of watchlist objects
+   */
+  getWatchlists: (token) =>
+    apiFetch("/watchlists", { token }),
+
+  /**
+   * Get a single watchlist with its items.
+   * @param {string} id    - Watchlist ID
+   * @param {string} token - JWT access token
+   * @returns {Promise<object>} Watchlist with items array
+   */
+  getWatchlist: (id, token) =>
+    apiFetch(`/watchlists/${id}`, { token }),
+
+  /**
+   * Rename an existing watchlist.
+   * @param {string} id    - Watchlist ID
+   * @param {object} body  - Rename data (e.g. { name: "New Name" })
+   * @param {string} token - JWT access token
+   * @returns {Promise<object>} Updated watchlist
+   */
+  renameWatchlist: (id, body, token) =>
+    apiFetch(`/watchlists/${id}`, { method: "PATCH", body, token }),
+
+  /**
+   * Delete a watchlist and all its items.
+   * @param {string} id    - Watchlist ID
+   * @param {string} token - JWT access token
+   * @returns {Promise<null>} Null on success (204)
+   */
+  deleteWatchlist: (id, token) =>
+    apiFetch(`/watchlists/${id}`, { method: "DELETE", token }),
+
+  /**
+   * Add an item (symbol) to a watchlist.
+   * @param {string} watchlistId - Watchlist ID
+   * @param {object} body        - Item data (e.g. { symbol, asset_type, notes })
+   * @param {string} token       - JWT access token
+   * @returns {Promise<object>} Created watchlist item
+   */
+  addWatchlistItem: (watchlistId, body, token) =>
+    apiFetch(`/watchlists/${watchlistId}/items`, { method: "POST", body, token }),
+
+  /**
+   * Update a watchlist item (e.g. edit notes).
+   * @param {string} watchlistId - Watchlist ID
+   * @param {string} itemId      - Watchlist item ID
+   * @param {object} body        - Fields to update (e.g. { notes })
+   * @param {string} token       - JWT access token
+   * @returns {Promise<object>} Updated watchlist item
+   */
+  updateWatchlistItem: (watchlistId, itemId, body, token) =>
+    apiFetch(`/watchlists/${watchlistId}/items/${itemId}`, { method: "PATCH", body, token }),
+
+  /**
+   * Remove an item from a watchlist.
+   * @param {string} watchlistId - Watchlist ID
+   * @param {string} itemId      - Watchlist item ID
+   * @param {string} token       - JWT access token
+   * @returns {Promise<null>} Null on success (204)
+   */
+  removeWatchlistItem: (watchlistId, itemId, token) =>
+    apiFetch(`/watchlists/${watchlistId}/items/${itemId}`, { method: "DELETE", token }),
+
+  /**
+   * Buy from a watchlist item into a portfolio.
+   * Creates a portfolio position from a watched symbol.
+   * @param {string} watchlistId - Watchlist ID
+   * @param {string} itemId      - Watchlist item ID
+   * @param {object} body        - Buy data (e.g. { portfolio_id, quantity, price, date })
+   * @param {string} token       - JWT access token
+   * @returns {Promise<object>} Created portfolio position
+   */
+  buyFromWatchlist: (watchlistId, itemId, body, token) =>
+    apiFetch(`/watchlists/${watchlistId}/items/${itemId}/buy`, { method: "POST", body, token }),
+
+  // ── Profile Management ─────────────────────────────────────────────────
+  /**
+   * Update the authenticated user's profile fields.
+   * Only provided fields are merged into the existing profile.
+   * @param {object} payload - Profile fields to update
+   * @param {string} token   - JWT access token
+   * @returns {Promise<object>} Updated profile
+   */
+  updateProfile: (payload, token) =>
+    apiFetch("/auth/profile", { method: "PATCH", body: payload, token }),
+
+  /**
+   * Initiate an email address change for the authenticated user.
+   * A confirmation link is sent to the new address.
+   * @param {string} newEmail - Desired new email address
+   * @param {string} password - Current password for confirmation
+   * @param {string} token    - JWT access token
+   * @returns {Promise<object>}
+   */
+  changeEmail: (newEmail, password, token) =>
+    apiFetch("/auth/change-email", { method: "POST", body: { new_email: newEmail, password }, token }),
+
+  /**
+   * Confirm an email address change using the token from the confirmation link.
+   * @param {string} token - Email change confirmation token
+   * @returns {Promise<object>}
+   */
+  confirmEmailChange: (token) =>
+    apiFetch("/auth/confirm-email-change", { method: "POST", body: { token } }),
 };
 
 export default api;

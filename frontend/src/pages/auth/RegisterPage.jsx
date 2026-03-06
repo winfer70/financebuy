@@ -20,6 +20,7 @@ export function RegisterPage({ onLogin, onBack, backendOk, onNavigate }) {
   const [show,      setShow]      = useState(false);
   const [loading,   setLoading]   = useState(false);
   const [err,       setErr]       = useState("");
+  const [registered, setRegistered] = useState(false);
 
   const handleRegister = async () => {
     if (!firstName)       { setErr("FIRST NAME REQUIRED"); return; }
@@ -30,7 +31,7 @@ export function RegisterPage({ onLogin, onBack, backendOk, onNavigate }) {
     setErr(""); setLoading(true);
     try {
       await api.register({ email, password: pwd, first_name: firstName, last_name: lastName });
-      await onLogin(email, pwd);
+      setRegistered(true);
     } catch(e) {
       setErr(e.message || "REGISTRATION FAILED");
     } finally {
@@ -72,48 +73,81 @@ export function RegisterPage({ onLogin, onBack, backendOk, onNavigate }) {
         </div>
       </div>
       <div className="login-right">
-        <div className="login-head">CREATE ACCOUNT</div>
-        <div className="login-subhead">Open your trading terminal account</div>
-        <form className="login-form" onSubmit={e=>{e.preventDefault();handleRegister();}}>
-          <div style={{display:"flex",gap:12}}>
-            <div className="form-field" style={{flex:1}}>
-              <label className="form-label">First Name</label>
-              <input className="form-control" type="text" value={firstName}
-                onChange={e=>setFirstName(e.target.value)} placeholder="First"/>
+        {!registered && <div className="login-head">CREATE ACCOUNT</div>}
+        {!registered && <div className="login-subhead">Open your trading terminal account</div>}
+        {registered ? (
+          <div style={{ textAlign: "center" }}>
+            <div style={{
+              fontFamily: "var(--font-disp)", fontSize: 24, color: "var(--green)",
+              letterSpacing: 1, marginBottom: 12,
+            }}>
+              ACCOUNT CREATED
             </div>
-            <div className="form-field" style={{flex:1}}>
-              <label className="form-label">Last Name</label>
-              <input className="form-control" type="text" value={lastName}
-                onChange={e=>setLastName(e.target.value)} placeholder="Last"/>
+            <div style={{
+              fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--muted)",
+              lineHeight: 1.6, marginBottom: 8,
+            }}>
+              A verification link has been sent to:
             </div>
-          </div>
-          <div className="form-field">
-            <label className="form-label">Email Address</label>
-            <input className="form-control" type="email" value={email}
-              onChange={e=>setEmail(e.target.value)} autoComplete="email" placeholder="you@example.com"/>
-          </div>
-          <div className="form-field">
-            <label className="form-label">Password</label>
-            <div className="pw-wrap">
-              <input className="form-control" type={show?"text":"password"} value={pwd}
-                onChange={e=>setPwd(e.target.value)}
-                autoComplete="new-password" placeholder="Min 8 characters" style={{paddingRight:36}}/>
-              <button type="button" className="pw-eye" onClick={()=>setShow(v=>!v)}>{show?<Ic.eyeOff/>:<Ic.eye/>}</button>
+            <div style={{
+              fontFamily: "var(--font-mono)", fontSize: 14, color: "var(--amber)",
+              fontWeight: 600, letterSpacing: 0.5, marginBottom: 24,
+            }}>
+              {email}
             </div>
+            <div style={{
+              fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)",
+              lineHeight: 1.6, marginBottom: 24,
+            }}>
+              Please check your inbox (and spam folder) and click the verification
+              link to activate your account.
+            </div>
+            <button className="btn btn-amber login-btn-full" onClick={onBack}>
+              BACK TO SIGN IN
+            </button>
           </div>
-          <div className="form-field">
-            <label className="form-label">Confirm Password</label>
-            <input className="form-control" type={show?"text":"password"} value={pwd2}
-              onChange={e=>setPwd2(e.target.value)} autoComplete="new-password" placeholder="Repeat password"/>
-          </div>
-          {err && <div style={{fontFamily:"var(--font-mono)",fontSize:11,color:"var(--red)"}}>{err}</div>}
-          <button type="submit" className="btn btn-amber login-btn-full" disabled={loading}>
-            {loading ? <span className="loading-pulse">CREATING ACCOUNT...</span> : "CREATE ACCOUNT"}
-          </button>
-          <div className="login-footer-links">
-            <span className="login-link" onClick={onBack}>← Back to sign in</span>
-          </div>
-        </form>
+        ) : (
+          <form className="login-form" onSubmit={e=>{e.preventDefault();handleRegister();}}>
+            <div style={{display:"flex",gap:12}}>
+              <div className="form-field" style={{flex:1}}>
+                <label className="form-label">First Name</label>
+                <input className="form-control" type="text" value={firstName}
+                  onChange={e=>setFirstName(e.target.value)} placeholder="First"/>
+              </div>
+              <div className="form-field" style={{flex:1}}>
+                <label className="form-label">Last Name</label>
+                <input className="form-control" type="text" value={lastName}
+                  onChange={e=>setLastName(e.target.value)} placeholder="Last"/>
+              </div>
+            </div>
+            <div className="form-field">
+              <label className="form-label">Email Address</label>
+              <input className="form-control" type="email" value={email}
+                onChange={e=>setEmail(e.target.value)} autoComplete="email" placeholder="you@example.com"/>
+            </div>
+            <div className="form-field">
+              <label className="form-label">Password</label>
+              <div className="pw-wrap">
+                <input className="form-control" type={show?"text":"password"} value={pwd}
+                  onChange={e=>setPwd(e.target.value)}
+                  autoComplete="new-password" placeholder="Min 8 characters" style={{paddingRight:36}}/>
+                <button type="button" className="pw-eye" onClick={()=>setShow(v=>!v)}>{show?<Ic.eyeOff/>:<Ic.eye/>}</button>
+              </div>
+            </div>
+            <div className="form-field">
+              <label className="form-label">Confirm Password</label>
+              <input className="form-control" type={show?"text":"password"} value={pwd2}
+                onChange={e=>setPwd2(e.target.value)} autoComplete="new-password" placeholder="Repeat password"/>
+            </div>
+            {err && <div style={{fontFamily:"var(--font-mono)",fontSize:11,color:"var(--red)"}}>{err}</div>}
+            <button type="submit" className="btn btn-amber login-btn-full" disabled={loading}>
+              {loading ? <span className="loading-pulse">CREATING ACCOUNT...</span> : "CREATE ACCOUNT"}
+            </button>
+            <div className="login-footer-links">
+              <span className="login-link" onClick={onBack}>← Back to sign in</span>
+            </div>
+          </form>
+        )}
         <div className="login-security">
           <div className="security-item"><Ic.lock/> TLS 1.3 Encrypted</div>
           <div className="security-item"><Ic.shield/> SOC 2 Compliant</div>
