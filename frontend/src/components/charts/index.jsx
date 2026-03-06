@@ -39,16 +39,28 @@ export function Sparkline({ positive, w=80, h=24 }) {
 }
 
 /**
- * PortfolioChart: Interactive area chart showing portfolio value over time
- * Supports hover interaction for detailed values
+ * PortfolioChart: Interactive area chart showing portfolio value over time.
+ * Supports hover interaction for detailed values.
+ *
+ * @param {number}       height         - SVG height in px (default 160)
+ * @param {Array|null}   data           - Array of { date, value } objects or plain numbers.
+ *                                         Returns empty-state when null / empty.
+ * @param {string}       period         - Display period label (e.g. "3M", "1Y")
+ * @param {string}       currencySymbol - Currency symbol for formatting (default "$")
  */
-export function PortfolioChart({ height=160, data=null, period="3M" }) {
+export function PortfolioChart({ height=160, data=null, period="3M", currencySymbol="$" }) {
+  /* Normalise input: accept [number], [{close}], or [{date, value}] */
   const raw = useMemo(() => {
-    if (data && data.length > 0) return data.map(d => typeof d === "number" ? d : d.close || d);
-    return Array.from({length:60},(_,i)=>
-      42000 + i*380 + (Math.sin(i*0.4)*800) + ((Math.sin(i*1.7+3)*0.5+0.15))*1200
-    );
+    if (data && data.length > 0) return data.map(d => typeof d === "number" ? d : d.value ?? d.close ?? d);
+    return [];
   }, [data]);
+
+  /* Extract date strings from data (if present) for x-axis labels */
+  const dates = useMemo(() => {
+    if (data && data.length > 0 && data[0]?.date) return data.map(d => d.date);
+    return null;
+  }, [data]);
+
   const [hover, setHover] = useState(null);
   const svgRef = useRef(null);
   const W=600, H=height;
@@ -62,8 +74,31 @@ export function PortfolioChart({ height=160, data=null, period="3M" }) {
   const line = pts.map((p,i)=>`${i===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
   /* Fill area closes down to DATA_W (not full W) so gradient doesn't bleed into future zone */
   const fill = line+` L${DATA_W},${H} L0,${H} Z`;
-  const yVals = [mx, (mx+mn)/2, mn].map(v=>"$"+(v/1000).toFixed(1)+"K");
-  const xLabels = ["DEC '25","JAN '26","FEB '26"];
+
+  /* Y-axis labels — adapt format based on magnitude */
+  const fmtY = (v) => {
+    if (Math.abs(v) >= 1e6) return currencySymbol + (v / 1e6).toFixed(1) + "M";
+    if (Math.abs(v) >= 1e3) return currencySymbol + (v / 1e3).toFixed(1) + "K";
+    return currencySymbol + v.toFixed(0);
+  };
+  const yVals = [mx, (mx+mn)/2, mn].map(fmtY);
+
+  /* X-axis labels — derive from dates or fall-back to period hint */
+  const xLabels = useMemo(() => {
+    if (dates && dates.length >= 3) {
+      const fmt = (d) => {
+        try {
+          const dt = new Date(d);
+          return dt.toLocaleDateString("en-US", { month: "short", year: "2-digit" }).toUpperCase().replace(",", " '");
+        } catch { return ""; }
+      };
+      const first = fmt(dates[0]);
+      const mid   = fmt(dates[Math.floor(dates.length / 2)]);
+      const last  = fmt(dates[dates.length - 1]);
+      return [first, mid, last];
+    }
+    return ["DEC '25","JAN '26","FEB '26"];
+  }, [dates]);
 
   /**
    * handleMouseMove — resolves cursor position to nearest data point.
@@ -80,13 +115,32 @@ export function PortfolioChart({ height=160, data=null, period="3M" }) {
       setHover({ idx: -1, x: relX, y: H / 2, value: null, inFuture: true });
     } else {
       const idx = Math.min(Math.max(Math.round((relX / DATA_W) * (raw.length - 1)), 0), raw.length - 1);
-      setHover({ idx, x: pts[idx].x, y: pts[idx].y, value: raw[idx], inFuture: false });
+      const dateStr = dates && dates[idx] ? dates[idx] : null;
+      setHover({ idx, x: pts[idx].x, y: pts[idx].y, value: raw[idx], inFuture: false, date: dateStr });
     }
-  }, [raw, pts, DATA_W]);
+  }, [raw, pts, DATA_W, dates]);
 
   /* Determine tooltip anchor: leftmost points anchor right, others center */
   const tooltipLeft = hover && !hover.inFuture ? `${(hover.x / W) * 100}%` : "0";
   const tooltipTransform = hover && hover.idx === 0 ? "translateX(0)" : "translateX(-50%)";
+
+  /* Format tooltip value based on magnitude */
+  const fmtTooltip = (v) => {
+    if (v >= 1e6) return currencySymbol + (v / 1e6).toFixed(2) + "M";
+    if (v >= 1e3) return currencySymbol + (v / 1e3).toFixed(2) + "K";
+    return currencySymbol + v.toFixed(2);
+  };
+
+  /* Empty-state: when no data is available, show a placeholder instead of the chart canvas */
+  if (raw.length === 0) {
+    return (
+      <div className="chart-area" style={{position:"relative", display:"flex", alignItems:"center", justifyContent:"center", height:H}}>
+        <span style={{fontFamily:"var(--font-mono)",fontSize:11,color:"var(--muted)",letterSpacing:"0.5px"}}>
+          NO PORTFOLIO DATA AVAILABLE
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div className="chart-area" style={{position:"relative"}}>
@@ -125,13 +179,18 @@ export function PortfolioChart({ height=160, data=null, period="3M" }) {
         </svg>
         {hover && !hover.inFuture && (
           <div style={{
-            position:"absolute", left:tooltipLeft, top:hover.y-36,
+            position:"absolute", left:tooltipLeft, top: hover.y < 50 ? hover.y + 16 : hover.y - 36,
             transform:tooltipTransform, background:"var(--bg2)", border:"1px solid var(--border)",
             padding:"4px 8px", borderRadius:2, pointerEvents:"none",
             fontFamily:"var(--font-mono)", fontSize:10, color:"var(--amber)",
             whiteSpace:"nowrap", zIndex:5,
           }}>
-            ${(hover.value/1000).toFixed(2)}K
+            {hover.date && (
+              <span style={{ color: "var(--muted)", marginRight: 6 }}>
+                {new Date(hover.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              </span>
+            )}
+            {fmtTooltip(hover.value)}
           </div>
         )}
       </div>
@@ -148,7 +207,7 @@ export function PortfolioChart({ height=160, data=null, period="3M" }) {
  */
 const PALETTE = ["#0f7d40","#3d7ef5","#00d97e","#f04438","#0fc0d0","#a78bfa","#fb923c"];
 
-export function AllocationDonut({ holdings: holdingsProp = null }) {
+export function AllocationDonut({ holdings: holdingsProp = null, currencySymbol = "$" }) {
   const [hoverIdx, setHoverIdx] = useState(null);
   const data = holdingsProp || [];
   const total = data.reduce((s,h)=>s+(h.quantity||h.qty||0)*(h.current_price||h.price||0),0);
@@ -210,14 +269,14 @@ export function AllocationDonut({ holdings: holdingsProp = null }) {
               {slices[hoverIdx].pct.toFixed(1)}%
             </text>
             <text x={cx} y={cy+14} textAnchor="middle" fill="var(--amber)" fontSize="9" fontFamily="IBM Plex Mono">
-              ${(slices[hoverIdx].val/1000).toFixed(2)}K
+              {currencySymbol}{(slices[hoverIdx].val/1000).toFixed(2)}K
             </text>
           </>
         ) : (
           <>
             <text x={cx} y={cy-5} textAnchor="middle" fill="var(--muted)" fontSize="8" fontFamily="IBM Plex Mono" letterSpacing="1">TOTAL</text>
             <text x={cx} y={cy+10} textAnchor="middle" fill="var(--amber)" fontSize="11" fontFamily="IBM Plex Mono" fontWeight="600">
-              ${(total/1000).toFixed(1)}K
+              {currencySymbol}{(total/1000).toFixed(1)}K
             </text>
           </>
         )}
@@ -314,7 +373,7 @@ function squarify(items, rect) {
   return results;
 }
 
-export function Heatmap({ holdings = [] }) {
+export function Heatmap({ holdings = [], onTileAction = null }) {
   const wrapRef = useRef(null);
   /* Taller container (280px) gives small-cap tiles more vertical room */
   const MAP_H = 280;
@@ -398,7 +457,9 @@ export function Heatmap({ holdings = [] }) {
           const showPct = cellW >= 36 && cellH >= 32;
           const fSize = symbolFontSize(cellW, cellH);
           return (
-            <g key={t.symbol} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} style={{ cursor: "pointer" }}>
+            <g key={t.symbol} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}
+              onClick={(e) => onTileAction && onTileAction(t.symbol, e)}
+              style={{ cursor: "pointer" }}>
               <rect
                 x={t.rx + gap} y={t.ry + gap}
                 width={cellW} height={cellH}

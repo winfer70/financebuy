@@ -32,6 +32,7 @@ const STORAGE_USER       = "tickertap_user";
 const STORAGE_ACCOUNT    = "tickertap_account";
 const STORAGE_PORTFOLIOS = "tickertap_portfolios";
 const STORAGE_POSITIONS  = "tickertap_positions";
+const STORAGE_PREFS      = "tickertap_preferences";
 const IDLE_KEY           = "tickertap_last_activity";
 const IDLE_MS            = 5 * 60 * 1000; // 5 minutes
 
@@ -68,6 +69,11 @@ export function AuthProvider({ children, onToast }) {
   const [accountId, setAccountId] = useState(
     () => sessionStorage.getItem(STORAGE_ACCOUNT) || null
   );
+  const [emailNotVerified, setEmailNotVerified] = useState(false);
+  const [unverifiedEmail, setUnverifiedEmail]   = useState(null);
+  const [accountDeactivated, setAccountDeactivated] = useState(false);
+  const [deactivatedEmail, setDeactivatedEmail] = useState(null);
+  const [deletionScheduledAt, setDeletionScheduledAt] = useState(null);
 
   // null = probe not complete, true = reachable, false = offline
   const [backendOk, setBackendOk] = useState(null);
@@ -89,6 +95,12 @@ export function AuthProvider({ children, onToast }) {
     sessionStorage.removeItem(STORAGE_ACCOUNT);
     sessionStorage.removeItem(STORAGE_PORTFOLIOS);
     sessionStorage.removeItem(STORAGE_POSITIONS);
+    sessionStorage.removeItem(STORAGE_PREFS);
+    setEmailNotVerified(false);
+    setUnverifiedEmail(null);
+    setAccountDeactivated(false);
+    setDeactivatedEmail(null);
+    setDeletionScheduledAt(null);
     onToast?.("SESSION TERMINATED");
   }, [onToast]);
 
@@ -98,6 +110,29 @@ export function AuthProvider({ children, onToast }) {
     window.addEventListener("session-expired", onExpired);
     return () => window.removeEventListener("session-expired", onExpired);
   }, [handleLogout]);
+
+  /* ── Listen for profile-updated events from SettingsPage name edits ──── */
+  useEffect(() => {
+    /**
+     * handleProfileUpdate — syncs first_name / last_name changes into
+     * authUser state and sessionStorage so navbar avatar reflects immediately.
+     *
+     * @param {CustomEvent} e - event with detail: { first_name, last_name }
+     */
+    const handleProfileUpdate = (e) => {
+      const { first_name, last_name } = e.detail;
+      setAuthUser(prev => prev ? { ...prev, first_name, last_name } : prev);
+      /* Also update sessionStorage so a page refresh keeps the new name */
+      try {
+        const stored = JSON.parse(sessionStorage.getItem("tickertap_user") || "null");
+        if (stored) {
+          sessionStorage.setItem("tickertap_user", JSON.stringify({ ...stored, first_name, last_name }));
+        }
+      } catch { /* non-fatal — sessionStorage may be unavailable */ }
+    };
+    window.addEventListener("profile-updated", handleProfileUpdate);
+    return () => window.removeEventListener("profile-updated", handleProfileUpdate);
+  }, []);
 
   /* ── Inactivity auto-logout ──────────────────────────────────────────── */
   useEffect(() => {
@@ -152,7 +187,18 @@ export function AuthProvider({ children, onToast }) {
     }
 
     // Real authentication
-    const res = await api.login(email, password); // throws on failure
+    let res;
+    try {
+      res = await api.login(email, password);
+    } catch (loginErr) {
+      /* Check if the error is a structured email_not_verified response */
+      if (loginErr.message === "email_not_verified" || loginErr.detail === "email_not_verified") {
+        setEmailNotVerified(true);
+        setUnverifiedEmail(email);
+        throw loginErr; /* re-throw so PageRouter can catch and route */
+      }
+      throw loginErr;
+    }
 
     const user = {
       email:      res.email,
@@ -165,6 +211,20 @@ export function AuthProvider({ children, onToast }) {
     setAuthUser(user);
     sessionStorage.setItem(STORAGE_TOKEN, res.access_token);
     sessionStorage.setItem(STORAGE_USER, JSON.stringify(user));
+
+    /* Handle deactivated account — UI should show deactivated page instead of dashboard */
+    if (res.account_deactivated) {
+      setAccountDeactivated(true);
+      setDeactivatedEmail(res.email);
+      setDeletionScheduledAt(res.deletion_scheduled_at || null);
+      onToast?.("ACCOUNT IS DEACTIVATED");
+      return { page: "deactivated" };
+    }
+
+    // Store preferences from login response (currency, language)
+    if (res.preferences) {
+      sessionStorage.setItem(STORAGE_PREFS, JSON.stringify(res.preferences));
+    }
 
     // Fetch first account (best-effort — non-fatal)
     try {
@@ -202,6 +262,11 @@ export function AuthProvider({ children, onToast }) {
     backendOk,
     handleLogin,
     handleLogout,
+    emailNotVerified,
+    unverifiedEmail,
+    accountDeactivated,
+    deactivatedEmail,
+    deletionScheduledAt,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -213,12 +278,17 @@ export function AuthProvider({ children, onToast }) {
  * Must be called inside a component tree wrapped with <AuthProvider>.
  *
  * @returns {{
- *   authToken:    string|null,
- *   authUser:     object|null,
- *   accountId:    string|null,
- *   backendOk:    boolean|null,
- *   handleLogin:  Function,
- *   handleLogout: Function,
+ *   authToken:          string|null,
+ *   authUser:           object|null,
+ *   accountId:          string|null,
+ *   backendOk:          boolean|null,
+ *   handleLogin:        Function,
+ *   handleLogout:       Function,
+ *   emailNotVerified:   boolean,
+ *   unverifiedEmail:    string|null,
+ *   accountDeactivated: boolean,
+ *   deactivatedEmail:   string|null,
+ *   deletionScheduledAt: string|null,
  * }}
  */
 export function useAuth() {

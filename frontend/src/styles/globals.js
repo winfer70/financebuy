@@ -69,7 +69,18 @@ body::before {
   padding: 0;
   flex-shrink: 0;
   z-index: 50;
+  transition: width 0.15s ease;
 }
+.sidebar.sidebar-collapsed { width: 52px; }
+.sidebar.sidebar-collapsed .logo-name { display: none; }
+.sidebar.sidebar-collapsed .nav-label { display: none; }
+.sidebar.sidebar-collapsed .nav-btn { justify-content: center; padding: 0; }
+.sidebar.sidebar-collapsed .sidebar-nav { padding: 10px 4px; }
+.sidebar.sidebar-collapsed .sidebar-bottom { padding: 8px 4px 12px; }
+.sidebar.sidebar-collapsed .sidebar-logo { padding: 0 10px; justify-content: center; gap: 0; }
+.sidebar.sidebar-collapsed .avatar-btn { justify-content: center; padding: 0 !important; }
+.sidebar.sidebar-collapsed .avatar-btn span:last-child { display: none; }
+.sidebar.sidebar-collapsed .sidebar-toggle { margin-left: 0 !important; }
 .sidebar-logo {
   width: 100%; height: 48px;
   display: flex; align-items: center; gap: 10px; padding: 0 16px;
@@ -289,6 +300,11 @@ body::before {
 .pnl-pos { color: var(--green); }
 .pnl-neg { color: var(--red); }
 
+/* ── Utility colour classes ── */
+.green { color: var(--green); }
+.red { color: var(--red); }
+.amber { color: var(--amber); }
+
 /* ── Inline sparkline ── */
 .spark-cell { display: flex; align-items: center; }
 
@@ -473,24 +489,24 @@ select.form-control option { background: var(--bg3); }
 
 /* ─── LOGIN PAGE ─── */
 .login-wrap {
-  height: 100vh; max-height: 100vh; background: var(--bg);
-  display: flex; align-items: stretch;
+  min-height: 100vh; background: var(--bg);
+  display: flex;
   position: relative; overflow: hidden;
 }
 .login-left {
   flex: 1; min-width: 0; display: flex; flex-direction: column;
-  justify-content: center; padding: 60px;
+  justify-content: center; padding: 48px 64px;
   border-right: 1px solid var(--border);
   position: relative; z-index: 1;
-  overflow-y: auto;
+  overflow-y: auto; min-height: 100vh;
 }
 .login-right {
-  width: 440px; flex-shrink: 0;
-  display: flex; flex-direction: column; justify-content: center;
+  flex: 0 0 480px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
   padding: 60px 48px;
   background: var(--bg2);
   position: relative; z-index: 1;
-  overflow-y: auto;
+  overflow-y: auto; min-height: 100vh;
 }
 .login-grid-bg {
   position: absolute; inset: 0;

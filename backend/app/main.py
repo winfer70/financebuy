@@ -31,9 +31,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from .auth import validate_jwt_config
 from .limiter import limiter
-from .routes import accounts, admin, auth_routes, chart_templates, feedback, holdings, market, news, orders, portfolio, portfolio_manager, transactions
+from .routes import accounts, admin, auth_routes, chart_templates, feedback, guide, holdings, market, news, orders, portfolio, portfolio_manager, reports, transactions, watchlists
 from .routes.news import register_retention_task
 from .routes.feedback import register_outcome_checker
+from .routes.auth_routes import register_deletion_purge
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -82,6 +83,16 @@ async def _startup_checks():
 
     logger.info("Startup checks passed — JWT secret validated, log level OK.")
 
+    # Warn if INTERNAL_NEWS_KEY is weak or using a known default
+    _news_key = os.getenv("INTERNAL_NEWS_KEY", "")
+    _weak_keys = {"", "please-change-me", "dev_internal_news_key_not_for_production"}
+    if _news_key in _weak_keys:
+        logger.warning(
+            "INTERNAL_NEWS_KEY is missing or set to a known default — "
+            "the internal news ingestion endpoint is effectively unprotected. "
+            "Generate a strong key with: openssl rand -hex 32"
+        )
+
 
 # ── Middleware stack (registered last → executes first) ──────────────────────
 
@@ -108,15 +119,23 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     calls).  nginx adds the same headers at the edge for production traffic.
 
     Headers set:
-        X-Content-Type-Options  — prevent MIME-type sniffing
-        X-Frame-Options         — prevent clickjacking via iframes
-        Referrer-Policy         — limit referrer leakage
-        Permissions-Policy      — disable unused browser features
-        Cache-Control           — prevent sensitive API responses from caching
+        Strict-Transport-Security — enforce HTTPS for 1 year, including subdomains
+        Content-Security-Policy   — restrictive default; block framing
+        X-Content-Type-Options    — prevent MIME-type sniffing
+        X-Frame-Options           — prevent clickjacking via iframes
+        Referrer-Policy           — limit referrer leakage
+        Permissions-Policy        — disable unused browser features
+        Cache-Control             — prevent sensitive API responses from caching
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+        response.headers.setdefault(
+            "Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'"
+        )
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault(
@@ -214,12 +233,18 @@ app.include_router(news.router, prefix=_V1)
 app.include_router(portfolio_manager.router, prefix=_V1)
 app.include_router(chart_templates.router, prefix=_V1)
 app.include_router(feedback.router, prefix=_V1)
+app.include_router(guide.router, prefix=_V1)
+app.include_router(reports.router, prefix=_V1)
+app.include_router(watchlists.router, prefix=_V1)
 
 # Register the 30-day news retention cleanup background task (Phase 9).
 register_retention_task(app)
 
 # Register the outcome checker that validates LLM scoring accuracy.
 register_outcome_checker(app)
+
+# Register the daily purge of soft-deleted accounts past their 30-day window.
+register_deletion_purge(app)
 
 
 @app.get("/health", tags=["health"])

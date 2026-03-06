@@ -2,8 +2,9 @@
 models.py — SQLAlchemy ORM models for TickerTap.
 
 Defines all database tables: users, accounts, transactions, securities,
-holdings, orders, password_reset_tokens, audit_log, news_articles,
-news_article_tickers, score_outcomes, and scoring_rules.
+holdings, orders, password_reset_tokens, email_verification_tokens,
+user_reports, audit_log, news_articles, news_article_tickers,
+score_outcomes, scoring_rules, watchlists, and watchlist_items.
 
 All foreign keys specify ondelete behaviour and nullable=False where
 a parent reference is required, ensuring referential integrity.
@@ -43,8 +44,14 @@ class User(Base):
     phone = Column(String(20))
     kyc_status = Column(String(20), server_default="pending")
     is_active = Column(Boolean, server_default="true")
+    email_verified = Column(Boolean, server_default="true", nullable=False)
+    deactivated_at = Column(DateTime(timezone=True), nullable=True)
+    deletion_scheduled_at = Column(DateTime(timezone=True), nullable=True)
+    failed_login_attempts = Column(Integer, server_default="0", nullable=False)
+    locked_until = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
+    preferences = Column(JSONB, server_default="{}", nullable=True)
 
 
 class Account(Base):
@@ -219,6 +226,52 @@ class RefreshToken(Base):
     token = Column(String(128), unique=True, nullable=False, index=True)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class EmailVerificationToken(Base):
+    """One-time token for email verification, email changes, reactivation,
+    and deletion cancellation."""
+
+    __tablename__ = "email_verification_tokens"
+
+    token_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    token = Column(String(128), unique=True, nullable=False, index=True)
+    token_type = Column(String(30), nullable=False)
+    new_email = Column(String(255), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used = Column(Boolean, server_default="false")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class UserReport(Base):
+    """User-submitted bug report or feature suggestion."""
+
+    __tablename__ = "user_reports"
+    __table_args__ = (
+        Index("idx_user_reports_status", "status"),
+        Index("idx_user_reports_created", "created_at"),
+    )
+
+    report_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    reporter_email = Column(String(255), nullable=False)
+    report_type = Column(String(20), nullable=False)
+    category = Column(String(50), nullable=True)
+    subject = Column(String(200), nullable=False)
+    body = Column(Text, nullable=False)
+    status = Column(String(20), server_default="new", nullable=False)
+    admin_notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class Portfolio(Base):
@@ -460,3 +513,42 @@ class ScoringRule(Base):
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class Watchlist(Base):
+    """Named watchlist owned by a user for tracking assets without positions."""
+
+    __tablename__ = "watchlists"
+
+    watchlist_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name = Column(String(128), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class WatchlistItem(Base):
+    """A single asset tracked within a Watchlist."""
+
+    __tablename__ = "watchlist_items"
+    __table_args__ = (
+        UniqueConstraint("watchlist_id", "symbol", name="uq_watchlist_item_symbol"),
+        Index("idx_watchlist_items_watchlist_id", "watchlist_id"),
+    )
+
+    item_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    watchlist_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("watchlists.watchlist_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    symbol = Column(String(20), nullable=False)
+    asset_type = Column(String(20), server_default="stock", nullable=False)
+    notes = Column(Text, nullable=True)
+    position_order = Column(Integer, server_default="0", nullable=False)
+    price_when_added = Column(Numeric(18, 4), nullable=True)
+    added_at = Column(DateTime(timezone=True), server_default=func.now())

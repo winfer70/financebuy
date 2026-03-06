@@ -621,3 +621,70 @@ async def get_bulk_sma(
         except Exception:
             results.append({"symbol": sym, "period": period, "sma": None})
     return results
+
+
+# ── Exchange rates (ECB via frankfurter.app, 1h cache) ──────────────────────
+
+_EXCHANGE_RATE_TTL = 3600  # 1 hour — ECB updates once per business day
+
+# Supported display currencies (must match schemas.SUPPORTED_CURRENCIES)
+_FX_CURRENCIES = ["EUR", "GBP", "PLN", "CHF", "JPY", "CAD", "AUD"]
+
+
+class ExchangeRateResponse(BaseModel):
+    """Exchange rates response — all rates are relative to USD base."""
+    base: str = "USD"
+    rates: Dict[str, float]
+    timestamp: str
+
+
+def _fetch_exchange_rates() -> dict:
+    """Fetch current exchange rates from frankfurter.app (ECB data, free, no API key).
+
+    Requests USD-based rates for all supported display currencies.
+    Always includes USD: 1.0 in the result so the frontend can treat
+    USD like any other currency without special-casing.
+
+    Returns:
+        dict with keys: base, rates, timestamp
+    """
+    currencies = ",".join(_FX_CURRENCIES)
+    url = f"https://api.frankfurter.app/latest?from=USD&to={currencies}"
+    req = urllib.request.Request(url, headers={"User-Agent": "TickerTap/1.0"})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read())
+
+    rates = data.get("rates", {})
+    # Always include USD → USD at 1.0
+    rates["USD"] = 1.0
+
+    return {
+        "base": "USD",
+        "rates": rates,
+        "timestamp": data.get("date", date.today().isoformat()),
+    }
+
+
+@router.get("/exchange-rates", response_model=ExchangeRateResponse)
+async def get_exchange_rates(current_user=Depends(get_current_user)):
+    """Return current exchange rates (USD base) for all supported currencies.
+
+    Data is sourced from the European Central Bank via frankfurter.app
+    and cached for 1 hour.  The ECB publishes rates once per business day
+    around 16:00 CET, so more frequent fetching would be wasteful.
+    """
+    cache_key = "exchange_rates"
+    cached = _get_cached(cache_key, _EXCHANGE_RATE_TTL)
+    if cached:
+        return cached
+
+    try:
+        result = await asyncio.to_thread(_fetch_exchange_rates)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not fetch exchange rates: {exc}",
+        )
+
+    _set_cached(cache_key, result)
+    return result

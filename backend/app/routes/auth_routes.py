@@ -12,6 +12,7 @@ Security measures applied in this module:
   - Constant-time password comparison via argon2-cffi
 """
 
+import asyncio
 import hashlib
 import logging
 import os
@@ -19,23 +20,42 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from uuid import UUID
 
 from ..auth import hash_password, verify_password, create_access_token, decode_access_token
-from ..db import get_db
-from ..email import send_password_reset_email
+from ..db import AsyncSessionLocal, get_db
+from ..email import (
+    send_deletion_cancellation_email,
+    send_email_change_verification,
+    send_password_reset_email,
+    send_reactivation_email,
+    send_verification_email,
+)
 from ..limiter import limiter
-from ..models import AuditLog, PasswordResetToken, RefreshToken, User
+from ..models import AuditLog, EmailVerificationToken, PasswordResetToken, RefreshToken, User
 from ..schemas import (
+    AccountDeleteRequest,
+    DeactivateRequest,
+    EmailChangeRequest,
     ForgotPasswordRequest,
+    ProfileUpdateRequest,
+    ReactivationRequest,
+    ResendVerificationRequest,
     ResetPasswordRequest,
+    TokenActionRequest,
     UserCreate,
     UserOut,
     UserLogin,
+    UserPreferences,
+    UserPreferencesUpdate,
+    UserProfileOut,
     TokenResponse,
+    SUPPORTED_CURRENCIES,
+    SUPPORTED_LANGUAGES,
 )
 
 # ── Refresh token configuration ──────────────────────────────────────────────
@@ -134,9 +154,13 @@ async def register_user(
     """
     existing = await db.execute(select(User).where(User.email == payload.email))
     if existing.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="user with this email already exists",
+        # Return the same response shape as a successful registration to prevent
+        # email enumeration — but don't create a duplicate user or send an email.
+        return JSONResponse(
+            status_code=status.HTTP_201_CREATED,
+            content={
+                "message": "check your email to verify your account",
+            },
         )
 
     user = User(
@@ -146,6 +170,8 @@ async def register_user(
         last_name=payload.last_name,
         phone=payload.phone,
     )
+    # Override model default — new registrations require email verification.
+    user.email_verified = False
 
     audit = AuditLog(
         user_id=user.user_id,
@@ -158,10 +184,34 @@ async def register_user(
         user_agent=request.headers.get("user-agent"),
     )
 
+    # Generate a cryptographically-secure email verification token.
+    # Only the SHA-256 hash is stored; the raw token is sent via email.
+    raw_token = secrets.token_urlsafe(48)
+    token_hash = _hash_token(raw_token)
+    verification_record = EmailVerificationToken(
+        user_id=user.user_id,
+        token=token_hash,
+        token_type="email_verify",
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+    )
+
     db.add(user)
     db.add(audit)
+    db.add(verification_record)
     await db.commit()
     await db.refresh(user)
+
+    # Build the verification URL and attempt to send the email.
+    app_url = os.getenv("APP_URL", "https://localhost")
+    verify_url = f"{app_url}?verify_email={raw_token}"
+    try:
+        # send_verification_email(to_email, verify_url) — sends an HTML email
+        # with a one-click verification button to the new user.
+        await send_verification_email(user.email, verify_url)
+    except Exception as exc:
+        # Don't expose SMTP errors to the client, but log for debugging.
+        logger.error("Failed to send verification email to %s: %s", user.email, exc)
+
     return user
 
 
@@ -221,13 +271,49 @@ async def login(
     result = await db.execute(select(User).where(User.email == payload.email))
     user = result.scalar_one_or_none()
 
-    if not user or not user.is_active:
+    if not user:
+        # Consume time equivalent to argon2 verify to prevent timing oracle
+        # that could reveal whether an email is registered.
+        try:
+            verify_password("$argon2id$v=19$m=65536,t=3,p=4$dummy$dummy", payload.password)
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid credentials",
+        )
+
+    # ── Account lockout check ───────────────────────────────────────────────
+    if user.locked_until is not None:
+        if user.locked_until > datetime.now(timezone.utc):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Account temporarily locked. Try again later.",
+            )
+        else:
+            # Lock period has expired — reset counters.
+            user.locked_until = None
+            user.failed_login_attempts = 0
+
+    # Allow deactivated and deletion-scheduled users to log in so the
+    # frontend can display the correct account state.  Block only truly
+    # disabled accounts (is_active=False without a recoverable reason).
+    if (
+        not user.is_active
+        and user.deactivated_at is None
+        and user.deletion_scheduled_at is None
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid credentials",
         )
 
     if not verify_password(user.password_hash, payload.password):
+        # Increment failed login counter and lock account after 10 failures.
+        user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
+        if user.failed_login_attempts >= 10:
+            user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=15)
+
         # Log failed login for anomaly detection / brute-force alerting.
         failed_audit = AuditLog(
             user_id=user.user_id,
@@ -245,6 +331,29 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid credentials",
         )
+
+    # ── Post-password checks (before issuing tokens) ─────────────────────
+
+    # Reset failed login counter on successful authentication.
+    user.failed_login_attempts = 0
+    user.locked_until = None
+
+    # A. Email verification gate — unverified accounts cannot authenticate.
+    if not user.email_verified:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={"detail": "email_not_verified", "email": user.email},
+        )
+
+    # B. Deactivation flag — allow login but inform frontend.
+    account_deactivated = True if user.deactivated_at is not None else None
+
+    # C. Deletion schedule flag — pass ISO timestamp to frontend.
+    deletion_iso = (
+        user.deletion_scheduled_at.isoformat()
+        if user.deletion_scheduled_at is not None
+        else None
+    )
 
     access_token = create_access_token(str(user.user_id))
     raw_refresh, refresh_record = _create_refresh_token_record(user.user_id)
@@ -281,6 +390,9 @@ async def login(
         email=user.email,
         first_name=user.first_name,
         last_name=user.last_name,
+        preferences=user.preferences or {},
+        account_deactivated=account_deactivated,
+        deletion_scheduled_at=deletion_iso,
     )
 
 
@@ -342,7 +454,20 @@ async def refresh_access_token(
         select(User).where(User.user_id == record.user_id)
     )
     user = user_result.scalar_one_or_none()
-    if not user or not user.is_active:
+    if not user:
+        await db.delete(record)
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="user not found or inactive",
+        )
+    # Block truly disabled accounts but allow deactivated / deletion-scheduled
+    # users to refresh so the frontend can display the correct account state.
+    if (
+        not user.is_active
+        and user.deactivated_at is None
+        and user.deletion_scheduled_at is None
+    ):
         await db.delete(record)
         await db.commit()
         raise HTTPException(
@@ -367,12 +492,23 @@ async def refresh_access_token(
         path="/api/v1/auth",
     )
 
+    # Determine account state flags for the response.
+    account_deactivated = True if user.deactivated_at is not None else None
+    deletion_iso = (
+        user.deletion_scheduled_at.isoformat()
+        if user.deletion_scheduled_at is not None
+        else None
+    )
+
     return TokenResponse(
         access_token=new_access_token,
         user_id=user.user_id,
         email=user.email,
         first_name=user.first_name,
         last_name=user.last_name,
+        preferences=user.preferences or {},
+        account_deactivated=account_deactivated,
+        deletion_scheduled_at=deletion_iso,
     )
 
 
@@ -493,3 +629,793 @@ async def reset_password(
     await db.commit()
 
     return {"detail": "Password updated successfully."}
+
+
+# ── Profile & Preferences ────────────────────────────────────────────────────
+
+@router.get("/me", response_model=UserProfileOut)
+async def get_profile(current_user: User = Depends(get_current_user)):
+    """Return the authenticated user's profile including preferences.
+
+    The preferences JSONB column is merged with defaults so missing keys
+    (e.g. for users created before the preferences migration) are populated.
+
+    Returns:
+        UserProfileOut with user identity fields and preferences.
+    """
+    raw = current_user.preferences or {}
+    prefs = UserPreferences(**{
+        "currency": raw.get("currency", "USD"),
+        "language": raw.get("language", "en"),
+    })
+    return UserProfileOut(
+        email=current_user.email,
+        first_name=current_user.first_name,
+        last_name=current_user.last_name,
+        phone=current_user.phone,
+        user_id=current_user.user_id,
+        kyc_status=current_user.kyc_status,
+        is_active=current_user.is_active,
+        preferences=prefs,
+    )
+
+
+@router.patch("/preferences", response_model=UserPreferences)
+async def update_preferences(
+    payload: UserPreferencesUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update the authenticated user's preferences.
+
+    Only provided fields are merged into the existing preferences JSON.
+    Validates that currency and language values are in the supported sets.
+
+    Args:
+        payload: Partial preferences update (currency and/or language).
+
+    Returns:
+        Updated UserPreferences object.
+
+    Raises:
+        HTTPException 400: If currency or language value is not supported.
+    """
+    if payload.currency and payload.currency not in SUPPORTED_CURRENCIES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported currency. Must be one of: {', '.join(sorted(SUPPORTED_CURRENCIES))}",
+        )
+    if payload.language and payload.language not in SUPPORTED_LANGUAGES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported language. Must be one of: {', '.join(sorted(SUPPORTED_LANGUAGES))}",
+        )
+
+    existing = dict(current_user.preferences or {})
+    if payload.currency:
+        existing["currency"] = payload.currency
+    if payload.language:
+        existing["language"] = payload.language
+
+    current_user.preferences = existing
+    await db.commit()
+    await db.refresh(current_user)
+
+    raw = current_user.preferences or {}
+    return UserPreferences(
+        currency=raw.get("currency", "USD"),
+        language=raw.get("language", "en"),
+    )
+
+
+# ── Email Verification ───────────────────────────────────────────────────────
+
+@router.post("/verify-email", status_code=200)
+async def verify_email(
+    payload: TokenActionRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Consume an email verification token and mark the user as verified.
+
+    The incoming raw token is hashed with SHA-256 before the database
+    lookup so that a compromised database cannot be used to verify
+    arbitrary accounts.
+
+    Args:
+        payload: TokenActionRequest containing the raw verification token.
+        db: AsyncSession — injected database session.
+
+    Returns:
+        dict: {"detail": "Email verified successfully"}
+
+    Raises:
+        HTTP 400: Invalid, expired, or already-used verification token.
+    """
+    # Hash the incoming raw token to match what is stored in the database.
+    incoming_hash = _hash_token(payload.token)
+    now = datetime.now(timezone.utc)
+
+    result = await db.execute(
+        select(EmailVerificationToken).where(
+            EmailVerificationToken.token == incoming_hash,
+            EmailVerificationToken.token_type == "email_verify",
+            EmailVerificationToken.used == False,  # noqa: E712 — SQLAlchemy filter
+            EmailVerificationToken.expires_at > now,
+        )
+    )
+    record = result.scalar_one_or_none()
+
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification token",
+        )
+
+    # Look up the owning user and flip the verification flag.
+    user_result = await db.execute(
+        select(User).where(User.user_id == record.user_id)
+    )
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification token",
+        )
+
+    record.used = True
+    user.email_verified = True
+    await db.commit()
+
+    logger.info("Email verified for user %s", user.user_id)
+    return {"detail": "Email verified successfully"}
+
+
+@router.post("/resend-verification", status_code=200)
+@limiter.limit("2/minute")
+async def resend_verification(
+    payload: ResendVerificationRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a fresh verification email to an unverified account.
+
+    Rate-limited to 2 requests per minute per IP to prevent abuse.
+    Always returns 200 regardless of whether the email exists or is
+    already verified, to prevent email enumeration.
+
+    Args:
+        payload: ResendVerificationRequest containing the email address.
+        request: FastAPI Request — required by the rate limiter.
+        db: AsyncSession — injected database session.
+
+    Returns:
+        dict: Generic success message (same for all cases).
+    """
+    _ANTI_ENUM_MSG = "If this email exists and is unverified, a new link has been sent"
+
+    result = await db.execute(select(User).where(User.email == payload.email))
+    user = result.scalar_one_or_none()
+
+    # Anti-enumeration: return the same 200 whether or not the user exists
+    # or is already verified.
+    if not user or user.email_verified:
+        return {"detail": _ANTI_ENUM_MSG}
+
+    # Generate a fresh verification token.
+    raw_token = secrets.token_urlsafe(48)
+    token_hash = _hash_token(raw_token)
+    verification_record = EmailVerificationToken(
+        user_id=user.user_id,
+        token=token_hash,
+        token_type="email_verify",
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+    )
+    db.add(verification_record)
+    await db.commit()
+
+    app_url = os.getenv("APP_URL", "https://localhost")
+    verify_url = f"{app_url}?verify_email={raw_token}"
+    try:
+        # send_verification_email(to_email, verify_url) — sends HTML email
+        # with a one-click verification button.
+        await send_verification_email(user.email, verify_url)
+    except Exception as exc:
+        logger.error("Failed to resend verification email to %s: %s", user.email, exc)
+
+    return {"detail": _ANTI_ENUM_MSG}
+
+
+# ── Account Deactivation / Reactivation ──────────────────────────────────────
+
+@router.post("/deactivate", status_code=200)
+async def deactivate_account(
+    payload: DeactivateRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Deactivate the authenticated user's account.
+
+    The user must confirm their password before deactivation.  The account
+    becomes inactive and is timestamped so that it can be reactivated later
+    via the /auth/request-reactivation flow.
+
+    Args:
+        payload: DeactivateRequest containing the current password.
+        request: FastAPI Request — for audit logging.
+        db: AsyncSession — injected database session.
+        current_user: User — the authenticated user (from JWT).
+
+    Returns:
+        dict: {"detail": "Account deactivated"}
+
+    Raises:
+        HTTP 401: Incorrect password.
+    """
+    if not verify_password(current_user.password_hash, payload.password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid credentials",
+        )
+
+    current_user.is_active = False
+    current_user.deactivated_at = datetime.now(timezone.utc)
+
+    audit = AuditLog(
+        user_id=current_user.user_id,
+        action="account_deactivated",
+        table_name="users",
+        record_id=current_user.user_id,
+        old_values={"is_active": True},
+        new_values={"is_active": False},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    db.add(audit)
+    await db.commit()
+
+    logger.info("Account deactivated for user %s", current_user.user_id)
+    return {"detail": "Account deactivated"}
+
+
+@router.post("/request-reactivation", status_code=200)
+@limiter.limit("3/minute")
+async def request_reactivation(
+    payload: ReactivationRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a reactivation email to a deactivated account.
+
+    Rate-limited to 3 requests per minute per IP.  Always returns 200
+    regardless of whether the email exists or the account is deactivated,
+    to prevent email enumeration.
+
+    Args:
+        payload: ReactivationRequest containing the email address.
+        request: FastAPI Request — required by the rate limiter.
+        db: AsyncSession — injected database session.
+
+    Returns:
+        dict: Generic success message (same for all cases).
+    """
+    _ANTI_ENUM_MSG = (
+        "If this email is associated with a deactivated account, "
+        "a reactivation link has been sent"
+    )
+
+    result = await db.execute(
+        select(User).where(
+            User.email == payload.email,
+            User.deactivated_at.isnot(None),
+        )
+    )
+    user = result.scalar_one_or_none()
+
+    # Anti-enumeration: return the same 200 whether or not we found a match.
+    if not user:
+        return {"detail": _ANTI_ENUM_MSG}
+
+    # Generate a one-time reactivation token (1 hour expiry).
+    raw_token = secrets.token_urlsafe(48)
+    token_hash = _hash_token(raw_token)
+    reactivation_record = EmailVerificationToken(
+        user_id=user.user_id,
+        token=token_hash,
+        token_type="reactivate",
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    db.add(reactivation_record)
+    await db.commit()
+
+    app_url = os.getenv("APP_URL", "https://localhost")
+    reactivate_url = f"{app_url}?reactivate={raw_token}"
+    try:
+        # send_reactivation_email(to_email, reactivate_url) — sends HTML email
+        # with a one-click reactivation button.
+        await send_reactivation_email(user.email, reactivate_url)
+    except Exception as exc:
+        logger.error("Failed to send reactivation email to %s: %s", user.email, exc)
+
+    return {"detail": _ANTI_ENUM_MSG}
+
+
+@router.post("/reactivate", status_code=200)
+async def reactivate_account(
+    payload: TokenActionRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Consume a reactivation token and restore the user's account.
+
+    The incoming raw token is hashed with SHA-256 before lookup.  On
+    success the account is set back to active and the deactivated_at
+    timestamp is cleared.
+
+    Args:
+        payload: TokenActionRequest containing the raw reactivation token.
+        db: AsyncSession — injected database session.
+
+    Returns:
+        dict: {"detail": "Account reactivated successfully"}
+
+    Raises:
+        HTTP 400: Invalid, expired, or already-used reactivation token.
+    """
+    incoming_hash = _hash_token(payload.token)
+    now = datetime.now(timezone.utc)
+
+    result = await db.execute(
+        select(EmailVerificationToken).where(
+            EmailVerificationToken.token == incoming_hash,
+            EmailVerificationToken.token_type == "reactivate",
+            EmailVerificationToken.used == False,  # noqa: E712
+            EmailVerificationToken.expires_at > now,
+        )
+    )
+    record = result.scalar_one_or_none()
+
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reactivation token",
+        )
+
+    user_result = await db.execute(
+        select(User).where(User.user_id == record.user_id)
+    )
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reactivation token",
+        )
+
+    user.is_active = True
+    user.deactivated_at = None
+    record.used = True
+    await db.commit()
+
+    logger.info("Account reactivated for user %s", user.user_id)
+    return {"detail": "Account reactivated successfully"}
+
+
+# ── Account Deletion ─────────────────────────────────────────────────────────
+
+@router.post("/delete-account", status_code=200)
+async def delete_account(
+    payload: AccountDeleteRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete the authenticated user's account (permanent or soft).
+
+    Requires password re-confirmation.  Two modes are supported:
+
+    - **permanent**: The user record and all cascaded data are deleted
+      immediately.  This action is irreversible.
+    - **soft**: The account is deactivated and scheduled for purging in
+      30 days.  A cancellation email is sent so the user can undo the
+      request within the grace period.
+
+    Args:
+        payload: AccountDeleteRequest with mode ("permanent"|"soft") and password.
+        request: FastAPI Request — for audit logging.
+        db: AsyncSession — injected database session.
+        current_user: User — the authenticated user (from JWT).
+
+    Returns:
+        dict: Confirmation message (varies by mode).
+
+    Raises:
+        HTTP 401: Incorrect password.
+    """
+    if not verify_password(current_user.password_hash, payload.password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid credentials",
+        )
+
+    if payload.mode == "permanent":
+        # Immediate irreversible deletion — CASCADE will clean up related rows.
+        audit = AuditLog(
+            user_id=current_user.user_id,
+            action="account_deleted_permanent",
+            table_name="users",
+            record_id=current_user.user_id,
+            old_values={"email": current_user.email},
+            new_values=None,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+        db.add(audit)
+        await db.delete(current_user)
+        await db.commit()
+
+        logger.info("Account permanently deleted for user %s", current_user.user_id)
+        return {"detail": "Account permanently deleted"}
+
+    # ── Soft deletion: schedule purge in 30 days ─────────────────────────
+    deletion_at = datetime.now(timezone.utc) + timedelta(days=30)
+    current_user.deletion_scheduled_at = deletion_at
+    current_user.is_active = False
+
+    # Generate a cancellation token so the user can undo within 30 days.
+    raw_token = secrets.token_urlsafe(48)
+    token_hash = _hash_token(raw_token)
+    cancel_record = EmailVerificationToken(
+        user_id=current_user.user_id,
+        token=token_hash,
+        token_type="cancel_deletion",
+        expires_at=deletion_at,  # Same 30-day window as the deletion schedule
+    )
+
+    audit = AuditLog(
+        user_id=current_user.user_id,
+        action="account_deletion_scheduled",
+        table_name="users",
+        record_id=current_user.user_id,
+        old_values=None,
+        new_values={"deletion_scheduled_at": deletion_at.isoformat()},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    db.add(cancel_record)
+    db.add(audit)
+    await db.commit()
+
+    # Send the cancellation email so the user can reverse the decision.
+    app_url = os.getenv("APP_URL", "https://localhost")
+    cancel_url = f"{app_url}?cancel_deletion={raw_token}"
+    try:
+        # send_deletion_cancellation_email(to_email, cancel_url) — sends HTML
+        # email with a one-click button to cancel the scheduled deletion.
+        await send_deletion_cancellation_email(current_user.email, cancel_url)
+    except Exception as exc:
+        logger.error(
+            "Failed to send deletion cancellation email to %s: %s",
+            current_user.email,
+            exc,
+        )
+
+    logger.info("Account deletion scheduled for user %s at %s", current_user.user_id, deletion_at)
+    return {
+        "detail": "Account scheduled for deletion in 30 days",
+        "deletion_scheduled_at": deletion_at.isoformat(),
+    }
+
+
+@router.post("/cancel-deletion", status_code=200)
+async def cancel_deletion(
+    payload: TokenActionRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Consume a cancellation token and restore a deletion-scheduled account.
+
+    The incoming raw token is hashed with SHA-256 before lookup.  On
+    success the account is reactivated and the deletion schedule is cleared.
+
+    Args:
+        payload: TokenActionRequest containing the raw cancellation token.
+        db: AsyncSession — injected database session.
+
+    Returns:
+        dict: {"detail": "Account deletion cancelled"}
+
+    Raises:
+        HTTP 400: Invalid, expired, or already-used cancellation token.
+    """
+    incoming_hash = _hash_token(payload.token)
+    now = datetime.now(timezone.utc)
+
+    result = await db.execute(
+        select(EmailVerificationToken).where(
+            EmailVerificationToken.token == incoming_hash,
+            EmailVerificationToken.token_type == "cancel_deletion",
+            EmailVerificationToken.used == False,  # noqa: E712
+            EmailVerificationToken.expires_at > now,
+        )
+    )
+    record = result.scalar_one_or_none()
+
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired cancellation token",
+        )
+
+    user_result = await db.execute(
+        select(User).where(User.user_id == record.user_id)
+    )
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired cancellation token",
+        )
+
+    user.is_active = True
+    user.deletion_scheduled_at = None
+    record.used = True
+    await db.commit()
+
+    logger.info("Account deletion cancelled for user %s", user.user_id)
+    return {"detail": "Account deletion cancelled"}
+
+
+# ── Profile Management ────────────────────────────────────────────────────────
+
+@router.patch("/profile", response_model=UserProfileOut)
+async def update_profile(
+    payload: ProfileUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update the authenticated user's profile (first name, last name).
+
+    Only non-None fields in the payload are applied, leaving other
+    profile attributes unchanged.
+
+    Args:
+        payload: ProfileUpdateRequest with optional first_name and last_name.
+        db: AsyncSession — injected database session.
+        current_user: User — the authenticated user (from JWT).
+
+    Returns:
+        UserProfileOut — the full updated profile including preferences.
+    """
+    # Apply only the fields that were explicitly provided.
+    if payload.first_name is not None:
+        current_user.first_name = payload.first_name
+    if payload.last_name is not None:
+        current_user.last_name = payload.last_name
+
+    await db.commit()
+    await db.refresh(current_user)
+
+    # Merge preferences with defaults (same pattern as GET /auth/me).
+    raw = current_user.preferences or {}
+    prefs = UserPreferences(**{
+        "currency": raw.get("currency", "USD"),
+        "language": raw.get("language", "en"),
+    })
+    return UserProfileOut(
+        email=current_user.email,
+        first_name=current_user.first_name,
+        last_name=current_user.last_name,
+        phone=current_user.phone,
+        user_id=current_user.user_id,
+        kyc_status=current_user.kyc_status,
+        is_active=current_user.is_active,
+        preferences=prefs,
+    )
+
+
+# ── Email Change ──────────────────────────────────────────────────────────────
+
+@router.post("/change-email", status_code=200)
+async def change_email(
+    payload: EmailChangeRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Initiate an email address change for the authenticated user.
+
+    Requires password re-confirmation.  A verification email is sent to
+    the NEW address; the actual email swap only happens when the user
+    clicks the link and calls /auth/confirm-email-change.
+
+    Args:
+        payload: EmailChangeRequest with new_email and current password.
+        request: FastAPI Request — for audit logging.
+        db: AsyncSession — injected database session.
+        current_user: User — the authenticated user (from JWT).
+
+    Returns:
+        dict: {"detail": "Verification email sent to new address"}
+
+    Raises:
+        HTTP 401: Incorrect password.
+        HTTP 400: New email is already in use by another account.
+    """
+    if not verify_password(current_user.password_hash, payload.password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid credentials",
+        )
+
+    # Ensure the new email is not already registered to another user.
+    existing = await db.execute(
+        select(User).where(User.email == payload.new_email)
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already in use",
+        )
+
+    # Generate a token with the new_email stored alongside it.
+    raw_token = secrets.token_urlsafe(48)
+    token_hash = _hash_token(raw_token)
+    change_record = EmailVerificationToken(
+        user_id=current_user.user_id,
+        token=token_hash,
+        token_type="email_change",
+        new_email=payload.new_email,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+
+    audit = AuditLog(
+        user_id=current_user.user_id,
+        action="email_change_requested",
+        table_name="users",
+        record_id=current_user.user_id,
+        old_values={"email": current_user.email},
+        new_values={"new_email": payload.new_email},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    db.add(change_record)
+    db.add(audit)
+    await db.commit()
+
+    # Send verification to the NEW email address.
+    app_url = os.getenv("APP_URL", "https://localhost")
+    verify_url = f"{app_url}?confirm_email_change={raw_token}"
+    try:
+        # send_email_change_verification(to_email, verify_url) — sends HTML
+        # email to the new address with a confirmation button.
+        await send_email_change_verification(payload.new_email, verify_url)
+    except Exception as exc:
+        logger.error(
+            "Failed to send email change verification to %s: %s",
+            payload.new_email,
+            exc,
+        )
+
+    return {"detail": "Verification email sent to new address"}
+
+
+@router.post("/confirm-email-change", status_code=200)
+async def confirm_email_change(
+    payload: TokenActionRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Consume an email-change token and update the user's email address.
+
+    The new email is stored on the token record itself (new_email column)
+    so that the swap is atomic and tamper-proof — the user cannot change
+    the destination after requesting the change.
+
+    Args:
+        payload: TokenActionRequest containing the raw email-change token.
+        db: AsyncSession — injected database session.
+
+    Returns:
+        dict: {"detail": "Email changed successfully"}
+
+    Raises:
+        HTTP 400: Invalid, expired, or already-used email-change token.
+    """
+    incoming_hash = _hash_token(payload.token)
+    now = datetime.now(timezone.utc)
+
+    result = await db.execute(
+        select(EmailVerificationToken).where(
+            EmailVerificationToken.token == incoming_hash,
+            EmailVerificationToken.token_type == "email_change",
+            EmailVerificationToken.used == False,  # noqa: E712
+            EmailVerificationToken.expires_at > now,
+        )
+    )
+    record = result.scalar_one_or_none()
+
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired email change token",
+        )
+
+    # Retrieve the new email from the token record.
+    new_email = record.new_email
+    if not new_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired email change token",
+        )
+
+    user_result = await db.execute(
+        select(User).where(User.user_id == record.user_id)
+    )
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired email change token",
+        )
+
+    user.email = new_email
+    record.used = True
+    await db.commit()
+
+    logger.info("Email changed for user %s to %s", user.user_id, new_email)
+    return {"detail": "Email changed successfully"}
+
+
+# ── Deletion Purge Background Task ───────────────────────────────────────────
+
+async def _deletion_purge_loop():
+    """Runs daily.  Deletes users whose deletion_scheduled_at is in the past.
+
+    This background coroutine sleeps for 24 hours between each sweep.
+    It opens its own database session (independent of any request) and
+    queries for users whose soft-deletion grace period has expired,
+    then removes them via CASCADE.
+    """
+    while True:
+        # Sleep first so the app has time to finish startup before the
+        # first purge cycle.
+        await asyncio.sleep(86400)  # 24 hours
+
+        try:
+            async with AsyncSessionLocal() as session:
+                now = datetime.now(timezone.utc)
+                result = await session.execute(
+                    select(User).where(
+                        User.deletion_scheduled_at.isnot(None),
+                        User.deletion_scheduled_at <= now,
+                    )
+                )
+                expired_users = result.scalars().all()
+
+                for user in expired_users:
+                    logger.info(
+                        "Purging deletion-scheduled user %s (scheduled at %s)",
+                        user.user_id,
+                        user.deletion_scheduled_at,
+                    )
+                    await session.delete(user)
+
+                await session.commit()
+                logger.info("Deletion purge cycle complete — %d users removed", len(expired_users))
+        except Exception as exc:
+            # Never crash the background loop; log and retry next cycle.
+            logger.error("Deletion purge cycle failed: %s", exc)
+
+
+def register_deletion_purge(app):
+    """Register the daily deletion-purge background task on app startup.
+
+    Call this function from main.py (or wherever the FastAPI app is
+    assembled) to enable automatic purging of soft-deleted accounts.
+
+    Args:
+        app: The FastAPI application instance.
+    """
+
+    @app.on_event("startup")
+    async def _start_purge():
+        """Launch the deletion purge loop as a fire-and-forget background task."""
+        asyncio.create_task(_deletion_purge_loop())
+

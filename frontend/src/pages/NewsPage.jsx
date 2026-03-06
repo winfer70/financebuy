@@ -1,27 +1,43 @@
 /**
  * NewsPage.jsx — Financial news page for TickerTap.
  *
- * Displays pre-scored news articles served from PostgreSQL.  Articles are
- * scored by a background LLM worker (Llama 3 on Server B) and carry both
- * a general market impact score (-5 to +5) and per-ticker impact scores.
+ * Displays pre-scored news articles served from PostgreSQL with server-side
+ * pagination AND server-side filtering.  Articles are scored by a background
+ * LLM worker (Llama 3 on Server B) and carry both a general market impact
+ * score (-5 to +5) and per-ticker impact scores.
+ *
+ * Filtering (portfolio toggle, sentiment, ticker search) is handled on the
+ * backend so that pagination totals and page offsets stay consistent
+ * regardless of the active filter combination.  The client only sorts
+ * the returned page (portfolio articles to the top).
  *
  * Features:
- *  - Ticker search bar to filter articles by symbol
- *  - Category filter: ALL | PORTFOLIO | BULLISH | BEARISH
+ *  - Server-side pagination with configurable page size (25/50/75/100)
+ *  - Server-side ticker search (matches ticker symbols and article titles)
+ *  - Server-side sentiment filter: ALL | BULLISH | BEARISH
+ *  - Server-side portfolio toggle to show only portfolio-relevant articles
+ *  - Automatic page reset to 1 when any filter changes
  *  - Score badge with colour gradient (-5 red → 0 neutral → +5 green)
  *  - LLM reasoning text below each headline
  *  - Per-ticker score drill-down badges
- *  - Portfolio articles sorted to the top
+ *  - Portfolio articles sorted to the top within each page
  *  - Staleness indicator when newest article is older than 30 minutes
+ *  - Page navigation with PREV / NEXT and page indicator
  *
  * Props:
  *  @param {string}   token          - JWT access token
  *  @param {string}   [initialTicker] - Pre-populate ticker search (from portfolio action)
+ *  @param {Function} [onViewChart]   - Callback to open a chart for a ticker
  */
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import api from "../api/client";
 import { Ic } from "../components/common/Icons";
+
+/* -- Page size options ---------------------------------------------------- */
+
+/** Available per-page options for the pagination selector. */
+const PAGE_SIZE_OPTIONS = [25, 50, 75, 100];
 
 /* -- Score colour helpers ------------------------------------------------- */
 
@@ -64,11 +80,10 @@ const SOURCE_LABELS = {
 };
 
 /* -- Filter categories ---------------------------------------------------- */
-const FILTERS = [
-  { id: "all",       label: "ALL" },
-  { id: "portfolio", label: "PORTFOLIO" },
-  { id: "bullish",   label: "BULLISH" },
-  { id: "bearish",   label: "BEARISH" },
+const SENTIMENT_FILTERS = [
+  { id: "all",     label: "ALL" },
+  { id: "bullish", label: "BULLISH" },
+  { id: "bearish", label: "BEARISH" },
 ];
 
 /**
@@ -107,48 +122,113 @@ function isStale(articles) {
   return (Date.now() - newest) > 30 * 60 * 1000;
 }
 
-export function NewsPage({ token, initialTicker }) {
+export function NewsPage({ token, initialTicker, onViewChart }) {
   /* -- State -------------------------------------------------------------- */
   const [articles,       setArticles]       = useState([]);
+  const [totalArticles,  setTotalArticles]  = useState(0);
   const [loading,        setLoading]        = useState(true);
   const [error,          setError]          = useState(null);
-  const [filter,         setFilter]         = useState("all");
+  const [sentimentFilter, setSentimentFilter] = useState("all");
+  const [portfolioOnly,  setPortfolioOnly]  = useState(false);
   const [searchTicker,   setSearchTicker]   = useState(initialTicker || "");
+  const [tickerPopup,    setTickerPopup]    = useState(null); /* { ticker, x, y } */
+
+  /* -- Pagination state --------------------------------------------------- */
+  const [perPage,     setPerPage]     = useState(25);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  /** Total number of pages based on total articles from the backend. */
+  const totalPages = Math.max(1, Math.ceil(totalArticles / perPage));
 
   /* -- Feed fetch --------------------------------------------------------- */
+
+  /**
+   * Fetch a page of articles from the backend with server-side filters.
+   * Reads perPage, currentPage, and filter state to compute query params.
+   * Filters are applied on the server so pagination totals stay consistent.
+   * Updates articles, totalArticles, loading, and error state.
+   */
   const loadFeed = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     setError(null);
     try {
-      const data = await api.getNews(token);
-      setArticles(data || []);
+      /* Calculate offset from 1-indexed currentPage. */
+      const offset = (currentPage - 1) * perPage;
+
+      /* Build server-side filter params. */
+      const params = {
+        limit: perPage,
+        offset,
+        portfolio_only: portfolioOnly,
+        sentiment: sentimentFilter !== "all" ? sentimentFilter : null,
+        ticker_search: searchTicker.trim() || null,
+      };
+
+      /* api.getNews returns { articles, total, limit, offset }. */
+      const data = await api.getNews(token, params);
+      setArticles(data.articles || []);
+      setTotalArticles(data.total || 0);
     } catch (e) {
       setError(e.message || "Failed to load news feed.");
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, perPage, currentPage, portfolioOnly, sentimentFilter, searchTicker]);
 
+  /* Re-fetch whenever token, pagination, or filter state changes. */
   useEffect(() => { loadFeed(); }, [loadFeed]);
 
-  /* -- Filtering + sorting ------------------------------------------------ */
+  /* -- Pagination handlers ------------------------------------------------ */
+
+  /**
+   * Reset to page 1 whenever any filter changes, so the user never lands
+   * on an empty page after narrowing results.
+   */
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [sentimentFilter, portfolioOnly, searchTicker]);
+
+  /**
+   * Change the per-page size and reset to page 1.
+   * @param {number} size - New page size (25, 50, 75, or 100).
+   */
+  const handlePerPageChange = useCallback((size) => {
+    setPerPage(size);
+    setCurrentPage(1);
+  }, []);
+
+  /**
+   * Navigate to the previous page (clamped at 1).
+   */
+  const handlePrev = useCallback(() => {
+    setCurrentPage(p => Math.max(1, p - 1));
+  }, []);
+
+  /**
+   * Navigate to the next page (clamped at totalPages).
+   */
+  const handleNext = useCallback(() => {
+    setCurrentPage(p => Math.min(totalPages, p + 1));
+  }, [totalPages]);
+
+  /* -- Dismiss ticker popup on outside click ------------------------------- */
+  useEffect(() => {
+    if (!tickerPopup) return;
+    const dismiss = () => setTickerPopup(null);
+    window.addEventListener("click", dismiss);
+    return () => window.removeEventListener("click", dismiss);
+  }, [tickerPopup]);
+
+  /* -- Client-side sorting (within the current server-filtered page) ------- */
+  /**
+   * Sort the server-filtered articles for display.  All filtering (portfolio,
+   * sentiment, ticker search) is now handled server-side so pagination totals
+   * stay consistent.  The client only sorts: portfolio articles bubble to
+   * the top, then sort by published_at descending.
+   */
   const filteredArticles = useMemo(() => {
-    let list = [...articles];
-
-    /* Apply category filter. */
-    if (filter === "portfolio") list = list.filter(a => a.in_portfolio);
-    if (filter === "bullish")   list = list.filter(a => a.score > 0);
-    if (filter === "bearish")   list = list.filter(a => a.score < 0);
-
-    /* Apply ticker search filter — matches against per-ticker scores. */
-    const q = searchTicker.trim().toUpperCase();
-    if (q) {
-      list = list.filter(a =>
-        (a.ticker_scores || []).some(ts => ts.ticker.toUpperCase().includes(q)) ||
-        a.title.toUpperCase().includes(q)
-      );
-    }
+    const list = [...articles];
 
     /* Portfolio articles bubble to the top, then sort by date descending. */
     list.sort((a, b) => {
@@ -159,10 +239,21 @@ export function NewsPage({ token, initialTicker }) {
     });
 
     return list;
-  }, [articles, filter, searchTicker]);
+  }, [articles]);
 
   /* -- Render ------------------------------------------------------------- */
   const stale = isStale(articles);
+
+  /** Shared mono style for pagination controls. */
+  const paginationBtnStyle = (disabled) => ({
+    fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 600,
+    letterSpacing: "0.5px", padding: "4px 12px",
+    background: disabled ? "transparent" : "var(--bg3)",
+    border: `1px solid ${disabled ? "var(--bg3)" : "var(--border)"}`,
+    color: disabled ? "var(--bg3)" : "var(--muted)",
+    cursor: disabled ? "default" : "pointer",
+    borderRadius: 2,
+  });
 
   return (
     <div className="page-scroll">
@@ -171,7 +262,7 @@ export function NewsPage({ token, initialTicker }) {
         <div>
           <div className="page-title">NEWS</div>
           <div className="page-sub">
-            LLM-SCORED FINANCIAL NEWS · {articles.length} ARTICLE{articles.length !== 1 ? "S" : ""}
+            LLM-SCORED FINANCIAL NEWS · {totalArticles} ARTICLE{totalArticles !== 1 ? "S" : ""} · PAGE {currentPage} OF {totalPages}
           </div>
         </div>
         <div className="page-actions">
@@ -193,7 +284,7 @@ export function NewsPage({ token, initialTicker }) {
           </div>
         )}
 
-        {/* Toolbar: search + filter */}
+        {/* Toolbar: search + filter + per-page selector */}
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           {/* Ticker search */}
           <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
@@ -221,22 +312,65 @@ export function NewsPage({ token, initialTicker }) {
             )}
           </div>
 
-          {/* Category filter */}
+          {/* Sentiment filter */}
           <div className="filter-bar">
-            {FILTERS.map(f => (
+            {SENTIMENT_FILTERS.map(f => (
               <button
                 key={f.id}
-                className={`filter-btn${filter === f.id ? " active" : ""}`}
-                onClick={() => setFilter(f.id)}
+                className={`filter-btn${sentimentFilter === f.id ? " active" : ""}`}
+                onClick={() => setSentimentFilter(f.id)}
               >
                 {f.label}
               </button>
             ))}
           </div>
 
-          {/* Count label */}
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", marginLeft: "auto" }}>
-            {filteredArticles.length} RESULT{filteredArticles.length !== 1 ? "S" : ""}
+          {/* Portfolio toggle — combines with sentiment filter */}
+          <button
+            className={`filter-btn${portfolioOnly ? " active" : ""}`}
+            onClick={() => setPortfolioOnly(p => !p)}
+            style={{
+              fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.5px",
+              border: portfolioOnly ? "1px solid var(--amber)" : "1px solid var(--border)",
+              color: portfolioOnly ? "var(--amber)" : "var(--muted)",
+              background: portfolioOnly ? "rgba(255,178,56,0.08)" : "transparent",
+              padding: "4px 10px", cursor: "pointer", borderRadius: 2,
+            }}
+          >
+            PORTFOLIO
+          </button>
+
+          {/* Per-page selector */}
+          <div style={{ display: "flex", gap: 4, alignItems: "center", marginLeft: "auto" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--muted)", letterSpacing: "0.5px" }}>
+              PER PAGE
+            </span>
+            {PAGE_SIZE_OPTIONS.map(size => (
+              <button
+                key={size}
+                onClick={() => handlePerPageChange(size)}
+                style={{
+                  fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 600,
+                  padding: "3px 8px", cursor: "pointer", borderRadius: 2,
+                  letterSpacing: "0.3px",
+                  background: perPage === size ? "var(--amber)" : "transparent",
+                  color: perPage === size ? "var(--bg1)" : "var(--muted)",
+                  border: perPage === size ? "1px solid var(--amber)" : "1px solid var(--border)",
+                }}
+              >
+                {size}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Results count */}
+        <div style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          marginTop: 4,
+        }}>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
+            {filteredArticles.length} RESULT{filteredArticles.length !== 1 ? "S" : ""} ON THIS PAGE
           </span>
         </div>
 
@@ -266,7 +400,7 @@ export function NewsPage({ token, initialTicker }) {
             textAlign: "center", padding: "48px 0",
             fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--muted)",
           }}>
-            {articles.length === 0
+            {articles.length === 0 && totalArticles === 0
               ? "No news articles available. Articles will appear once the news worker begins scoring."
               : "No articles match the current filter."}
           </div>
@@ -348,7 +482,10 @@ export function NewsPage({ token, initialTicker }) {
                         return (
                           <span
                             key={ts.ticker}
-                            onClick={() => setSearchTicker(ts.ticker)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setTickerPopup({ ticker: ts.ticker, x: e.clientX, y: e.clientY });
+                            }}
                             title={ts.reasoning || `${ts.ticker}: ${ts.score > 0 ? "+" : ""}${ts.score}`}
                             style={{
                               fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 600,
@@ -397,7 +534,100 @@ export function NewsPage({ token, initialTicker }) {
             })}
           </div>
         )}
+
+        {/* ── Pagination controls ─────────────────────────────────────────── */}
+        {totalArticles > 0 && (
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "center",
+            gap: 16, padding: "16px 0 8px",
+          }}>
+            {/* PREV button */}
+            <button
+              onClick={handlePrev}
+              disabled={currentPage <= 1}
+              style={paginationBtnStyle(currentPage <= 1)}
+            >
+              ◀ PREV
+            </button>
+
+            {/* Page indicator */}
+            <span style={{
+              fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 600,
+              color: "var(--bright)", letterSpacing: "0.5px",
+            }}>
+              PAGE {currentPage} OF {totalPages}
+            </span>
+
+            {/* NEXT button */}
+            <button
+              onClick={handleNext}
+              disabled={currentPage >= totalPages}
+              style={paginationBtnStyle(currentPage >= totalPages)}
+            >
+              NEXT ▶
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* ── Ticker popup (click on ticker badge) ─────────────────────────── */}
+      {tickerPopup && (
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{
+            position: "fixed",
+            top: tickerPopup.y,
+            left: tickerPopup.x,
+            zIndex: 1000,
+            background: "var(--bg2)",
+            border: "1px solid var(--border)",
+            borderRadius: 3,
+            padding: "6px 0",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            minWidth: 140,
+          }}
+        >
+          <div style={{
+            padding: "4px 12px", color: "var(--amber)",
+            fontWeight: 600, letterSpacing: "0.5px", borderBottom: "1px solid var(--border)",
+            marginBottom: 2,
+          }}>
+            {tickerPopup.ticker}
+          </div>
+          {onViewChart && (
+            <button
+              onClick={() => { onViewChart(tickerPopup.ticker); setTickerPopup(null); }}
+              style={{
+                display: "block", width: "100%", textAlign: "left",
+                background: "none", border: "none", cursor: "pointer",
+                color: "var(--bright)", padding: "5px 12px",
+                fontFamily: "var(--font-mono)", fontSize: 10,
+                letterSpacing: "0.3px",
+              }}
+              onMouseOver={e => e.currentTarget.style.background = "var(--bg3)"}
+              onMouseOut={e => e.currentTarget.style.background = "none"}
+            >
+              VIEW CHART →
+            </button>
+          )}
+          <button
+            onClick={() => { setSearchTicker(tickerPopup.ticker); setTickerPopup(null); }}
+            style={{
+              display: "block", width: "100%", textAlign: "left",
+              background: "none", border: "none", cursor: "pointer",
+              color: "var(--bright)", padding: "5px 12px",
+              fontFamily: "var(--font-mono)", fontSize: 10,
+              letterSpacing: "0.3px",
+            }}
+            onMouseOver={e => e.currentTarget.style.background = "var(--bg3)"}
+            onMouseOut={e => e.currentTarget.style.background = "none"}
+          >
+            FILTER NEWS
+          </button>
+        </div>
+      )}
     </div>
   );
 }
