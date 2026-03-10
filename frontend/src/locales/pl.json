@@ -76,7 +76,35 @@
     "crypto": "KRYPTO",
     "etfs": "ETF-y",
     "physical": "FIZYCZNE",
-    "sectionTotal": "SUMA SEKCJI"
+    "sectionTotal": "SUMA SEKCJI",
+    "name": "NAZWA",
+    "date": "DATA",
+    "profitTaking": "REALIZACJA ZYSKU",
+    "excluded": "WYK",
+    "sma": "SMA",
+    "group": "GRUPA",
+    "allocation": "UDZIAŁ %",
+    "periodGainLoss": "Z/S OKRESU",
+    "totalValue": "WARTOŚĆ CAŁKOWITA",
+    "totalCost": "KOSZT CAŁKOWITY",
+    "totalGainLoss": "CAŁKOWITY Z/S",
+    "positions": "POZYCJE",
+    "analystsTarget": "CELE ANALITYKÓW",
+    "targetMean": "ŚREDNI",
+    "targetHigh": "WYSOKI",
+    "targetLow": "NISKI",
+    "noTargets": "Brak celów analityków",
+    "setTarget": "Ustaw cenę docelową",
+    "portfolioName": "Nazwa portfela",
+    "strategy": "Strategia (opcjonalnie)",
+    "creating": "TWORZENIE...",
+    "create": "UTWÓRZ",
+    "confirmDelete": "Usunąć ten portfel i wszystkie pozycje?",
+    "sellQty": "Ilość do sprzedaży",
+    "selling": "SPRZEDAŻ...",
+    "importing": "IMPORTOWANIE...",
+    "noPositions": "Brak pozycji w tym portfelu",
+    "addFirst": "Dodaj swoją pierwszą pozycję"
   },
   "charts": {
     "title": "WYKRESY",
@@ -124,6 +152,12 @@
     "pitchfork": "WIDŁY",
     "text": "TEKST",
     "arrow": "STRZAŁKA",
+    "ruler": "LINIJKA",
+    "rulerTooltip": "Kliknij aby ustawić start, przesuń aby zmierzyć, kliknij ponownie aby zablokować",
+    "events": "WYDARZENIA",
+    "earnings": "WYNIKI",
+    "dividend": "DYWIDENDA",
+    "split": "PODZIAŁ",
     "loading": "ŁADOWANIE...",
     "nyseOpen": "NYSE OTWARTY",
     "closedOpensIn": "ZAMKNIĘTY · OTWARCIE ZA"
@@ -134,6 +168,7 @@
     "bullish": "BYCZE",
     "bearish": "NIEDŹWIEDZIE",
     "portfolioOnly": "PORTFEL",
+    "watchlistOnly": "WATCHLIST",
     "search": "Szukaj tickerów...",
     "noArticles": "Nie znaleziono artykułów",
     "viewChart": "POKAŻ WYKRES",
@@ -300,9 +335,11 @@
     "submitError": "Nie udało się wysłać zgłoszenia. Spróbuj ponownie."
   },
   "footer": {
-    "disclaimer": "Zastrzeżenie finansowe",
-    "privacy": "Polityka prywatności",
+    "disclaimer": "Zastrzeżenie",
+    "privacy": "Prywatność",
     "terms": "Regulamin",
-    "guide": "Poradnik"
+    "guide": "Poradnik",
+    "allRights": "Wszelkie prawa zastrzeżone.",
+    "dataAttribution": "Dane rynkowe dostarczane przez Yahoo Finance."
   }
 }

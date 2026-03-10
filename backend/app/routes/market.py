@@ -1,15 +1,30 @@
+"""
+routes/market.py — Market data API endpoints.
+
+Provides real-time and historical market data sourced from yfinance,
+including quotes, OHLCV bars, symbol search, SMA, price changes,
+exchange rates, and financial events (earnings, dividends, splits).
+
+All endpoints require authentication and use an in-memory cache to
+reduce redundant API calls.
+
+Route prefix: /api/v1/market  (registered in main.py)
+"""
+
 import asyncio
 import json
 import math
 import time
 import urllib.request
 from datetime import date, datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 from zoneinfo import ZoneInfo
 
 import yfinance as yf
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+
+from ..schemas import EventItem, EventsResponse
 
 # Canonical auth dependency — returns a User ORM object (not a string)
 from .auth_routes import get_current_user
@@ -54,6 +69,7 @@ _QUOTE_TTL_OPEN = 3       # seconds — market open
 _QUOTE_TTL_CLOSED = 300   # 5 minutes — market closed
 _OHLCV_TTL = 300          # 5 minutes
 _SYMBOLS_TTL = 3600       # 1 hour
+_EVENTS_TTL = 3600        # 1 hour — earnings/dividend dates change infrequently
 
 _NYSE_TZ = ZoneInfo("America/New_York")
 
@@ -187,6 +203,37 @@ def _safe_float(value, default: float = 0.0) -> float:
     return f if math.isfinite(f) else default
 
 
+def _fetch_earnings_dates_set(sym: str) -> Set[str]:
+    """Fetch known earnings dates for a symbol as a set of 'YYYY-MM-DD' strings.
+
+    Used by OHLCV fetchers to flag bars that coincide with earnings releases.
+    Results are cached for 1 hour under the 'earnings_dates:{sym}' key.
+
+    Args:
+        sym: Uppercase ticker symbol.
+
+    Returns:
+        A set of date strings in 'YYYY-MM-DD' format.
+    """
+    cache_key = f"earnings_dates:{sym}"
+    cached = _get_cached(cache_key, _EVENTS_TTL)
+    if cached is not None:
+        return cached
+
+    dates: Set[str] = set()
+    try:
+        ticker = yf.Ticker(sym)
+        earnings_df = ticker.earnings_dates
+        if earnings_df is not None and not earnings_df.empty:
+            for dt in earnings_df.index:
+                dates.add(dt.strftime("%Y-%m-%d"))
+    except Exception:
+        pass
+
+    _set_cached(cache_key, dates)
+    return dates
+
+
 def _fetch_quote(sym: str) -> QuoteOut:
     ticker = yf.Ticker(sym)
     fi = ticker.fast_info
@@ -222,11 +269,26 @@ def _fetch_quote(sym: str) -> QuoteOut:
 
 
 def _fetch_ohlcv(sym: str, years: int) -> OHLCVResponse:
+    """Fetch daily OHLCV data for a symbol over the given number of years.
+
+    Flags bars that coincide with earnings release dates. For futures symbols
+    with unreliable volume, substitutes ETF volume data.
+
+    Args:
+        sym:   Uppercase ticker symbol.
+        years: Number of years of history to fetch (1–10).
+
+    Returns:
+        OHLCVResponse with bars, optional volume_source, and is_earnings flags.
+    """
     ticker = yf.Ticker(sym)
     period = f"{years}y" if years <= 5 else "max"
     hist = ticker.history(period=period, auto_adjust=True)
     if hist.empty:
         raise ValueError(f"No OHLCV data for {sym}")
+
+    # Fetch earnings dates to flag bars that coincide with earnings releases
+    earnings_dates = _fetch_earnings_dates_set(sym)
 
     # If this is a futures symbol with unreliable volume, fetch ETF volume
     etf_sym = _FUTURES_TO_ETF.get(sym)
@@ -250,7 +312,7 @@ def _fetch_ohlcv(sym: str, years: int) -> OHLCVResponse:
             low=round(_safe_float(row["Low"]), 2),
             close=round(_safe_float(row["Close"]), 2),
             volume=volume,
-            is_earnings=False,
+            is_earnings=date_str in earnings_dates,
         ))
     return OHLCVResponse(
         bars=bars,
@@ -263,7 +325,18 @@ def _fetch_ohlcv_interval(sym: str, interval: str, days: int) -> OHLCVResponse:
 
     Uses the _INTERVAL_MAP to resolve yfinance base interval and aggregation
     factor.  Clamps `days` to the maximum allowed by yfinance for intraday
-    intervals and returns a warning when clamped.
+    intervals and returns a warning when clamped.  Flags bars that coincide
+    with earnings release dates (daily resolution only — intraday bars are
+    matched by their date portion).
+
+    Args:
+        sym:      Uppercase ticker symbol.
+        interval: Requested candle interval (e.g. '1d', '1h', '5m').
+        days:     Number of calendar days of history to fetch.
+
+    Returns:
+        OHLCVResponse with bars, interval label, optional volume_source,
+        is_earnings flags, and optional clamping warning.
     """
     entry = _INTERVAL_MAP.get(interval)
     if entry is None:
@@ -284,6 +357,9 @@ def _fetch_ohlcv_interval(sym: str, interval: str, days: int) -> OHLCVResponse:
     if hist.empty:
         raise ValueError(f"No data for {sym} at interval {interval}")
 
+    # Fetch earnings dates to flag bars on earnings days
+    earnings_dates = _fetch_earnings_dates_set(sym)
+
     # Fetch ETF volume for futures symbols
     etf_sym = _FUTURES_TO_ETF.get(sym)
     etf_vol: Dict[str, int] = {}
@@ -302,8 +378,11 @@ def _fetch_ohlcv_interval(sym: str, interval: str, days: int) -> OHLCVResponse:
     for dt, row in hist.iterrows():
         if is_intraday:
             date_str = dt.strftime("%Y-%m-%dT%H:%M:%S%z")
+            # For intraday bars, match earnings by the date portion only
+            day_str = dt.strftime("%Y-%m-%d")
         else:
             date_str = dt.strftime("%Y-%m-%d")
+            day_str = date_str
         volume = etf_vol.get(date_str, int(row["Volume"])) if etf_vol else int(row["Volume"])
         bars.append(
             OHLCVBar(
@@ -313,7 +392,7 @@ def _fetch_ohlcv_interval(sym: str, interval: str, days: int) -> OHLCVResponse:
                 low=round(_safe_float(row["Low"]), 2),
                 close=round(_safe_float(row["Close"]), 2),
                 volume=volume,
-                is_earnings=False,
+                is_earnings=day_str in earnings_dates,
             )
         )
 
@@ -531,8 +610,11 @@ _PERIOD_DAYS_MAP: Dict[str, int] = {
 def _fetch_price_change(sym: str, period: str) -> dict:
     """Compute percentage price change for a symbol over the given period.
 
-    Fetches history from (today - period_days) to today and computes:
-        change_pct = (last_close - first_close) / first_close * 100
+    For "1D": compares the last two trading-day closes so the result
+    reflects a single-day move (e.g. Friday vs Thursday).
+
+    For longer periods (1W, 1M, 3M, 1Y): compares the most recent close
+    to the first close in the window to capture the full-period change.
 
     Returns 0.0 if insufficient data is available.
     """
@@ -541,11 +623,13 @@ def _fetch_price_change(sym: str, period: str) -> dict:
     hist = yf.Ticker(sym).history(start=start, auto_adjust=True)
     if len(hist) < 2:
         return {"symbol": sym, "period": period, "change_pct": 0.0}
-    first_close = _safe_float(hist.iloc[0]["Close"])
+    # For 1D, use the second-to-last bar as the baseline (previous trading day)
+    # so the result is a true single-day change, not a multi-day window.
+    ref_close = _safe_float(hist.iloc[-2]["Close"]) if period == "1D" else _safe_float(hist.iloc[0]["Close"])
     last_close = _safe_float(hist.iloc[-1]["Close"])
-    if first_close == 0:
+    if ref_close == 0:
         return {"symbol": sym, "period": period, "change_pct": 0.0}
-    change_pct = round((last_close - first_close) / first_close * 100, 2)
+    change_pct = round((last_close - ref_close) / ref_close * 100, 2)
     # Guard the final result in case arithmetic still produced a non-finite value
     return {"symbol": sym, "period": period, "change_pct": _safe_float(change_pct)}
 
@@ -684,6 +768,151 @@ async def get_exchange_rates(current_user=Depends(get_current_user)):
         raise HTTPException(
             status_code=502,
             detail=f"Could not fetch exchange rates: {exc}",
+        )
+
+    _set_cached(cache_key, result)
+    return result
+
+
+# ── Financial events (earnings, dividends, splits, analyst targets) ──────────
+
+def _fetch_events(sym: str) -> dict:
+    """Fetch financial events and analyst target prices for a symbol.
+
+    Collects earnings dates, dividend history, stock splits, and analyst
+    consensus target prices from yfinance for a single ticker.  Each event
+    is normalised into an ``EventItem``-compatible dict.
+
+    Args:
+        sym: Uppercase ticker symbol.
+
+    Returns:
+        A dict matching the ``EventsResponse`` schema with keys:
+        symbol, events, target_mean, target_high, target_low.
+    """
+    ticker = yf.Ticker(sym)
+    events: List[dict] = []
+
+    # ── Earnings dates ─────────────────────────────────────────────────
+    try:
+        earnings_df = ticker.earnings_dates
+        if earnings_df is not None and not earnings_df.empty:
+            for dt, row in earnings_df.iterrows():
+                date_str = dt.strftime("%Y-%m-%d")
+                # EPS estimate may be present in the 'EPS Estimate' column
+                eps = None
+                if "EPS Estimate" in row.index:
+                    raw = row["EPS Estimate"]
+                    try:
+                        val = float(raw)
+                        if math.isfinite(val):
+                            eps = val
+                    except (TypeError, ValueError):
+                        pass
+                label = f"Earnings {date_str}"
+                if eps is not None:
+                    label = f"Earnings (est. ${eps:.2f} EPS)"
+                events.append({
+                    "date": date_str,
+                    "type": "earnings",
+                    "value": eps,
+                    "label": label,
+                })
+    except Exception:
+        pass
+
+    # ── Dividends ──────────────────────────────────────────────────────
+    try:
+        divs = ticker.dividends
+        if divs is not None and not divs.empty:
+            for dt, amount in divs.items():
+                date_str = dt.strftime("%Y-%m-%d")
+                amt = round(_safe_float(amount), 4)
+                events.append({
+                    "date": date_str,
+                    "type": "dividend",
+                    "value": amt,
+                    "label": f"${amt:.2f} dividend",
+                })
+    except Exception:
+        pass
+
+    # ── Stock splits ───────────────────────────────────────────────────
+    try:
+        splits = ticker.splits
+        if splits is not None and not splits.empty:
+            for dt, ratio in splits.items():
+                date_str = dt.strftime("%Y-%m-%d")
+                r = _safe_float(ratio)
+                events.append({
+                    "date": date_str,
+                    "type": "split",
+                    "value": r,
+                    "label": f"{r:.0f}:1 split" if r >= 1 else f"1:{1/r:.0f} reverse split",
+                })
+    except Exception:
+        pass
+
+    # Sort events by date descending (most recent first)
+    events.sort(key=lambda e: e["date"], reverse=True)
+
+    # ── Analyst target prices ──────────────────────────────────────────
+    target_mean = None
+    target_high = None
+    target_low = None
+    try:
+        info = ticker.info
+        raw_mean = info.get("targetMeanPrice")
+        raw_high = info.get("targetHighPrice")
+        raw_low = info.get("targetLowPrice")
+        if raw_mean is not None:
+            target_mean = round(_safe_float(raw_mean), 2) or None
+        if raw_high is not None:
+            target_high = round(_safe_float(raw_high), 2) or None
+        if raw_low is not None:
+            target_low = round(_safe_float(raw_low), 2) or None
+    except Exception:
+        pass
+
+    return {
+        "symbol": sym,
+        "events": events,
+        "target_mean": target_mean,
+        "target_high": target_high,
+        "target_low": target_low,
+    }
+
+
+@router.get("/events/{symbol}", response_model=EventsResponse)
+async def get_events(
+    symbol: str,
+    current_user=Depends(get_current_user),
+):
+    """Return financial events and analyst target prices for a symbol.
+
+    Events include earnings dates (past and upcoming), dividend payments,
+    and stock splits.  Analyst consensus target prices (mean, high, low)
+    are included when available.  Results are cached for 1 hour.
+
+    Args:
+        symbol:       Ticker symbol (case-insensitive).
+        current_user: Authenticated user (injected).
+
+    Returns:
+        EventsResponse with events list and optional analyst targets.
+    """
+    sym = symbol.upper()
+    cache_key = f"events:{sym}"
+    cached = _get_cached(cache_key, _EVENTS_TTL)
+    if cached:
+        return cached
+
+    try:
+        result = await asyncio.to_thread(_fetch_events, sym)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Could not fetch events for '{sym}': {exc}",
         )
 
     _set_cached(cache_key, result)

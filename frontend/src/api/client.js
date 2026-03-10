@@ -192,6 +192,17 @@ const api = {
   getOhlcvInterval: (symbol, token, interval = "1d", days = 365) =>
     apiFetch(`/market/ohlcv_interval/${symbol}?interval=${interval}&days=${days}`, { token }),
 
+  /**
+   * Fetch financial events (earnings, dividends, splits) and analyst
+   * target prices for a symbol.  Cached for 1 hour on the backend.
+   *
+   * @param {string} symbol - Ticker symbol (e.g. "AAPL")
+   * @param {string} token  - JWT access token
+   * @returns {Promise<{symbol: string, events: Array, target_mean: number|null, target_high: number|null, target_low: number|null}>}
+   */
+  getEvents: (symbol, token) =>
+    apiFetch(`/market/events/${encodeURIComponent(symbol)}`, { token }),
+
   /** @param {string} query @param {string} token */
   searchSymbols: (query, token) =>
     apiFetch(`/market/search?q=${encodeURIComponent(query)}`, { token }),

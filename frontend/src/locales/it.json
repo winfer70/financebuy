@@ -76,7 +76,35 @@
     "crypto": "CRIPTO",
     "etfs": "ETF",
     "physical": "FISICO",
-    "sectionTotal": "TOTALE SEZIONE"
+    "sectionTotal": "TOTALE SEZIONE",
+    "name": "NOME",
+    "date": "DATA",
+    "profitTaking": "PRESA DI PROFITTO",
+    "excluded": "ESC",
+    "sma": "MMS",
+    "group": "GRUPPO",
+    "allocation": "ALLOC %",
+    "periodGainLoss": "G/P DEL PERIODO",
+    "totalValue": "VALORE TOTALE",
+    "totalCost": "COSTO TOTALE",
+    "totalGainLoss": "G/P TOTALE",
+    "positions": "POSIZIONI",
+    "analystsTarget": "OBIETTIVI DEGLI ANALISTI",
+    "targetMean": "MEDIA",
+    "targetHigh": "ALTO",
+    "targetLow": "BASSO",
+    "noTargets": "Nessun obiettivo degli analisti disponibile",
+    "setTarget": "Imposta prezzo obiettivo",
+    "portfolioName": "Nome del Portafoglio",
+    "strategy": "Strategia (facoltativo)",
+    "creating": "CREAZIONE...",
+    "create": "CREA",
+    "confirmDelete": "Eliminare questo portafoglio e tutte le posizioni?",
+    "sellQty": "Quantità da vendere",
+    "selling": "VENDITA...",
+    "importing": "IMPORTAZIONE...",
+    "noPositions": "Nessuna posizione in questo portafoglio",
+    "addFirst": "Aggiungi la tua prima posizione per iniziare"
   },
   "charts": {
     "title": "GRAFICI",
@@ -124,6 +152,12 @@
     "pitchfork": "FORCA",
     "text": "TESTO",
     "arrow": "FRECCIA",
+    "ruler": "RIGHELLO",
+    "rulerTooltip": "Clicca per impostare l'inizio, muovi per misurare, clicca di nuovo per fissare",
+    "events": "EVENTI",
+    "earnings": "TRIMESTRALI",
+    "dividend": "DIVIDENDO",
+    "split": "FRAZIONAMENTO",
     "loading": "CARICAMENTO...",
     "nyseOpen": "NYSE APERTA",
     "closedOpensIn": "CHIUSA · APRE TRA"
@@ -134,6 +168,7 @@
     "bullish": "RIALZISTA",
     "bearish": "RIBASSISTA",
     "portfolioOnly": "PORTAFOGLIO",
+    "watchlistOnly": "WATCHLIST",
     "search": "Cerca ticker...",
     "noArticles": "Nessun articolo trovato",
     "viewChart": "VEDI GRAFICO",
@@ -300,9 +335,11 @@
     "submitError": "Invio della segnalazione fallito. Riprova."
   },
   "footer": {
-    "disclaimer": "Avviso Finanziario",
-    "privacy": "Informativa sulla Privacy",
-    "terms": "Termini di Servizio",
-    "guide": "Guida Utente"
+    "disclaimer": "Avvertenza",
+    "privacy": "Privacy",
+    "terms": "Termini",
+    "guide": "Guida Utente",
+    "allRights": "Tutti i diritti riservati.",
+    "dataAttribution": "Dati di mercato forniti da Yahoo Finance."
   }
 }

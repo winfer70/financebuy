@@ -163,6 +163,7 @@ async def add_position(
         asset_type=payload.asset_type,
         physical_type=payload.physical_type,
         stop_loss=payload.stop_loss,
+        profit_taking=payload.profit_taking,
     )
     db.add(position)
     await db.commit()
@@ -200,6 +201,7 @@ async def bulk_import_positions(
             asset_type=p.asset_type,
             physical_type=p.physical_type,
             stop_loss=p.stop_loss,
+            profit_taking=p.profit_taking,
         )
         for p in payload
     ]
@@ -229,6 +231,8 @@ async def modify_position(
         position.is_excluded = payload.is_excluded
     if payload.stop_loss is not None:
         position.stop_loss = payload.stop_loss if payload.stop_loss > 0 else None
+    if payload.profit_taking is not None:
+        position.profit_taking = payload.profit_taking if payload.profit_taking > 0 else None
     await db.commit()
     await db.refresh(position)
     return position

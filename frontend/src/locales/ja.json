@@ -76,7 +76,35 @@
     "crypto": "暗号資産",
     "etfs": "ETF",
     "physical": "現物資産",
-    "sectionTotal": "セクション合計"
+    "sectionTotal": "セクション合計",
+    "name": "名称",
+    "date": "日付",
+    "profitTaking": "利食い",
+    "excluded": "除外",
+    "sma": "SMA",
+    "group": "グループ",
+    "allocation": "配分 %",
+    "periodGainLoss": "期間損益",
+    "totalValue": "総評価額",
+    "totalCost": "総取得額",
+    "totalGainLoss": "総損益",
+    "positions": "保有銘柄",
+    "analystsTarget": "アナリスト目標",
+    "targetMean": "平均",
+    "targetHigh": "高値",
+    "targetLow": "安値",
+    "noTargets": "アナリスト目標はありません",
+    "setTarget": "目標価格を設定",
+    "portfolioName": "ポートフォリオ名",
+    "strategy": "戦略（任意）",
+    "creating": "作成中...",
+    "create": "作成",
+    "confirmDelete": "このポートフォリオとすべてのポジションを削除しますか？",
+    "sellQty": "売却数量",
+    "selling": "売却中...",
+    "importing": "インポート中...",
+    "noPositions": "このポートフォリオにはポジションがありません",
+    "addFirst": "最初のポジションを追加してください"
   },
   "charts": {
     "title": "チャート",
@@ -124,6 +152,12 @@
     "pitchfork": "ピッチフォーク",
     "text": "テキスト",
     "arrow": "矢印",
+    "ruler": "定規",
+    "rulerTooltip": "クリックで開始、移動で計測、再クリックで固定",
+    "events": "イベント",
+    "earnings": "決算",
+    "dividend": "配当",
+    "split": "株式分割",
     "loading": "読み込み中...",
     "nyseOpen": "NYSE開場",
     "closedOpensIn": "閉場 · 開場まで"
@@ -134,6 +168,7 @@
     "bullish": "強気",
     "bearish": "弱気",
     "portfolioOnly": "ポートフォリオ",
+    "watchlistOnly": "ウォッチリスト",
     "search": "ティッカーを検索...",
     "noArticles": "記事が見つかりません",
     "viewChart": "チャートを見る",
@@ -300,9 +335,11 @@
     "submitError": "レポートの送信に失敗しました。もう一度お試しください。"
   },
   "footer": {
-    "disclaimer": "金融に関する免責事項",
-    "privacy": "プライバシーポリシー",
+    "disclaimer": "免責事項",
+    "privacy": "プライバシー",
     "terms": "利用規約",
-    "guide": "ユーザーガイド"
+    "guide": "ユーザーガイド",
+    "allRights": "全著作権所有。",
+    "dataAttribution": "市場データはYahoo Financeより提供。"
   }
 }

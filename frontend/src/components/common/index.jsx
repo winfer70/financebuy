@@ -16,6 +16,7 @@ import api from "../../api/client";
 import { Ic } from "./Icons";
 import { TICKER_DATA } from "../../styles/globals";
 import { useQuotes } from "../../context/QuotesContext";
+import { useI18n } from "../../context/I18nContext";
 
 /**
  * SkeletonRow: Animated loading placeholder for table rows
@@ -105,23 +106,24 @@ export function Clock() {
  */
 export function Footer({ onNavigate, showGuide }) {
   const year = new Date().getFullYear();
+  const { t } = useI18n();
   return (
     <footer className="app-footer">
-      <span>&copy; {year} Ticker-Tap. All rights reserved.</span>
+      <span>&copy; {year} Ticker-Tap. {t("footer.allRights")}</span>
       <span className="app-footer-links">
-        <a onClick={() => onNavigate && onNavigate("legal")}>Disclaimer</a>
+        <a onClick={() => onNavigate && onNavigate("legal")}>{t("footer.disclaimer")}</a>
         <span className="app-footer-sep">&middot;</span>
-        <a onClick={() => onNavigate && onNavigate("legal-privacy")}>Privacy</a>
+        <a onClick={() => onNavigate && onNavigate("legal-privacy")}>{t("footer.privacy")}</a>
         <span className="app-footer-sep">&middot;</span>
-        <a onClick={() => onNavigate && onNavigate("legal-terms")}>Terms</a>
+        <a onClick={() => onNavigate && onNavigate("legal-terms")}>{t("footer.terms")}</a>
         {showGuide && (
           <>
             <span className="app-footer-sep">&middot;</span>
-            <a onClick={() => onNavigate && onNavigate("guide")}>User Guide</a>
+            <a onClick={() => onNavigate && onNavigate("guide")}>{t("footer.guide")}</a>
           </>
         )}
       </span>
-      <span>Market data provided by Yahoo Finance.</span>
+      <span>{t("footer.dataAttribution")}</span>
     </footer>
   );
 }

@@ -315,6 +315,7 @@ class PortfolioPosition(Base):
     asset_type = Column(String(20), server_default="stock", nullable=False)
     physical_type = Column(String(20), nullable=True)
     stop_loss = Column(Numeric(18, 2), nullable=True)
+    profit_taking = Column(Numeric(18, 2), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

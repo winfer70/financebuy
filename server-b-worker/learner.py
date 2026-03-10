@@ -18,7 +18,7 @@ Environment variables:
     OLLAMA_MODEL             — Ollama model tag (default: llama3:8b-instruct-q4_K_M)
     OLLAMA_URL               — Ollama API base URL (default: http://localhost:11434)
     MIN_OUTCOMES_FOR_LEARNING — Minimum outcomes before generating rules (default: 50)
-    MAX_OUTCOMES_FOR_PROMPT   — Max outcomes to include in analysis prompt (default: 200)
+    MAX_OUTCOMES_FOR_PROMPT   — Max outcomes to include in analysis prompt (default: 50)
 
 Usage:
     python learner.py
@@ -53,14 +53,14 @@ INTERNAL_KEY = os.getenv("TICKERTAP_INTERNAL_KEY", "")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3:8b-instruct-q4_K_M")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 MIN_OUTCOMES = int(os.getenv("MIN_OUTCOMES_FOR_LEARNING", "50"))
-MAX_OUTCOMES_FOR_PROMPT = int(os.getenv("MAX_OUTCOMES_FOR_PROMPT", "200"))
+MAX_OUTCOMES_FOR_PROMPT = int(os.getenv("MAX_OUTCOMES_FOR_PROMPT", "50"))
 
 # Server A endpoints.
 _OUTCOME_ENDPOINT = f"{API_URL}/api/v1/feedback/internal/outcome-data"
 _RULES_ENDPOINT = f"{API_URL}/api/v1/feedback/internal/rules"
 
 # Ollama generation timeout.
-_OLLAMA_TIMEOUT = 180  # seconds
+_OLLAMA_TIMEOUT = 600  # seconds — covers the prompt-eval (prefill) phase
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +275,11 @@ Keep rules concise and actionable (max 10 rules). Each rule should be a clear in
 def analyse_with_ollama(prompt: str) -> Dict:
     """Call the local Ollama API to analyse scoring patterns.
 
+    Uses streaming mode so that tokens arrive incrementally, keeping the
+    HTTP connection alive on slow CPU-only hardware.  The read timeout
+    applies per-chunk rather than to the entire generation, preventing
+    false timeouts on long inferences.
+
     Args:
         prompt: Analysis prompt with statistics and sample outcomes.
 
@@ -288,22 +293,43 @@ def analyse_with_ollama(prompt: str) -> Dict:
     payload = {
         "model": OLLAMA_MODEL,
         "prompt": prompt,
-        "stream": False,
+        "stream": True,
         "options": {
             "temperature": 0.3,   # Slightly higher than scoring for creativity
             "num_predict": 1024,  # Allow longer analysis output
         },
     }
 
-    logger.info("Calling Ollama for accuracy analysis...")
+    logger.info("Calling Ollama for accuracy analysis (streaming)...")
+
+    # Use a (connect, read) timeout tuple.  The read timeout applies to
+    # each chunk, not the total request — streaming keeps it alive.
     resp = requests.post(
         f"{OLLAMA_URL}/api/generate",
         json=payload,
-        timeout=_OLLAMA_TIMEOUT,
+        timeout=(30, _OLLAMA_TIMEOUT),
+        stream=True,
     )
     resp.raise_for_status()
 
-    raw_text = resp.json().get("response", "")
+    # Collect streamed tokens.  Ollama sends one JSON object per line;
+    # each has a "response" field with the next token fragment and a
+    # "done" boolean that is True on the final line.
+    fragments: List[str] = []
+    token_count = 0
+    for line in resp.iter_lines():
+        if not line:
+            continue
+        chunk = json.loads(line)
+        token = chunk.get("response", "")
+        if token:
+            fragments.append(token)
+            token_count += 1
+        if chunk.get("done"):
+            break
+
+    raw_text = "".join(fragments)
+    logger.info("Ollama analysis complete — received %d tokens.", token_count)
     return _parse_analysis_json(raw_text)
 
 

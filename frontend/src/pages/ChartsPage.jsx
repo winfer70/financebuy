@@ -174,6 +174,7 @@ const DRAWING_TOOLS_BASE = {
   pitchfork:      { anchors: 3, icon: "pitchfork",    labelKey: "charts.pitchfork" },
   text:           { anchors: 1, icon: "textTool",     labelKey: "charts.text" },
   arrow:          { anchors: 2, icon: "arrowTool",    labelKey: "charts.arrow" },
+  ruler:          { anchors: 2, icon: "ruler",         labelKey: "charts.ruler" },
 };
 
 const DEFAULT_DRAW_STYLE = { color: "#f59e0b", lineWidth: 1.5, lineStyle: "solid", fontSize: 12, text: "" };
@@ -310,6 +311,30 @@ function renderDrawing(drawing, visibleData, visibleStart, allData, xOf, yOf, PA
         </g>
       );
     }
+    case "ruler": {
+      if (anchors.length < 2) return null;
+      const x1 = ax(0), y1 = ay(0), x2 = ax(1), y2 = ay(1);
+      const price1 = anchors[0].price, price2 = anchors[1].price;
+      const diff = price2 - price1;
+      const pct = price1 !== 0 ? (diff / price1) * 100 : 0;
+      const midX = (x1 + x2) / 2, midY = (y1 + y2) / 2;
+      const labelText = `${diff >= 0 ? "+" : ""}${diff.toFixed(2)} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
+      const labelColor = diff >= 0 ? "#00d97e" : "#f04438";
+      return (
+        <g key={drawing.id}>
+          {isSelected && <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#fff" strokeWidth={lw + 2} opacity="0.3" />}
+          <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={col} strokeWidth={lw} strokeDasharray="6,3" />
+          <circle cx={x1} cy={y1} r={3} fill={col} opacity="0.7" />
+          <circle cx={x2} cy={y2} r={3} fill={col} opacity="0.7" />
+          <line x1={x1} y1={y1} x2={x1} y2={y2} stroke={col} strokeWidth={0.5} strokeDasharray="3,3" opacity="0.4" />
+          <line x1={x1} y1={y2} x2={x2} y2={y2} stroke={col} strokeWidth={0.5} strokeDasharray="3,3" opacity="0.4" />
+          <rect x={midX - 60} y={midY - 10} width={120} height={16} rx={2} fill="var(--bg2, #1a1a2e)" fillOpacity="0.9" stroke={labelColor} strokeWidth="0.5" />
+          <text x={midX} y={midY + 3} textAnchor="middle" fontFamily="IBM Plex Mono" fontSize="9" fontWeight="600" fill={labelColor}>
+            {labelText}
+          </text>
+        </g>
+      );
+    }
     case "fibonacci": {
       if (anchors.length < 2) return null;
       const p1 = anchors[0].price, p2 = anchors[1].price;
@@ -402,6 +427,7 @@ function renderPreview(toolType, anchors, previewPoint, visibleData, visibleStar
   switch (toolType) {
     case "trendLine":
     case "arrow":
+    case "ruler":
       if (anchors.length === 1) {
         return <line x1={ax(anchors[0])} y1={ay(anchors[0])} x2={px} y2={py} stroke={col} strokeWidth={lw} strokeDasharray="4,4" opacity="0.7" />;
       }
@@ -482,7 +508,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
   const [crosshair, setCrosshair] = useState(null);
   const [tooltip, setTooltip] = useState(null);
   const [period, setPeriod] = useState("1Y");
-  const [overlays, setOverlays] = useState({ sma50: true, sma150: true, smaCustom: true, volume: true, breakouts: true });
+  const [overlays, setOverlays] = useState({ sma50: true, sma150: true, smaCustom: true, volume: true, breakouts: true, events: true });
   const [customPeriod, setCustomPeriod] = useState(20);
   const [chartType, setChartType] = useState("candle");
   const [interval, setIntervalState] = useState("1d");
@@ -530,6 +556,34 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
     })();
     return () => { cancelled = true; };
   }, [token, symbol]);
+
+  /* ── Events data (earnings, dividends, splits) from backend ───────────── */
+  const [eventsData, setEventsData] = useState([]);
+  useEffect(() => {
+    if (!token || !symbol) return;
+    let cancelled = false;
+    api.getEvents(symbol, token)
+      .then(resp => {
+        if (!cancelled && resp?.events) setEventsData(resp.events);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [token, symbol]);
+
+  /**
+   * Build a lookup map of event dates → event arrays for O(1) matching
+   * against visible bars.  Key is the date portion "YYYY-MM-DD".
+   */
+  const eventsByDate = useMemo(() => {
+    const map = {};
+    for (const ev of eventsData) {
+      const key = ev.date?.slice(0, 10);
+      if (!key) continue;
+      if (!map[key]) map[key] = [];
+      map[key].push(ev);
+    }
+    return map;
+  }, [eventsData]);
 
   // Fetch OHLCV from backend; fall back to local generation if backend offline
   const [allData, setAllData] = useState(() => generateOHLCV(stockInfo.price, 5));
@@ -835,6 +889,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
       switch (type) {
         case "trendLine":
         case "arrow":
+        case "ruler":
           if (anchors.length >= 2) {
             const dist = pointToSegmentDist(mx, my, ax(anchors[0]), ay(anchors[0]), ax(anchors[1]), ay(anchors[1]));
             if (dist < threshold) return dr.id;
@@ -1049,6 +1104,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
     { key: "smaCustom", label: `SMA ${customPeriod}`,  color: "#a78bfa" },
     { key: "breakouts", label: "BREAKOUTS",            color: "#0f7d40" },
     { key: "volume",    label: "VOLUME",               color: "#4a5568" },
+    { key: "events",    label: t("charts.events"),      color: "#e879f9" },
   ];
 
   // Breakout tooltip hover state
@@ -1275,6 +1331,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
             {overlays.sma150    && <div className="legend-item"><div className="legend-line" style={{ background: "#0fc0d0" }}/>SMA150</div>}
             {overlays.smaCustom && <div className="legend-item"><div className="legend-line" style={{ background: "#a78bfa" }}/>SMA{customPeriod}</div>}
             {overlays.breakouts && <div className="legend-item"><div style={{ width: 8, height: 8, background: "#00d97e", clipPath: "polygon(50% 0,100% 100%,0 100%)", flexShrink: 0 }}/>{t("charts.breakout")}</div>}
+            {overlays.events && <div className="legend-item"><div style={{ width: 8, height: 8, background: "#e879f9", borderRadius: 1, flexShrink: 0 }}/>{t("charts.events")}</div>}
           </div>
 
           {/* ── DRAWING TOOLBAR ── */}
@@ -1478,7 +1535,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
                         fillOpacity={bull ? 0.85 : 0.7} fill={col}
                         stroke={isHov ? "#fff" : col} strokeWidth={isHov ? 0.6 : 0.3}
                       />
-                      {d.isEarnings && <circle cx={x} cy={bodyTop - 5} r={3} fill="#0f7d40" opacity="0.9" />}
+                      {d.isEarnings && !overlays.events && <circle cx={x} cy={bodyTop - 5} r={3} fill="#0f7d40" opacity="0.9" />}
                     </g>
                   );
                 })}
@@ -1603,6 +1660,58 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
               });
             })()}
 
+            {/* ── EVENT INDICATORS (earnings, dividends, splits) ── */}
+            {overlays.events && (() => {
+              /** Event color + label config by type */
+              const EVENT_CFG = {
+                earnings: { color: "#e879f9", label: "E" },
+                dividend: { color: "#38bdf8", label: "D" },
+                split:    { color: "#fbbf24", label: "S" },
+              };
+              const markers = [];
+              for (let i = 0; i < visibleData.length; i++) {
+                const bar = visibleData[i];
+                const dateKey = bar.date?.slice(0, 10);
+                /** Merge backend events + the is_earnings flag from OHLCV */
+                const evts = eventsByDate[dateKey] || [];
+                const hasFlag = bar.isEarnings && !evts.some(e => e.type === "earnings");
+                const combined = hasFlag ? [...evts, { type: "earnings", date: dateKey }] : evts;
+                if (combined.length === 0) continue;
+
+                /** Deduplicate by event type for this bar */
+                const seen = new Set();
+                const unique = combined.filter(e => {
+                  if (seen.has(e.type)) return false;
+                  seen.add(e.type);
+                  return true;
+                });
+
+                const x = xOf(i);
+                const baseY = PAD.top + H - 2; // bottom of price area
+                unique.forEach((ev, ei) => {
+                  const cfg = EVENT_CFG[ev.type];
+                  if (!cfg) return;
+                  const markerY = baseY - ei * 14; // stack vertically if multiple events
+                  markers.push(
+                    <g key={`ev-${i}-${ev.type}`}>
+                      {/* Subtle vertical line from marker to bottom */}
+                      <line x1={x} y1={markerY - 5} x2={x} y2={PAD.top + H}
+                        stroke={cfg.color} strokeWidth="0.4" strokeDasharray="2,3" opacity="0.3" />
+                      {/* Square marker */}
+                      <rect x={x - 6} y={markerY - 6} width={12} height={12} rx={2}
+                        fill={cfg.color} fillOpacity="0.15" stroke={cfg.color} strokeWidth="0.6" />
+                      {/* Label letter */}
+                      <text x={x} y={markerY + 3} textAnchor="middle"
+                        fontFamily="IBM Plex Mono" fontSize="8" fontWeight="700" fill={cfg.color}>
+                        {cfg.label}
+                      </text>
+                    </g>
+                  );
+                });
+              }
+              return markers.length > 0 ? <g clipPath="url(#chartClip)">{markers}</g> : null;
+            })()}
+
             {/* ── DRAWING LAYER ── */}
             <g clipPath="url(#chartClip)">
               {drawings.filter(d => d.visible).map(d =>
@@ -1687,7 +1796,29 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
           }}>
             <div className="tt-date">
               {new Date(tooltip.d.date).toLocaleDateString("en-US", { weekday: "short", year: "numeric", month: "short", day: "numeric" })}
-              {tooltip.d.isEarnings && <span style={{ marginLeft: 8, color: "#0f7d40", fontSize: 9, background: "rgba(15,125,64,0.1)", padding: "1px 5px", border: "1px solid rgba(15,125,64,0.2)" }}>EARNINGS</span>}
+              {/* Event badges (earnings from OHLCV flag + events API) */}
+              {overlays.events && (() => {
+                const dateKey = tooltip.d.date?.slice(0, 10);
+                const evts = eventsByDate[dateKey] || [];
+                const hasFlag = tooltip.d.isEarnings && !evts.some(e => e.type === "earnings");
+                const combined = hasFlag ? [...evts, { type: "earnings" }] : evts;
+                const seen = new Set();
+                const unique = combined.filter(e => { if (seen.has(e.type)) return false; seen.add(e.type); return true; });
+                const cfgMap = {
+                  earnings: { color: "#e879f9", label: t("charts.earnings") },
+                  dividend: { color: "#38bdf8", label: t("charts.dividend") },
+                  split:    { color: "#fbbf24", label: t("charts.split") },
+                };
+                return unique.map(ev => {
+                  const c = cfgMap[ev.type];
+                  if (!c) return null;
+                  return (
+                    <span key={ev.type} style={{ marginLeft: 6, color: c.color, fontSize: 9, background: `${c.color}18`, padding: "1px 5px", border: `1px solid ${c.color}33` }}>
+                      {c.label}{ev.detail ? ` · ${ev.detail}` : ""}
+                    </span>
+                  );
+                });
+              })()}
             </div>
             <div className="tt-row"><span className="tt-key">{t("charts.open")}</span>  <span className="tt-val">{currencySymbol}{tooltip.d.open.toFixed(2)}</span></div>
             <div className="tt-row"><span className="tt-key">HIGH</span>  <span className="tt-val" style={{ color: "#00d97e" }}>{currencySymbol}{tooltip.d.high.toFixed(2)}</span></div>

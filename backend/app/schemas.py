@@ -505,6 +505,7 @@ class PositionCreate(BaseModel):
     asset_type: str = Field("stock", description="Asset type: stock, crypto, etf, or physical.", example="stock")
     physical_type: Optional[str] = Field(None, max_length=20, description="Physical asset sub-type: coin or bar.", example="coin")
     stop_loss: Optional[Decimal] = Field(None, gt=Decimal("0"), max_digits=18, decimal_places=2, description="Stop-loss price trigger.", example="140.00")
+    profit_taking: Optional[Decimal] = Field(None, gt=Decimal("0"), max_digits=18, decimal_places=2, description="Profit-taking target price.", example="200.00")
 
 
 class PositionOut(BaseModel):
@@ -522,6 +523,7 @@ class PositionOut(BaseModel):
     asset_type: str = "stock"
     physical_type: Optional[str] = None
     stop_loss: Optional[Decimal] = Field(None, max_digits=18, decimal_places=2)
+    profit_taking: Optional[Decimal] = Field(None, max_digits=18, decimal_places=2)
     created_at: datetime
 
     class Config:
@@ -536,12 +538,34 @@ class PositionUpdate(BaseModel):
     group_tag: Optional[str] = Field(None, max_length=64)
     is_excluded: Optional[bool] = None
     stop_loss: Optional[Decimal] = Field(None, max_digits=18, decimal_places=2)
+    profit_taking: Optional[Decimal] = Field(None, max_digits=18, decimal_places=2)
 
 
 class SellRequest(BaseModel):
     """Payload for a partial sell — reduces quantity; deletes if fully sold."""
 
     quantity: Decimal = Field(..., gt=Decimal("0"), max_digits=18, decimal_places=6, description="Units to sell.")
+
+
+# ── Market Event schemas ─────────────────────────────────────────────────────
+
+class EventItem(BaseModel):
+    """A single financial event (earnings, dividend, split) for a symbol."""
+
+    date: str = Field(..., description="Event date in YYYY-MM-DD format.")
+    type: str = Field(..., description="Event type: 'earnings', 'dividend', or 'split'.")
+    value: Optional[float] = Field(None, description="Dividend amount, split ratio, or EPS.")
+    label: Optional[str] = Field(None, description="Human-readable label, e.g. '$0.24 dividend'.")
+
+
+class EventsResponse(BaseModel):
+    """Response from the market events endpoint."""
+
+    symbol: str
+    events: List[EventItem] = Field(default_factory=list)
+    target_mean: Optional[float] = Field(None, description="Analyst mean target price.")
+    target_high: Optional[float] = Field(None, description="Analyst high target price.")
+    target_low: Optional[float] = Field(None, description="Analyst low target price.")
 
 
 # ── Chart Template schemas ────────────────────────────────────────────────────
