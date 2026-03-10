@@ -76,7 +76,35 @@
     "crypto": "CRIPTO",
     "etfs": "ETFs",
     "physical": "FÍSICO",
-    "sectionTotal": "TOTAL DA SEÇÃO"
+    "sectionTotal": "TOTAL DA SEÇÃO",
+    "name": "NOME",
+    "date": "DATA",
+    "profitTaking": "REALIZAÇÃO DE LUCRO",
+    "excluded": "EXC",
+    "sma": "MMS",
+    "group": "GRUPO",
+    "allocation": "ALOC %",
+    "periodGainLoss": "G/P DO PERÍODO",
+    "totalValue": "VALOR TOTAL",
+    "totalCost": "CUSTO TOTAL",
+    "totalGainLoss": "G/P TOTAL",
+    "positions": "POSIÇÕES",
+    "analystsTarget": "ALVOS DOS ANALISTAS",
+    "targetMean": "MÉDIA",
+    "targetHigh": "ALTO",
+    "targetLow": "BAIXO",
+    "noTargets": "Nenhum alvo de analista disponível",
+    "setTarget": "Definir preço alvo",
+    "portfolioName": "Nome do Portfólio",
+    "strategy": "Estratégia (opcional)",
+    "creating": "CRIANDO...",
+    "create": "CRIAR",
+    "confirmDelete": "Excluir este portfólio e todas as posições?",
+    "sellQty": "Quantidade a vender",
+    "selling": "VENDENDO...",
+    "importing": "IMPORTANDO...",
+    "noPositions": "Nenhuma posição neste portfólio",
+    "addFirst": "Adicione sua primeira posição para começar"
   },
   "charts": {
     "title": "GRÁFICOS",
@@ -124,6 +152,12 @@
     "pitchfork": "TRIDENTE",
     "text": "TEXTO",
     "arrow": "SETA",
+    "ruler": "RÉGUA",
+    "rulerTooltip": "Clique para definir o início, mova para medir, clique novamente para fixar",
+    "events": "EVENTOS",
+    "earnings": "RESULTADOS",
+    "dividend": "DIVIDENDO",
+    "split": "DESDOBRAMENTO",
     "loading": "CARREGANDO...",
     "nyseOpen": "NYSE ABERTA",
     "closedOpensIn": "FECHADO · ABRE EM"
@@ -134,6 +168,7 @@
     "bullish": "ALTA",
     "bearish": "BAIXA",
     "portfolioOnly": "PORTFÓLIO",
+    "watchlistOnly": "WATCHLIST",
     "search": "Buscar tickers...",
     "noArticles": "Nenhum artigo encontrado",
     "viewChart": "VER GRÁFICO",
@@ -300,9 +335,11 @@
     "submitError": "Falha ao enviar relatório. Tente novamente."
   },
   "footer": {
-    "disclaimer": "Aviso Financeiro",
-    "privacy": "Política de Privacidade",
-    "terms": "Termos de Serviço",
-    "guide": "Guia do Usuário"
+    "disclaimer": "Aviso",
+    "privacy": "Privacidade",
+    "terms": "Termos",
+    "guide": "Guia do Usuário",
+    "allRights": "Todos os direitos reservados.",
+    "dataAttribution": "Dados de mercado fornecidos pelo Yahoo Finance."
   }
 }

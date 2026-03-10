@@ -76,7 +76,35 @@
     "crypto": "CRYPTO",
     "etfs": "ETFs",
     "physical": "PHYSIQUE",
-    "sectionTotal": "TOTAL DE LA SECTION"
+    "sectionTotal": "TOTAL DE LA SECTION",
+    "name": "NOM",
+    "date": "DATE",
+    "profitTaking": "PRISE DE BÉNÉFICES",
+    "excluded": "EXC",
+    "sma": "MMS",
+    "group": "GROUPE",
+    "allocation": "ALLOC %",
+    "periodGainLoss": "G/P DE LA PÉRIODE",
+    "totalValue": "VALEUR TOTALE",
+    "totalCost": "COÛT TOTAL",
+    "totalGainLoss": "G/P TOTAL",
+    "positions": "POSITIONS",
+    "analystsTarget": "OBJECTIFS DES ANALYSTES",
+    "targetMean": "MOYENNE",
+    "targetHigh": "HAUT",
+    "targetLow": "BAS",
+    "noTargets": "Aucun objectif d'analyste disponible",
+    "setTarget": "Définir le prix cible",
+    "portfolioName": "Nom du portefeuille",
+    "strategy": "Stratégie (facultatif)",
+    "creating": "CRÉATION...",
+    "create": "CRÉER",
+    "confirmDelete": "Supprimer ce portefeuille et toutes ses positions ?",
+    "sellQty": "Quantité à vendre",
+    "selling": "VENTE...",
+    "importing": "IMPORTATION...",
+    "noPositions": "Aucune position dans ce portefeuille",
+    "addFirst": "Ajoutez votre première position pour commencer"
   },
   "charts": {
     "title": "GRAPHIQUES",
@@ -124,6 +152,12 @@
     "pitchfork": "FOURCHE",
     "text": "TEXTE",
     "arrow": "FLÈCHE",
+    "ruler": "RÈGLE",
+    "rulerTooltip": "Cliquez pour le début, déplacez pour mesurer, cliquez à nouveau pour fixer",
+    "events": "ÉVÉNEMENTS",
+    "earnings": "RÉSULTATS",
+    "dividend": "DIVIDENDE",
+    "split": "FRACTIONNEMENT",
     "loading": "CHARGEMENT...",
     "nyseOpen": "NYSE OUVERT",
     "closedOpensIn": "FERMÉ · OUVRE DANS"
@@ -134,6 +168,7 @@
     "bullish": "HAUSSIER",
     "bearish": "BAISSIER",
     "portfolioOnly": "PORTEFEUILLE",
+    "watchlistOnly": "WATCHLIST",
     "search": "Rechercher des symboles...",
     "noArticles": "Aucun article trouve",
     "viewChart": "VOIR LE GRAPHIQUE",
@@ -300,9 +335,11 @@
     "submitError": "Échec de l'envoi du rapport. Veuillez réessayer."
   },
   "footer": {
-    "disclaimer": "Avertissement financier",
-    "privacy": "Politique de confidentialite",
-    "terms": "Conditions d'utilisation",
-    "guide": "Guide utilisateur"
+    "disclaimer": "Avertissement",
+    "privacy": "Confidentialité",
+    "terms": "Conditions",
+    "guide": "Guide utilisateur",
+    "allRights": "Tous droits réservés.",
+    "dataAttribution": "Données de marché fournies par Yahoo Finance."
   }
 }

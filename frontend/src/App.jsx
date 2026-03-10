@@ -77,7 +77,11 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
   const { authToken, authUser, accountId, handleLogout } = useAuth();
   const { t } = useI18n();
   const [showTxModal,  setShowTxModal]  = useState(false);
-  const [chartSymbol,  setChartSymbol]  = useState(null);
+  // Read ?symbol= from the URL so /charts?symbol=NVDA works in a new tab
+  const [chartSymbol,  setChartSymbol]  = useState(() => {
+    const sp = new URLSearchParams(window.location.search);
+    return sp.get("symbol")?.toUpperCase() || null;
+  });
   const [newsSymbol,   setNewsSymbol]   = useState(null);
   const marketStatus = useMarketStatus();
 
@@ -130,9 +134,10 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
   };
 
   /* ── Navigate to a chart for a specific symbol ─────────────────────── */
+  /* Opens in a new browser tab so the user doesn't lose their current
+     context in Portfolio Manager or Watchlist. */
   const navigateToChart = (symbol) => {
-    setChartSymbol(symbol);
-    setPage("charts");
+    window.open(`/charts?symbol=${encodeURIComponent(symbol)}`, "_blank");
   };
 
   /* ── Navigate to news filtered for a specific ticker ─────────────── */

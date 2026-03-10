@@ -33,6 +33,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import api from "../api/client";
 import { Ic } from "../components/common/Icons";
+import { useI18n } from "../context/I18nContext";
 
 /* -- Page size options ---------------------------------------------------- */
 
@@ -124,12 +125,15 @@ function isStale(articles) {
 
 export function NewsPage({ token, initialTicker, onViewChart }) {
   /* -- State -------------------------------------------------------------- */
+  const { t } = useI18n();
   const [articles,       setArticles]       = useState([]);
   const [totalArticles,  setTotalArticles]  = useState(0);
   const [loading,        setLoading]        = useState(true);
   const [error,          setError]          = useState(null);
   const [sentimentFilter, setSentimentFilter] = useState("all");
   const [portfolioOnly,  setPortfolioOnly]  = useState(false);
+  const [watchlistOnly,  setWatchlistOnly]  = useState(false);
+  const [watchlistTickers, setWatchlistTickers] = useState([]);
   const [searchTicker,   setSearchTicker]   = useState(initialTicker || "");
   const [tickerPopup,    setTickerPopup]    = useState(null); /* { ticker, x, y } */
 
@@ -139,6 +143,25 @@ export function NewsPage({ token, initialTicker, onViewChart }) {
 
   /** Total number of pages based on total articles from the backend. */
   const totalPages = Math.max(1, Math.ceil(totalArticles / perPage));
+
+  /* -- Fetch watchlist tickers on mount ----------------------------------- */
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        // Fetch all watchlists, then collect unique ticker symbols from items
+        const watchlists = await api.getWatchlists(token);
+        if (cancelled || !watchlists?.length) return;
+        const allItems = await Promise.all(
+          watchlists.map(wl => api.getWatchlist(wl.watchlist_id, token).catch(() => ({ items: [] })))
+        );
+        const tickers = [...new Set(allItems.flatMap(wl => (wl.items || []).map(it => it.symbol)))];
+        if (!cancelled) setWatchlistTickers(tickers);
+      } catch { /* Keep empty on error */ }
+    })();
+    return () => { cancelled = true; };
+  }, [token]);
 
   /* -- Feed fetch --------------------------------------------------------- */
 
@@ -163,6 +186,11 @@ export function NewsPage({ token, initialTicker, onViewChart }) {
         portfolio_only: portfolioOnly,
         sentiment: sentimentFilter !== "all" ? sentimentFilter : null,
         ticker_search: searchTicker.trim() || null,
+        // When watchlist toggle is active, pass watchlist tickers to the
+        // backend's portfolio_tickers param for server-side filtering.
+        portfolio_tickers: watchlistOnly && watchlistTickers.length
+          ? watchlistTickers.join(",")
+          : null,
       };
 
       /* api.getNews returns { articles, total, limit, offset }. */
@@ -174,7 +202,7 @@ export function NewsPage({ token, initialTicker, onViewChart }) {
     } finally {
       setLoading(false);
     }
-  }, [token, perPage, currentPage, portfolioOnly, sentimentFilter, searchTicker]);
+  }, [token, perPage, currentPage, portfolioOnly, watchlistOnly, watchlistTickers, sentimentFilter, searchTicker]);
 
   /* Re-fetch whenever token, pagination, or filter state changes. */
   useEffect(() => { loadFeed(); }, [loadFeed]);
@@ -187,7 +215,7 @@ export function NewsPage({ token, initialTicker, onViewChart }) {
    */
   useEffect(() => {
     setCurrentPage(1);
-  }, [sentimentFilter, portfolioOnly, searchTicker]);
+  }, [sentimentFilter, portfolioOnly, watchlistOnly, searchTicker]);
 
   /**
    * Change the per-page size and reset to page 1.
@@ -328,7 +356,7 @@ export function NewsPage({ token, initialTicker, onViewChart }) {
           {/* Portfolio toggle — combines with sentiment filter */}
           <button
             className={`filter-btn${portfolioOnly ? " active" : ""}`}
-            onClick={() => setPortfolioOnly(p => !p)}
+            onClick={() => { setPortfolioOnly(p => !p); if (!portfolioOnly) setWatchlistOnly(false); }}
             style={{
               fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.5px",
               border: portfolioOnly ? "1px solid var(--amber)" : "1px solid var(--border)",
@@ -337,7 +365,25 @@ export function NewsPage({ token, initialTicker, onViewChart }) {
               padding: "4px 10px", cursor: "pointer", borderRadius: 2,
             }}
           >
-            PORTFOLIO
+            {t("news.portfolioOnly")}
+          </button>
+
+          {/* Watchlist toggle — filters to watchlist tickers (mutually exclusive with portfolio) */}
+          <button
+            className={`filter-btn${watchlistOnly ? " active" : ""}`}
+            onClick={() => { setWatchlistOnly(w => !w); if (!watchlistOnly) setPortfolioOnly(false); }}
+            style={{
+              fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.5px",
+              border: watchlistOnly ? "1px solid var(--amber)" : "1px solid var(--border)",
+              color: watchlistOnly ? "var(--amber)" : "var(--muted)",
+              background: watchlistOnly ? "rgba(255,178,56,0.08)" : "transparent",
+              padding: "4px 10px", cursor: "pointer", borderRadius: 2,
+              opacity: watchlistTickers.length ? 1 : 0.4,
+            }}
+            disabled={!watchlistTickers.length}
+            title={watchlistTickers.length ? `Filter to ${watchlistTickers.length} watchlist tickers` : "No watchlist tickers"}
+          >
+            {t("news.watchlistOnly")}
           </button>
 
           {/* Per-page selector */}

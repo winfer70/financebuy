@@ -15,10 +15,12 @@
  *   5. All mutations reload positions + quotes
  */
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import api from "../api/client";
 import { Ic } from "../components/common/Icons";
+import { useMarketStatus } from "../components/common";
 import { useCurrency } from "../context/CurrencyContext";
+import { useI18n } from "../context/I18nContext";
 
 /* -- Formatters ----------------------------------------------------------- */
 const fmtUSD  = (n) => n == null ? "\u2014" : `$${parseFloat(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -104,7 +106,7 @@ function CreatePortfolioModal({ onClose, onCreated, token }) {
    MODAL: Add Stock Position
 ========================================================================= */
 function AddStockModal({ portfolioId, onClose, onAdded, token }) {
-  const [form, setForm] = useState({ ticker: "", quantity: "", purchase_date: "", purchase_price: "", group_tag: "", stop_loss: "" });
+  const [form, setForm] = useState({ ticker: "", quantity: "", purchase_date: "", purchase_price: "", group_tag: "", stop_loss: "", profit_taking: "" });
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -125,6 +127,7 @@ function AddStockModal({ portfolioId, onClose, onAdded, token }) {
         group_tag:      form.group_tag.trim() || null,
         asset_type:     "stock",
         stop_loss:      form.stop_loss && !isNaN(+form.stop_loss) && +form.stop_loss > 0 ? parseFloat(form.stop_loss) : null,
+        profit_taking:  form.profit_taking && !isNaN(+form.profit_taking) && +form.profit_taking > 0 ? parseFloat(form.profit_taking) : null,
       };
       const pos = await api.addPosition(portfolioId, payload, token);
       onAdded(pos);
@@ -170,6 +173,13 @@ function AddStockModal({ portfolioId, onClose, onAdded, token }) {
               <input className="form-control" type="number" min="0.01" step="any" placeholder="140.00" value={form.stop_loss} onChange={e => set("stop_loss", e.target.value)} />
             </div>
           </div>
+          <div className="form-row">
+            <div className="form-field">
+              <label className="form-label">Profit Taking</label>
+              <input className="form-control" type="number" min="0.01" step="any" placeholder="200.00" value={form.profit_taking} onChange={e => set("profit_taking", e.target.value)} />
+            </div>
+            <div className="form-field" />
+          </div>
         </div>
         {err && <div style={{ padding: "8px 20px", fontSize: 11, color: "var(--red)", background: "rgba(239,68,68,.06)", borderTop: "1px solid rgba(239,68,68,.2)" }}>{err}</div>}
         <div className="modal-footer">
@@ -187,7 +197,7 @@ function AddStockModal({ portfolioId, onClose, onAdded, token }) {
    MODAL: Add Crypto Position
 ========================================================================= */
 function AddCryptoModal({ portfolioId, onClose, onAdded, token }) {
-  const [form, setForm] = useState({ ticker: "", quantity: "", purchase_date: "", purchase_price: "", stop_loss: "" });
+  const [form, setForm] = useState({ ticker: "", quantity: "", purchase_date: "", purchase_price: "", stop_loss: "", profit_taking: "" });
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -208,6 +218,7 @@ function AddCryptoModal({ portfolioId, onClose, onAdded, token }) {
         group_tag:      null,
         asset_type:     "crypto",
         stop_loss:      form.stop_loss && !isNaN(+form.stop_loss) && +form.stop_loss > 0 ? parseFloat(form.stop_loss) : null,
+        profit_taking:  form.profit_taking && !isNaN(+form.profit_taking) && +form.profit_taking > 0 ? parseFloat(form.profit_taking) : null,
       };
       const pos = await api.addPosition(portfolioId, payload, token);
       onAdded(pos);
@@ -248,6 +259,10 @@ function AddCryptoModal({ portfolioId, onClose, onAdded, token }) {
             <label className="form-label">Stop Loss</label>
             <input className="form-control" type="number" min="0.01" step="any" placeholder="38000.00" value={form.stop_loss} onChange={e => set("stop_loss", e.target.value)} />
           </div>
+          <div className="form-field">
+            <label className="form-label">Profit Taking</label>
+            <input className="form-control" type="number" min="0.01" step="any" placeholder="55000.00" value={form.profit_taking} onChange={e => set("profit_taking", e.target.value)} />
+          </div>
         </div>
         {err && <div style={{ padding: "8px 20px", fontSize: 11, color: "var(--red)", background: "rgba(239,68,68,.06)", borderTop: "1px solid rgba(239,68,68,.2)" }}>{err}</div>}
         <div className="modal-footer">
@@ -265,7 +280,7 @@ function AddCryptoModal({ portfolioId, onClose, onAdded, token }) {
    MODAL: Add ETF Position
 ========================================================================= */
 function AddETFModal({ portfolioId, onClose, onAdded, token }) {
-  const [form, setForm] = useState({ ticker: "", quantity: "", purchase_date: "", purchase_price: "", stop_loss: "" });
+  const [form, setForm] = useState({ ticker: "", quantity: "", purchase_date: "", purchase_price: "", stop_loss: "", profit_taking: "" });
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -286,6 +301,7 @@ function AddETFModal({ portfolioId, onClose, onAdded, token }) {
         group_tag:      null,
         asset_type:     "etf",
         stop_loss:      form.stop_loss && !isNaN(+form.stop_loss) && +form.stop_loss > 0 ? parseFloat(form.stop_loss) : null,
+        profit_taking:  form.profit_taking && !isNaN(+form.profit_taking) && +form.profit_taking > 0 ? parseFloat(form.profit_taking) : null,
       };
       const pos = await api.addPosition(portfolioId, payload, token);
       onAdded(pos);
@@ -326,6 +342,10 @@ function AddETFModal({ portfolioId, onClose, onAdded, token }) {
             <label className="form-label">Stop Loss</label>
             <input className="form-control" type="number" min="0.01" step="any" placeholder="170.00" value={form.stop_loss} onChange={e => set("stop_loss", e.target.value)} />
           </div>
+          <div className="form-field">
+            <label className="form-label">Profit Taking</label>
+            <input className="form-control" type="number" min="0.01" step="any" placeholder="200.00" value={form.profit_taking} onChange={e => set("profit_taking", e.target.value)} />
+          </div>
         </div>
         {err && <div style={{ padding: "8px 20px", fontSize: 11, color: "var(--red)", background: "rgba(239,68,68,.06)", borderTop: "1px solid rgba(239,68,68,.2)" }}>{err}</div>}
         <div className="modal-footer">
@@ -343,7 +363,7 @@ function AddETFModal({ portfolioId, onClose, onAdded, token }) {
    MODAL: Add Physical Asset
 ========================================================================= */
 function AddPhysicalModal({ portfolioId, onClose, onAdded, token }) {
-  const [form, setForm] = useState({ metal: METALS[0].symbol, quantity: "", purchase_date: "", purchase_price: "", physical_type: "coin", name: "", stop_loss: "" });
+  const [form, setForm] = useState({ metal: METALS[0].symbol, quantity: "", purchase_date: "", purchase_price: "", physical_type: "coin", name: "", stop_loss: "", profit_taking: "" });
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -364,6 +384,7 @@ function AddPhysicalModal({ portfolioId, onClose, onAdded, token }) {
         asset_type:     "physical",
         physical_type:  form.physical_type,
         stop_loss:      form.stop_loss && !isNaN(+form.stop_loss) && +form.stop_loss > 0 ? parseFloat(form.stop_loss) : null,
+        profit_taking:  form.profit_taking && !isNaN(+form.profit_taking) && +form.profit_taking > 0 ? parseFloat(form.profit_taking) : null,
       };
       const pos = await api.addPosition(portfolioId, payload, token);
       onAdded(pos);
@@ -421,6 +442,13 @@ function AddPhysicalModal({ portfolioId, onClose, onAdded, token }) {
               <label className="form-label">Stop Loss</label>
               <input className="form-control" type="number" min="0.01" step="any" placeholder="1800.00" value={form.stop_loss} onChange={e => set("stop_loss", e.target.value)} />
             </div>
+          </div>
+          <div className="form-row">
+            <div className="form-field">
+              <label className="form-label">Profit Taking</label>
+              <input className="form-control" type="number" min="0.01" step="any" placeholder="2200.00" value={form.profit_taking} onChange={e => set("profit_taking", e.target.value)} />
+            </div>
+            <div className="form-field" />
           </div>
         </div>
         {err && <div style={{ padding: "8px 20px", fontSize: 11, color: "var(--red)", background: "rgba(239,68,68,.06)", borderTop: "1px solid rgba(239,68,68,.2)" }}>{err}</div>}
@@ -567,6 +595,7 @@ function ModifyPositionModal({ position, onClose, onModified, token }) {
     purchase_price: String(parseFloat(position.purchase_price)),
     group_tag:      position.group_tag || "",
     stop_loss:      position.stop_loss ? String(parseFloat(position.stop_loss)) : "",
+    profit_taking:  position.profit_taking ? String(parseFloat(position.profit_taking)) : "",
   });
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -576,6 +605,7 @@ function ModifyPositionModal({ position, onClose, onModified, token }) {
     if (!form.quantity || isNaN(+form.quantity) || +form.quantity <= 0) { setErr("Quantity must be a positive number."); return; }
     if (!form.purchase_price || isNaN(+form.purchase_price) || +form.purchase_price <= 0) { setErr("Purchase price must be a positive number."); return; }
     if (form.stop_loss && (isNaN(+form.stop_loss) || +form.stop_loss < 0)) { setErr("Stop loss must be a non-negative number."); return; }
+    if (form.profit_taking && (isNaN(+form.profit_taking) || +form.profit_taking < 0)) { setErr("Profit taking must be a non-negative number."); return; }
     setLoading(true); setErr("");
     try {
       const updated = await api.modifyPosition(position.position_id, {
@@ -583,6 +613,7 @@ function ModifyPositionModal({ position, onClose, onModified, token }) {
         purchase_price: parseFloat(form.purchase_price),
         group_tag:      form.group_tag.trim() || null,
         stop_loss:      form.stop_loss ? parseFloat(form.stop_loss) : null,
+        profit_taking:  form.profit_taking ? parseFloat(form.profit_taking) : null,
       }, token);
       onModified(updated);
     } catch (e) { setErr(e.message || "Failed to modify position."); }
@@ -613,9 +644,16 @@ function ModifyPositionModal({ position, onClose, onModified, token }) {
               <input className="form-control" type="number" min="0" step="any" placeholder="e.g. 145.00" value={form.stop_loss} onChange={e => set("stop_loss", e.target.value)} />
             </div>
             <div className="form-field">
+              <label className="form-label">Profit Taking (optional)</label>
+              <input className="form-control" type="number" min="0" step="any" placeholder="e.g. 200.00" value={form.profit_taking} onChange={e => set("profit_taking", e.target.value)} />
+            </div>
+          </div>
+          <div className="form-row">
+            <div className="form-field">
               <label className="form-label">Group / Tag</label>
               <input className="form-control" placeholder="Core, Speculative..." value={form.group_tag} onChange={e => set("group_tag", e.target.value)} maxLength={64} />
             </div>
+            <div className="form-field" />
           </div>
         </div>
         {err && <div style={{ padding: "8px 20px", fontSize: 11, color: "var(--red)", background: "rgba(239,68,68,.06)", borderTop: "1px solid rgba(239,68,68,.2)" }}>{err}</div>}
@@ -710,6 +748,9 @@ function SortTh({ label, col, sortCol, sortDir, onSort, right }) {
 export function PortfolioManagerPage({ token, onViewChart, onViewNews, pageParams }) {
   /* -- State -------------------------------------------------------------- */
   const { formatValue } = useCurrency();
+  const { t } = useI18n();
+  const { isOpen: marketOpen } = useMarketStatus();
+  const pollRef = useRef(null);
   const [portfolios,         setPortfolios]         = useState([]);
   const [activePortfolioId,  setActivePortfolioId]  = useState(null);
   const [positions,          setPositions]          = useState([]);
@@ -735,6 +776,8 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, pageParam
   const [customSmaPeriod,    setCustomSmaPeriod]    = useState(200);
   const [editingStopLoss,    setEditingStopLoss]    = useState(null); // position_id or null
   const [stopLossInput,      setStopLossInput]      = useState("");
+  const [editingProfitTaking, setEditingProfitTaking] = useState(null); // position_id or null
+  const [profitTakingInput,   setProfitTakingInput]   = useState("");
 
   // Modals
   const [showCreate,    setShowCreate]    = useState(false);
@@ -765,28 +808,32 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, pageParam
     finally { setLoadingPositions(false); }
   }, [token]);
 
-  const loadQuotes = useCallback(async (positionList) => {
+  const loadQuotes = useCallback(async (positionList, { replace = false } = {}) => {
     if (!token || !positionList.length) { setQuotes({}); return; }
     const tickers = [...new Set(positionList.map(p => p.ticker))];
     try {
       const quoteList = await api.bulkQuotes(tickers, token);
-      const map = {};
-      quoteList.forEach(q => { map[q.symbol] = q; });
-      setQuotes(map);
+      const incoming = {};
+      quoteList.forEach(q => { incoming[q.symbol] = q; });
+      // Merge into existing state so intermittent per-symbol failures
+      // during polling don't wipe previously-loaded data.
+      setQuotes(prev => replace ? incoming : { ...prev, ...incoming });
     } catch { /* non-fatal */ }
   }, [token]);
 
-  const loadPriceChanges = useCallback(async (positionList, period) => {
+  const loadPriceChanges = useCallback(async (positionList, period, { replace = false } = {}) => {
     if (!token || !positionList.length) { setPriceChanges({}); return; }
     const tickers = [...new Set(positionList.map(p => p.ticker))];
     const results = await Promise.allSettled(
       tickers.map(sym => api.priceChange(sym, period, token))
     );
-    const map = {};
+    const incoming = {};
     results.forEach((r, i) => {
-      if (r.status === "fulfilled" && r.value) map[tickers[i]] = r.value.change_pct;
+      if (r.status === "fulfilled" && r.value) incoming[tickers[i]] = r.value.change_pct;
     });
-    setPriceChanges(map);
+    // Merge into existing state so intermittent per-symbol failures
+    // during polling don't wipe previously-loaded data.
+    setPriceChanges(prev => replace ? incoming : { ...prev, ...incoming });
   }, [token]);
 
   const loadSmaData = useCallback(async (positionList, customPeriod) => {
@@ -820,19 +867,34 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, pageParam
 
   useEffect(() => {
     if (positions.length) {
-      loadQuotes(positions);
-      loadPriceChanges(positions, changePeriod);
+      loadQuotes(positions, { replace: true });
+      loadPriceChanges(positions, changePeriod, { replace: true });
       loadSmaData(positions, customSmaPeriod);
     }
   }, [positions]); // eslint-disable-line
 
   useEffect(() => {
-    if (positions.length) loadPriceChanges(positions, changePeriod);
+    if (positions.length) loadPriceChanges(positions, changePeriod, { replace: true });
   }, [changePeriod]); // eslint-disable-line
 
   useEffect(() => {
     if (positions.length) loadSmaData(positions, customSmaPeriod);
   }, [customSmaPeriod]); // eslint-disable-line
+
+  /* -- Live price polling ------------------------------------------------- */
+  /* Refreshes quotes and price changes at a market-aware interval:
+     15 seconds during market hours, 5 minutes when closed.
+     SMA data changes infrequently so it is not polled. */
+  useEffect(() => {
+    clearInterval(pollRef.current);
+    if (!positions.length) return;
+    const ms = marketOpen ? 15_000 : 300_000;
+    pollRef.current = setInterval(() => {
+      loadQuotes(positions);
+      loadPriceChanges(positions, changePeriod);
+    }, ms);
+    return () => clearInterval(pollRef.current);
+  }, [positions, changePeriod, marketOpen, loadQuotes, loadPriceChanges]);
 
   /* -- Derived data -------------------------------------------------------- */
   const activePortfolio = useMemo(
@@ -871,6 +933,7 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, pageParam
         case "sma50":         av = smaData[a.ticker]?.[50] ?? -Infinity; bv = smaData[b.ticker]?.[50] ?? -Infinity; break;
         case "smaCustom":     av = smaData[a.ticker]?.[customSmaPeriod] ?? -Infinity; bv = smaData[b.ticker]?.[customSmaPeriod] ?? -Infinity; break;
         case "stoploss":      av = parseFloat(a.stop_loss) || -Infinity; bv = parseFloat(b.stop_loss) || -Infinity; break;
+        case "profittaking":  av = parseFloat(a.profit_taking) || -Infinity; bv = parseFloat(b.profit_taking) || -Infinity; break;
         default:              av = 0; bv = 0;
       }
       if (typeof av === "string") return mul * av.localeCompare(bv);
@@ -884,18 +947,27 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, pageParam
       ? positions
       : positions.filter(p => (p.asset_type || "stock") === activeSection);
     const active = sectionFiltered.filter(p => !p.is_excluded);
-    let totalValue = 0, totalCost = 0;
+    let totalValue = 0, totalCost = 0, periodGL = 0;
     active.forEach(p => {
       const price = quotes[p.ticker]?.price;
       const qty   = parseFloat(p.quantity);
       const bep   = parseFloat(p.purchase_price);
-      if (price != null) totalValue += price * qty;
-      totalCost += bep * qty;
+      // Only include positions that have a loaded price so totalValue and
+      // totalCost stay in sync; prevents huge phantom losses while quotes
+      // are still loading.
+      if (price != null) {
+        totalValue += price * qty;
+        totalCost  += bep * qty;
+      }
+      // Aggregate period gain/loss using per-ticker change percentages
+      const chgPct = priceChanges[p.ticker];
+      if (chgPct != null && price != null) periodGL += price * qty * (chgPct / 100);
     });
     const gainLoss = totalValue - totalCost;
     const gainPct  = totalCost > 0 ? (gainLoss / totalCost) * 100 : 0;
-    return { totalValue, totalCost, gainLoss, gainPct, count: active.length };
-  }, [positions, quotes, activeSection]);
+    const periodPct = totalValue > 0 ? (periodGL / totalValue) * 100 : 0;
+    return { totalValue, totalCost, gainLoss, gainPct, count: active.length, periodGL, periodPct };
+  }, [positions, quotes, activeSection, priceChanges]);
 
   /* -- Sorting ------------------------------------------------------------ */
   const handleSort = (col) => {
@@ -942,6 +1014,22 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, pageParam
   };
 
   /**
+   * handleSaveProfitTaking — inline edit handler for the profit-taking cell.
+   * Sends a PATCH to update the position's profit_taking target price.
+   * An empty value clears the target (sends 0 which the backend maps to null).
+   */
+  const handleSaveProfitTaking = async (pos) => {
+    const val = profitTakingInput.trim();
+    const numVal = val === "" ? 0 : parseFloat(val);
+    if (val !== "" && (isNaN(numVal) || numVal < 0)) { setGlobalErr("Profit taking must be a positive number or empty."); return; }
+    try {
+      const updated = await api.modifyPosition(pos.position_id, { profit_taking: numVal || 0 }, token);
+      setPositions(prev => prev.map(p => p.position_id === pos.position_id ? updated : p));
+      setEditingProfitTaking(null);
+    } catch (e) { setGlobalErr(e.message || "Failed to update profit taking."); }
+  };
+
+  /**
    * handleExportCSV — generates a CSV from current positions + live quotes
    * and triggers a browser download.
    *
@@ -952,7 +1040,7 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, pageParam
    * quotes map for live pricing. No backend call required.
    */
   const handleExportCSV = () => {
-    const header = ["Name","Ticker","Type","Date","Qty","BEP","Price","Value","Gain/Loss","Gain%","Stop Loss","Group"];
+    const header = ["Name","Ticker","Type","Date","Qty","BEP","Price","Value","Gain/Loss","Gain%","Stop Loss","Profit Taking","Group"];
     const rows = sortedPositions.map(pos => {
       const q = quotes[pos.ticker];
       const price = q?.price;
@@ -976,6 +1064,7 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, pageParam
         gainLoss != null ? gainLoss.toFixed(2) : "",
         gainPct != null ? gainPct.toFixed(2) + "%" : "",
         pos.stop_loss ? parseFloat(pos.stop_loss).toFixed(2) : "",
+        pos.profit_taking ? parseFloat(pos.profit_taking).toFixed(2) : "",
         pos.group_tag || "",
       ];
     });
@@ -1125,6 +1214,7 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, pageParam
               { lbl: "TOTAL COST",      val: formatValue(summary.totalCost),   cls: "" },
               { lbl: "GAIN / LOSS",     val: formatValue(summary.gainLoss, { showSign: true }),    cls: summary.gainLoss >= 0 ? "green" : "red" },
               { lbl: "RETURN",          val: fmtPct(summary.gainPct),     cls: summary.gainPct >= 0 ? "green" : "red" },
+              { lbl: `${changePeriod} G/L`, val: <>{formatValue(summary.periodGL, { showSign: true })} <span style={{ fontSize: 10, opacity: .75 }}>({fmtPct(summary.periodPct)})</span></>, cls: summary.periodGL >= 0 ? "green" : "red" },
               { lbl: "ACTIVE POS.",     val: summary.count,               cls: "" },
             ].map((s, i) => (
               <div key={i} className="stat-block">
@@ -1198,6 +1288,8 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, pageParam
                       />
                     </th>
                     <SortTh label="STOP LOSS" col="stoploss"    sortCol={sortCol} sortDir={sortDir} onSort={handleSort} right />
+                    <SortTh label="PROFIT TAKING" col="profittaking" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} right />
+                    <th className="right" title="Allocation % relative to current view">ALLOC %</th>
                     <th className="right" onClick={() => handleSort("change")}
                       style={{ whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }}>
                       CHG
@@ -1311,6 +1403,39 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, pageParam
                               {pos.stop_loss ? formatValue(parseFloat(pos.stop_loss)) : <span style={{ color: "var(--c-muted)" }}>{"\u2014"}</span>}
                             </span>
                           )}
+                        </td>
+
+                        {/* Profit Taking — inline editable like Stop Loss */}
+                        <td className="right" style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                          {editingProfitTaking === pos.position_id ? (
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                              <input
+                                type="number" min="0" step="any"
+                                value={profitTakingInput}
+                                onChange={e => setProfitTakingInput(e.target.value)}
+                                onKeyDown={e => { if (e.key === "Enter") handleSaveProfitTaking(pos); if (e.key === "Escape") setEditingProfitTaking(null); }}
+                                autoFocus
+                                style={{ width: 72, background: "var(--c-surface)", border: "1px solid var(--c-border)", color: "var(--c-text)", fontFamily: "var(--font-mono)", fontSize: 11, borderRadius: 2, padding: "2px 4px", textAlign: "right" }}
+                              />
+                              <button onClick={() => handleSaveProfitTaking(pos)} style={{ background: "none", border: "none", color: "var(--green)", cursor: "pointer", padding: 0, fontSize: 14, lineHeight: 1 }} title="Save">{"\u2713"}</button>
+                              <button onClick={() => setEditingProfitTaking(null)} style={{ background: "none", border: "none", color: "var(--red)", cursor: "pointer", padding: 0, fontSize: 14, lineHeight: 1 }} title="Cancel">{"\u2717"}</button>
+                            </span>
+                          ) : (
+                            <span
+                              onClick={() => { setEditingProfitTaking(pos.position_id); setProfitTakingInput(pos.profit_taking ? String(parseFloat(pos.profit_taking)) : ""); }}
+                              style={{ cursor: "pointer", color: pos.profit_taking && price != null && price >= parseFloat(pos.profit_taking) ? "var(--green)" : undefined, fontWeight: pos.profit_taking && price != null && price >= parseFloat(pos.profit_taking) ? 700 : undefined }}
+                              title="Click to edit profit taking target"
+                            >
+                              {pos.profit_taking ? formatValue(parseFloat(pos.profit_taking)) : <span style={{ color: "var(--c-muted)" }}>{"\u2014"}</span>}
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Allocation % — position value as percentage of section total */}
+                        <td className="right" style={{ fontVariantNumeric: "tabular-nums", fontSize: 11 }}>
+                          {value != null && summary.totalValue > 0 && !excluded
+                            ? fmtPct((value / summary.totalValue) * 100)
+                            : <span style={{ color: "var(--c-muted)" }}>{"\u2014"}</span>}
                         </td>
 
                         <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>

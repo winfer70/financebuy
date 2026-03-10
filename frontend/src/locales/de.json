@@ -76,7 +76,35 @@
     "crypto": "KRYPTO",
     "etfs": "ETFs",
     "physical": "PHYSISCH",
-    "sectionTotal": "BEREICHSSUMME"
+    "sectionTotal": "BEREICHSSUMME",
+    "name": "NAME",
+    "date": "DATUM",
+    "profitTaking": "GEWINNMITNAHME",
+    "excluded": "AUSSCHL",
+    "sma": "SMA",
+    "group": "GRUPPE",
+    "allocation": "ANT. %",
+    "periodGainLoss": "PERIODEN-G/V",
+    "totalValue": "GESAMTWERT",
+    "totalCost": "GESAMTKOSTEN",
+    "totalGainLoss": "GESAMT-G/V",
+    "positions": "POSITIONEN",
+    "analystsTarget": "ANALYSTEN-ZIELE",
+    "targetMean": "MITTEL",
+    "targetHigh": "HOCH",
+    "targetLow": "TIEF",
+    "noTargets": "Keine Analysten-Ziele verfügbar",
+    "setTarget": "Zielkurs festlegen",
+    "portfolioName": "Portfolio-Name",
+    "strategy": "Strategie (optional)",
+    "creating": "ERSTELLE...",
+    "create": "ERSTELLEN",
+    "confirmDelete": "Dieses Portfolio und alle Positionen löschen?",
+    "sellQty": "Verkaufsmenge",
+    "selling": "VERKAUFE...",
+    "importing": "IMPORTIERE...",
+    "noPositions": "Keine Positionen in diesem Portfolio",
+    "addFirst": "Fügen Sie Ihre erste Position hinzu"
   },
   "charts": {
     "title": "CHARTS",
@@ -124,6 +152,12 @@
     "pitchfork": "HEUGABEL",
     "text": "TEXT",
     "arrow": "PFEIL",
+    "ruler": "LINEAL",
+    "rulerTooltip": "Klicken für Start, bewegen zum Messen, erneut klicken zum Fixieren",
+    "events": "EREIGNISSE",
+    "earnings": "QUARTALSBERICHT",
+    "dividend": "DIVIDENDE",
+    "split": "SPLIT",
     "loading": "LADEN...",
     "nyseOpen": "NYSE GEÖFFNET",
     "closedOpensIn": "GESCHLOSSEN · ÖFFNET IN"
@@ -134,6 +168,7 @@
     "bullish": "BULLISCH",
     "bearish": "BÄRISCH",
     "portfolioOnly": "PORTFOLIO",
+    "watchlistOnly": "WATCHLIST",
     "search": "Ticker suchen...",
     "noArticles": "Keine Artikel gefunden",
     "viewChart": "CHART ANZEIGEN",
@@ -300,9 +335,11 @@
     "submitError": "Bericht konnte nicht gesendet werden. Bitte versuchen Sie es erneut."
   },
   "footer": {
-    "disclaimer": "Finanzieller Haftungsausschluss",
-    "privacy": "Datenschutzrichtlinie",
-    "terms": "Nutzungsbedingungen",
-    "guide": "Benutzerhandbuch"
+    "disclaimer": "Haftungsausschluss",
+    "privacy": "Datenschutz",
+    "terms": "AGB",
+    "guide": "Benutzerhandbuch",
+    "allRights": "Alle Rechte vorbehalten.",
+    "dataAttribution": "Marktdaten bereitgestellt von Yahoo Finance."
   }
 }

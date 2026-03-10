@@ -76,7 +76,35 @@
     "crypto": "加密货币",
     "etfs": "ETF基金",
     "physical": "实物资产",
-    "sectionTotal": "分类小计"
+    "sectionTotal": "分类小计",
+    "name": "名称",
+    "date": "日期",
+    "profitTaking": "止盈价",
+    "excluded": "排除",
+    "sma": "均线",
+    "group": "分组",
+    "allocation": "占比 %",
+    "periodGainLoss": "期间盈亏",
+    "totalValue": "总市值",
+    "totalCost": "总成本",
+    "totalGainLoss": "总盈亏",
+    "positions": "持仓",
+    "analystsTarget": "分析师目标",
+    "targetMean": "均值",
+    "targetHigh": "最高",
+    "targetLow": "最低",
+    "noTargets": "暂无分析师目标",
+    "setTarget": "设置目标价",
+    "portfolioName": "投资组合名称",
+    "strategy": "策略（选填）",
+    "creating": "创建中...",
+    "create": "创建",
+    "confirmDelete": "删除此投资组合及所有持仓？",
+    "sellQty": "卖出数量",
+    "selling": "卖出中...",
+    "importing": "导入中...",
+    "noPositions": "该投资组合暂无持仓",
+    "addFirst": "添加您的第一个持仓"
   },
   "charts": {
     "title": "图表",
@@ -124,6 +152,12 @@
     "pitchfork": "安德鲁叉",
     "text": "文本",
     "arrow": "箭头",
+    "ruler": "量尺",
+    "rulerTooltip": "点击设定起点，移动以测量，再次点击以固定",
+    "events": "事件",
+    "earnings": "财报",
+    "dividend": "分红",
+    "split": "拆股",
     "loading": "加载中...",
     "nyseOpen": "纽交所开盘",
     "closedOpensIn": "已收盘 · 开盘倒计时"
@@ -134,6 +168,7 @@
     "bullish": "看涨",
     "bearish": "看跌",
     "portfolioOnly": "持仓相关",
+    "watchlistOnly": "自选相关",
     "search": "搜索代码...",
     "noArticles": "未找到相关文章",
     "viewChart": "查看图表",
@@ -300,9 +335,11 @@
     "submitError": "提交失败，请重试。"
   },
   "footer": {
-    "disclaimer": "金融免责声明",
-    "privacy": "隐私政策",
-    "terms": "服务条款",
-    "guide": "用户指南"
+    "disclaimer": "免责声明",
+    "privacy": "隐私",
+    "terms": "条款",
+    "guide": "用户指南",
+    "allRights": "版权所有。",
+    "dataAttribution": "市场数据由Yahoo Finance提供。"
   }
 }

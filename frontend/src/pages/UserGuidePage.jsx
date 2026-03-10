@@ -54,6 +54,10 @@ const FEATURES = [
       "Pre-configured metals futures: Gold (GC=F), Silver (SI=F), Platinum (PL=F), Palladium (PA=F), Copper (HG=F)",
       "CHG column shows dollar amount with percentage: $123.45 (+1.23%)",
       "All monetary values respect your display currency preference",
+      "Profit Taking column with inline-editable target price — highlights green when price reaches target, pairs with Stop Loss for bracket management",
+      "Allocation % column showing each position's weight as a percentage of total portfolio value",
+      "Period Gain/Loss in the summary strip — shows portfolio-level gain/loss for the selected change period (1D through 1Y)",
+      "Analyst price targets displayed when modifying a position — shows mean, high, and low consensus targets from market analysts",
     ],
   },
   {
@@ -74,6 +78,8 @@ const FEATURES = [
       "Chart template save/load system — save drawings and overlay settings as named templates",
       "Purchase point indicators showing where you bought positions — uses nearest-bar matching for accurate placement across all intervals",
       "Mouse wheel zoom and click-drag pan across the time axis",
+      "Ruler measurement tool — click two points to measure price difference and percentage change between them",
+      "Event indicators overlay showing earnings dates (E), dividend dates (D), and stock splits (S) as colour-coded markers at the bottom of the chart",
     ],
   },
   {
@@ -90,6 +96,7 @@ const FEATURES = [
       "Ticker search with instant filtering",
       "Staleness indicator when newest article is older than 30 minutes",
       "Portfolio-relevant articles are automatically sorted to the top",
+      "Watchlist toggle to filter articles by tickers in your watchlists — mutually exclusive with portfolio filter",
       "Server-side filtering and pagination — portfolio, sentiment, and search filters applied before pagination for consistent page sizes (25, 50, 75, or 100 articles per page) with PREV/NEXT navigation",
     ],
   },
@@ -311,6 +318,26 @@ const FAQ_ITEMS = [
   {
     q: "Why do I need to verify my email?",
     a: "Email verification is required for security. After registration, check your inbox for a verification link before signing in.",
+  },
+  {
+    q: "What is the Profit Taking column?",
+    a: "Profit Taking lets you set a target exit price for a position. When the current price meets or exceeds the target, the cell highlights green. You can set it when adding a position or click the pencil icon inline to edit it. It pairs with Stop Loss for complete bracket management.",
+  },
+  {
+    q: "What does Allocation % show in Portfolio Manager?",
+    a: "The ALLOC % column shows each position's weight as a percentage of the total portfolio value. It updates in real-time as prices change and helps you monitor concentration risk across your holdings.",
+  },
+  {
+    q: "How do I use the ruler tool on charts?",
+    a: "Select the ruler from the drawing tools panel. Click on the chart to set the start point, then move your mouse and click again to lock the endpoint. The ruler displays the price difference and percentage change between the two points with a colour-coded label (green for gain, red for loss).",
+  },
+  {
+    q: "What are event indicators on charts?",
+    a: "When the EVENTS overlay is enabled, charts display colour-coded markers at the bottom: 'E' (purple) for earnings dates, 'D' (blue) for dividend ex-dates, and 'S' (yellow) for stock splits. Hovering over a bar with events shows badges in the tooltip with event details.",
+  },
+  {
+    q: "Can I filter news by my watchlist?",
+    a: "Yes — click the WATCHLIST toggle button on the News page to show only articles related to tickers in your watchlists. This is mutually exclusive with the PORTFOLIO filter, so activating one deactivates the other.",
   },
 ];
 
