@@ -46,5 +46,12 @@ echo "Running database migrations..."
 alembic -c /app/alembic.ini upgrade head
 
 # ── Start the application ────────────────────────────────────────────────────
-echo "Starting application..."
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+# If docker-compose passes a custom command (e.g. arq worker), use that;
+# otherwise fall back to the default Uvicorn server.
+if [ $# -gt 0 ]; then
+  echo "Starting custom command: $@"
+  exec "$@"
+else
+  echo "Starting application..."
+  exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+fi
