@@ -29,6 +29,10 @@ import { Sparkline, PortfolioChart, AllocationDonut, Heatmap } from "../componen
 import { useCurrency } from "../context/CurrencyContext";
 import { useI18n } from "../context/I18nContext";
 import { useQuotes } from "../context/QuotesContext";
+import PeriodSelector from "../components/common/PeriodSelector";
+import FilterBar from "../components/common/FilterBar";
+import useContextPopup from "../hooks/useContextPopup";
+import ContextPopup from "../components/common/ContextPopup";
 
 /* -- Category filter IDs for Top Positions panel (labels resolved via t()) -- */
 
@@ -212,7 +216,7 @@ export function DashboardPage({ onNewTx, token, setPage, onViewChart }) {
   const dayChg = holdings.reduce((s, h) => s + h.chg * h.quantity, 0);
 
   /* ── Heatmap click popup state ───────────────────────────────────────── */
-  const [heatmapPopup, setHeatmapPopup] = useState(null);
+  const heatmapCtx = useContextPopup();
 
   /**
    * handleHeatmapClick — opens a context popup on a heatmap tile click.
@@ -222,17 +226,8 @@ export function DashboardPage({ onNewTx, token, setPage, onViewChart }) {
    * @param {MouseEvent} e  - click event for positioning
    */
   const handleHeatmapClick = useCallback((symbol, e) => {
-    e.stopPropagation();
-    setHeatmapPopup({ symbol, x: e.clientX, y: e.clientY });
-  }, []);
-
-  /* Dismiss popup on outside click */
-  useEffect(() => {
-    if (!heatmapPopup) return;
-    const dismiss = () => setHeatmapPopup(null);
-    document.addEventListener("click", dismiss);
-    return () => document.removeEventListener("click", dismiss);
-  }, [heatmapPopup]);
+    heatmapCtx.open({ symbol }, e);
+  }, [heatmapCtx]);
 
   const hasPortfolios = portfolios.length > 0;
   const activePortfolioName = portfolios.find(p => p.portfolio_id === activePortfolioId)?.name || "";
@@ -371,16 +366,11 @@ export function DashboardPage({ onNewTx, token, setPage, onViewChart }) {
             <div className="panel">
               <div className="panel-header">
                 <span className="panel-title">{t("dashboard.perfChart")} · {chartPeriod}</span>
-                <div style={{ display: "flex", gap: 1 }}>
-                  {["1W", "1M", "3M", "YTD", "1Y", "ALL"].map(p => (
-                    <button
-                      key={p}
-                      className={`filter-btn${p === chartPeriod ? " active" : ""}`}
-                      style={{ padding: "4px 10px", fontSize: 9 }}
-                      onClick={() => setChartPeriod(p)}
-                    >{p}</button>
-                  ))}
-                </div>
+                <PeriodSelector
+                  periods={["1W", "1M", "3M", "YTD", "1Y", "ALL"]}
+                  value={chartPeriod}
+                  onChange={setChartPeriod}
+                />
               </div>
               <div className="panel-body" style={{ paddingBottom: 8 }}>
                 <PortfolioChart key={activePortfolioId + chartPeriod} height={160} data={perfData} period={chartPeriod} currencySymbol={currencySymbol} />
@@ -401,16 +391,12 @@ export function DashboardPage({ onNewTx, token, setPage, onViewChart }) {
                       </span>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <div style={{ display: "flex", gap: 1 }}>
-                        {POSITION_CATEGORIES.map(c => (
-                          <button
-                            key={c.id}
-                            className={`filter-btn${c.id === positionCategory ? " active" : ""}`}
-                            style={{ padding: "4px 10px", fontSize: 9 }}
-                            onClick={() => setPositionCategory(c.id)}
-                          >{c.label}</button>
-                        ))}
-                      </div>
+                      <FilterBar
+                        items={POSITION_CATEGORIES}
+                        value={positionCategory}
+                        onChange={setPositionCategory}
+                        style={{ padding: "4px 10px", fontSize: 9 }}
+                      />
                       <button
                         className="btn btn-ghost"
                         style={{ fontSize: 9, padding: "3px 10px" }}
@@ -478,16 +464,12 @@ export function DashboardPage({ onNewTx, token, setPage, onViewChart }) {
                       </span>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <div style={{ display: "flex", gap: 1 }}>
-                        {POSITION_CATEGORIES.map(c => (
-                          <button
-                            key={c.id}
-                            className={`filter-btn${c.id === loserCategory ? " active" : ""}`}
-                            style={{ padding: "4px 10px", fontSize: 9 }}
-                            onClick={() => setLoserCategory(c.id)}
-                          >{c.label}</button>
-                        ))}
-                      </div>
+                      <FilterBar
+                        items={POSITION_CATEGORIES}
+                        value={loserCategory}
+                        onChange={setLoserCategory}
+                        style={{ padding: "4px 10px", fontSize: 9 }}
+                      />
                       <button
                         className="btn btn-ghost"
                         style={{ fontSize: 9, padding: "3px 10px" }}
@@ -561,33 +543,18 @@ export function DashboardPage({ onNewTx, token, setPage, onViewChart }) {
       )}
 
       {/* ── Heatmap click popup ────────────────────────────────────────── */}
-      {heatmapPopup && (
-        <div
-          onClick={e => e.stopPropagation()}
-          style={{
-            position: "fixed", left: heatmapPopup.x, top: heatmapPopup.y,
-            background: "var(--panel)", border: "1px solid var(--border)",
-            borderRadius: 3, padding: "8px 0", zIndex: 1000, minWidth: 140,
-            boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
-            fontFamily: "var(--font-mono)", fontSize: 11,
-          }}
-        >
-          <div style={{ padding: "4px 14px 6px", color: "var(--bright)", fontWeight: 600, letterSpacing: "0.5px", borderBottom: "1px solid var(--border)" }}>
-            {heatmapPopup.symbol}
-          </div>
-          <button
-            onClick={() => { onViewChart && onViewChart(heatmapPopup.symbol); setHeatmapPopup(null); }}
-            style={{
-              display: "block", width: "100%", padding: "7px 14px", background: "none",
-              border: "none", color: "var(--amber)", cursor: "pointer", textAlign: "left",
-              fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: "0.5px",
-            }}
-            onMouseOver={e => e.currentTarget.style.background = "var(--bg3)"}
-            onMouseOut={e => e.currentTarget.style.background = "none"}
-          >
-            {t("dashboard.viewChart")} →
-          </button>
-        </div>
+      {heatmapCtx.popup && (
+        <ContextPopup
+          x={heatmapCtx.popup.x}
+          y={heatmapCtx.popup.y}
+          title={heatmapCtx.popup.symbol}
+          actions={[
+            {
+              label: `${t("dashboard.viewChart")} →`,
+              onClick: () => { onViewChart && onViewChart(heatmapCtx.popup.symbol); heatmapCtx.close(); },
+            },
+          ]}
+        />
       )}
     </div>
   );

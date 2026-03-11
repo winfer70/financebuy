@@ -31,7 +31,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from .auth import validate_jwt_config
 from .limiter import limiter
-from .routes import accounts, admin, auth_routes, chart_templates, feedback, guide, holdings, market, news, orders, portfolio, portfolio_manager, reports, transactions, watchlists
+from .routes import accounts, admin, auth_routes, chart_templates, feedback, guide, holdings, market, news, orders, portfolio, portfolio_manager, reports, transactions, trading, watchlists
 from .routes.news import register_retention_task
 from .routes.feedback import register_outcome_checker
 from .routes.auth_routes import register_deletion_purge
@@ -60,6 +60,51 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 # ── Startup validation ───────────────────────────────────────────────────────
+
+async def _seed_system_strategies():
+    """Insert system strategy templates if the strategies table is empty.
+
+    Reads templates from trading/templates.py and inserts them as
+    ``is_system=True`` rows.  Skips if any system strategies already exist
+    to avoid duplicates on subsequent restarts.
+    """
+    import uuid
+    from .db import AsyncSessionLocal
+    from .models import Strategy
+    from .trading.templates import TEMPLATES
+    from sqlalchemy import select, func
+
+    async with AsyncSessionLocal() as session:
+        # Check if system strategies already exist
+        count_stmt = select(func.count(Strategy.strategy_id)).where(
+            Strategy.is_system == True  # noqa: E712
+        )
+        count = (await session.execute(count_stmt)).scalar() or 0
+        if count > 0:
+            logger.info("System strategies already seeded (%d found). Skipping.", count)
+            return
+
+        # Insert each template
+        for tmpl in TEMPLATES:
+            strategy = Strategy(
+                strategy_id=uuid.uuid4(),
+                user_id=None,
+                name=tmpl["name"],
+                description=tmpl["description"],
+                strategy_type=tmpl["strategy_type"],
+                category=tmpl.get("category"),
+                timeframe=tmpl.get("timeframe"),
+                asset_class=tmpl.get("asset_class"),
+                definition_json=tmpl["definition_json"],
+                is_public=True,
+                is_system=True,
+            )
+            session.add(strategy)
+
+        await session.commit()
+        logger.info("Seeded %d system strategies from templates.", len(TEMPLATES))
+
+
 @app.on_event("startup")
 async def _startup_checks():
     """Validate critical configuration on startup.
@@ -92,6 +137,9 @@ async def _startup_checks():
             "the internal news ingestion endpoint is effectively unprotected. "
             "Generate a strong key with: openssl rand -hex 32"
         )
+
+    # Seed system strategies from templates on first run
+    await _seed_system_strategies()
 
 
 # ── Middleware stack (registered last → executes first) ──────────────────────
@@ -236,6 +284,7 @@ app.include_router(feedback.router, prefix=_V1)
 app.include_router(guide.router, prefix=_V1)
 app.include_router(reports.router, prefix=_V1)
 app.include_router(watchlists.router, prefix=_V1)
+app.include_router(trading.router, prefix=_V1)
 
 # Register the 30-day news retention cleanup background task (Phase 9).
 register_retention_task(app)

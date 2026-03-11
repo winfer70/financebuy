@@ -26,6 +26,7 @@ import { GLOBAL_CSS } from "./styles/globals";
 
 /* ── Common components ────────────────────────────────────────────────────── */
 import { Ic } from "./components/common/Icons";
+import { NotificationBell } from "./components/common/NotificationBell";
 import {
   ToastContainer,
   Clock,
@@ -59,6 +60,7 @@ import { LegalPage }              from "./pages/LegalPage";
 import { UserGuidePage }          from "./pages/UserGuidePage";
 import { SettingsPage }           from "./pages/SettingsPage";
 import { FeedbackPage }             from "./pages/FeedbackPage";
+import { TradingPage }              from "./pages/TradingPage";
 
 /* ── API ─────────────────────────────────────────────────────────────────── */
 import api from "./api/client";
@@ -155,6 +157,7 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
     { id: "news",             label: t("nav.news"),         Icon: Ic.news         },
     { id: "watchlist",         label: t("nav.watchlist"),    Icon: Ic.watchlist    },
     { id: "portfolio-manager",label: t("nav.portfolio"),    Icon: Ic.portfolio    },
+    { id: "trading",          label: "TRADING AI",           Icon: Ic.trading      },
     { id: "feedback",          label: t("nav.feedback"),     Icon: Ic.feedback     },
   ];
 
@@ -278,6 +281,7 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
                 ? t("topbar.nyseOpen")
                 : `${t("topbar.closed")} · ${t("topbar.opensIn")} ${marketStatus.countdown}`}
             </div>
+            <NotificationBell token={authToken} />
             <Clock />
           </div>
         </div>
@@ -342,6 +346,12 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
             onViewChart={navigateToChart}
             onViewNews={navigateToNews}
             pageParams={pageParams}
+          />
+        )}
+        {page === "trading" && (
+          <TradingPage
+            token={authToken}
+            onViewChart={navigateToChart}
           />
         )}
         {page.startsWith("legal") && (
@@ -412,7 +422,7 @@ export default function App() {
     /* Derive initial page from URL pathname when no special query params */
     const KNOWN_PAGES = new Set([
       "dashboard", "transactions", "orders", "charts", "news", "watchlist",
-      "portfolio-manager", "feedback", "import", "settings", "guide",
+      "portfolio-manager", "trading", "feedback", "import", "settings", "guide",
       "legal", "legal-privacy", "legal-terms", "legal-disclaimer",
       "login", "register", "forgot-password", "reset-password",
       "verify-email", "token-action", "deactivated",

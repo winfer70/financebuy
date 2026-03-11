@@ -8,6 +8,7 @@ import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import api, { useApi } from "../api/client";
 import { Ic } from "../components/common/Icons";
 import { SkeletonRow, ApiError } from "../components/common";
+import FilterBar from "../components/common/FilterBar";
 import { ORDERS } from "../styles/globals";
 
 export function OrdersPage({ onNewTx, token, accountId, goBack }) {
@@ -67,13 +68,16 @@ export function OrdersPage({ onNewTx, token, accountId, goBack }) {
       <div className="page-inner stagger">
         {/* Filter */}
         <div style={{display:"flex",gap:12,alignItems:"center"}}>
-          <div className="filter-bar">
-            {["all","pending","filled","cancelled"].map(f=>(
-              <button key={f} className={`filter-btn${statusFilter===f?" active":""}`} onClick={()=>setStatusFilter(f)}>
-                {f === "pending" ? "OPEN" : f.toUpperCase()}
-              </button>
-            ))}
-          </div>
+          <FilterBar
+            items={[
+              { id: "all", label: "ALL" },
+              { id: "pending", label: "OPEN" },
+              { id: "filled", label: "FILLED" },
+              { id: "cancelled", label: "CANCELLED" },
+            ]}
+            value={statusFilter}
+            onChange={setStatusFilter}
+          />
         </div>
 
         {/* Orders table */}

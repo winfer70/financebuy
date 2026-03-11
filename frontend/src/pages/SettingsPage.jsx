@@ -209,6 +209,15 @@ export function SettingsPage({ token, goBack, onLogout }) {
   const [deleteErr, setDeleteErr]       = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState("");  /* must type "DELETE" for permanent */
 
+  /* Webhooks */
+  const [webhooks, setWebhooks]            = useState([]);
+  const [webhooksLoading, setWebhooksLoading] = useState(true);
+  const [showAddWebhook, setShowAddWebhook]   = useState(false);
+  const [newWebhookUrl, setNewWebhookUrl]     = useState("");
+  const [newWebhookEvents, setNewWebhookEvents] = useState([]);
+  const [webhookSaving, setWebhookSaving]     = useState(false);
+  const [webhookErr, setWebhookErr]           = useState(null);
+
   /* ── Load profile on mount ─────────────────────────────────────────────── */
   useEffect(() => {
     if (!token) return;
@@ -375,6 +384,64 @@ export function SettingsPage({ token, goBack, onLogout }) {
     }
   }, [deletePwd, deleteMode, deleteConfirm, deleting, token, onLogout]);
 
+  /* ── Webhook management ─────────────────────────────────────────────── */
+  /** Available webhook event types for the checkbox selector. */
+  const WEBHOOK_EVENT_TYPES = [
+    "signal_entry", "signal_exit", "backtest_complete",
+    "strategy_decay", "stop_loss_triggered",
+  ];
+
+  /** fetchWebhooks — load all webhooks for the current user. */
+  const fetchWebhooks = useCallback(async () => {
+    if (!token) return;
+    try {
+      const data = await api.listWebhooks(token);
+      setWebhooks(data || []);
+    } catch { /* silent */ }
+    finally { setWebhooksLoading(false); }
+  }, [token]);
+
+  useEffect(() => { fetchWebhooks(); }, [fetchWebhooks]);
+
+  /** handleAddWebhook — create a new webhook endpoint. */
+  const handleAddWebhook = useCallback(async () => {
+    if (webhookSaving || !newWebhookUrl.trim()) return;
+    setWebhookSaving(true);
+    setWebhookErr(null);
+    try {
+      await api.createWebhook(
+        { url: newWebhookUrl.trim(), events: newWebhookEvents },
+        token,
+      );
+      setNewWebhookUrl("");
+      setNewWebhookEvents([]);
+      setShowAddWebhook(false);
+      await fetchWebhooks();
+    } catch (err) {
+      setWebhookErr(err.message || "Failed to add webhook.");
+    } finally {
+      setWebhookSaving(false);
+    }
+  }, [newWebhookUrl, newWebhookEvents, webhookSaving, token, fetchWebhooks]);
+
+  /** handleDeleteWebhook — delete a webhook by ID. */
+  const handleDeleteWebhook = useCallback(async (whId) => {
+    try {
+      await api.deleteWebhook(whId, token);
+      setWebhooks(prev => prev.filter(w => w.webhook_id !== whId));
+    } catch { /* silent */ }
+  }, [token]);
+
+  /** handleToggleWebhook — toggle a webhook's active state. */
+  const handleToggleWebhook = useCallback(async (wh) => {
+    try {
+      await api.updateWebhook(wh.webhook_id, { is_active: !wh.is_active }, token);
+      setWebhooks(prev =>
+        prev.map(w => w.webhook_id === wh.webhook_id ? { ...w, is_active: !w.is_active } : w)
+      );
+    } catch { /* silent */ }
+  }, [token]);
+
   /* ── Loading / Error states ────────────────────────────────────────────── */
   if (loading) {
     return (
@@ -512,6 +579,149 @@ export function SettingsPage({ token, goBack, onLogout }) {
             </span>
           )}
         </div>
+      </div>
+
+      {/* ── Webhooks Section ──────────────────────────────────────────── */}
+      <div style={S.section}>
+        <div style={S.sectionTitle}>WEBHOOKS</div>
+
+        {webhooksLoading ? (
+          <div style={{ color: "var(--muted)", fontSize: 11 }}>Loading…</div>
+        ) : (
+          <>
+            {/* Existing webhooks list */}
+            {webhooks.length === 0 && !showAddWebhook && (
+              <div style={{ color: "var(--muted)", fontSize: 11, marginBottom: 12 }}>
+                No webhooks configured. Add one to receive real-time JSON event notifications.
+              </div>
+            )}
+
+            {webhooks.map((wh) => (
+              <div key={wh.webhook_id} style={{
+                ...S.row,
+                flexDirection: "column",
+                alignItems: "stretch",
+                gap: 6,
+                padding: "10px 0",
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ fontSize: 11, color: "var(--bright)", wordBreak: "break-all", flex: 1 }}>
+                    {wh.url}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginLeft: 12 }}>
+                    <button
+                      style={{
+                        ...S.backBtn,
+                        fontSize: 9,
+                        color: wh.is_active ? "var(--green)" : "var(--muted)",
+                      }}
+                      onClick={() => handleToggleWebhook(wh)}
+                      title={wh.is_active ? "Disable" : "Enable"}
+                    >
+                      {wh.is_active ? "ON" : "OFF"}
+                    </button>
+                    <button
+                      style={{ ...S.backBtn, fontSize: 9, color: "var(--red)" }}
+                      onClick={() => handleDeleteWebhook(wh.webhook_id)}
+                      title="Delete webhook"
+                    >
+                      <Ic.close />
+                    </button>
+                  </div>
+                </div>
+                <div style={{ fontSize: 9, color: "var(--muted)" }}>
+                  Events: {(wh.events || []).join(", ") || "none"}
+                </div>
+              </div>
+            ))}
+
+            {/* Add webhook form */}
+            {showAddWebhook ? (
+              <div style={{
+                background: "var(--bg3)",
+                border: "1px solid var(--border)",
+                borderRadius: 4,
+                padding: 12,
+                marginTop: 8,
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+              }}>
+                <input
+                  className="form-control"
+                  placeholder="https://your-server.com/webhook"
+                  value={newWebhookUrl}
+                  onChange={(e) => setNewWebhookUrl(e.target.value)}
+                  style={{ fontSize: 11 }}
+                />
+                <div style={{ fontSize: 9, color: "var(--muted)", letterSpacing: 1 }}>
+                  SUBSCRIBE TO EVENTS:
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {WEBHOOK_EVENT_TYPES.map((evt) => (
+                    <label key={evt} style={{
+                      display: "flex", alignItems: "center", gap: 4,
+                      fontSize: 10, color: "var(--bright)", cursor: "pointer",
+                    }}>
+                      <input
+                        type="checkbox"
+                        checked={newWebhookEvents.includes(evt)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setNewWebhookEvents(prev => [...prev, evt]);
+                          } else {
+                            setNewWebhookEvents(prev => prev.filter(x => x !== evt));
+                          }
+                        }}
+                      />
+                      {evt.replace(/_/g, " ")}
+                    </label>
+                  ))}
+                </div>
+                {webhookErr && (
+                  <div style={{ fontSize: 10, color: "var(--red)" }}>{webhookErr}</div>
+                )}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() => { setShowAddWebhook(false); setNewWebhookUrl(""); setNewWebhookEvents([]); setWebhookErr(null); }}
+                    style={{ fontSize: 10, padding: "5px 12px" }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    style={{
+                      ...S.saveBtn,
+                      marginTop: 0,
+                      fontSize: 10,
+                      padding: "5px 14px",
+                      ...(!newWebhookUrl.trim() || webhookSaving ? S.saveBtnDisabled : {}),
+                    }}
+                    onClick={handleAddWebhook}
+                    disabled={!newWebhookUrl.trim() || webhookSaving}
+                  >
+                    {webhookSaving ? "SAVING..." : "ADD WEBHOOK"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                className="btn btn-outline"
+                onClick={() => setShowAddWebhook(true)}
+                style={{ fontSize: 10, padding: "6px 14px", marginTop: 8 }}
+                disabled={webhooks.length >= 5}
+              >
+                + ADD WEBHOOK
+              </button>
+            )}
+
+            {webhooks.length >= 5 && (
+              <div style={{ fontSize: 9, color: "var(--muted)", marginTop: 6 }}>
+                Maximum 5 webhooks reached.
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       {/* ── Account Section ──────────────────────────────────────────── */}

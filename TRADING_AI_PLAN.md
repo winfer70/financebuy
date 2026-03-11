@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-10
 **Project:** TickerTap
-**Status:** Awaiting approval
+**Status:** Phases 1–3 implemented and deployed
 
 ---
 
@@ -500,6 +500,170 @@ pandas>=2.0
 ```
 
 **`frontend/package.json` — No new dependencies** (canvas rendering is vanilla, existing patterns).
+
+### 1.15 Shared Component & Utility Refactor
+
+Extract duplicated logic from existing pages into shared modules. All new TradingPage code will consume these from day one, and existing pages will be updated to use them — reducing drift and improving maintainability.
+
+#### 1.15.1 Shared Formatters
+
+**File:** `frontend/src/utils/formatters.js`
+
+Consolidate duplicated formatting functions scattered across PortfolioManagerPage, WatchlistPage, DashboardPage, TransactionsPage, OrdersPage, and charts/index.jsx:
+
+```
+fmtCurrency(n, symbol="$")    — Format number as currency ($1,234.56, $1.2M)
+fmtPct(n)                      — Format as percentage with +/- prefix (+1.23%)
+fmtQty(n)                      — Format quantity (max 6 decimal places)
+fmtDate(s)                     — Format ISO date string (Mar 10, 2026)
+fmtDateShort(s)                — Short date for chart axes (MAR '26)
+fmtVol(n)                      — Format volume (1.2B, 3.4M, 500K)
+fmtCompact(n, symbol="$")     — Compact currency ($1.2K, $3.4M)
+timeAgo(dt)                    — Relative time (5m ago, 2h ago, Mar 10)
+```
+
+Pure functions, no React dependency. Accept optional params for currency symbol so `useCurrency` context can pass through.
+
+#### 1.15.2 Shared Style Exports
+
+**File:** `frontend/src/styles/shared.js`
+
+Export shared style objects used across multiple pages:
+
+```
+MODAL_BACKDROP   — Fixed overlay backdrop (used in PortfolioManagerPage, WatchlistPage)
+```
+
+#### 1.15.3 Context Popup
+
+**File:** `frontend/src/hooks/useContextPopup.js`
+
+```
+useContextPopup() → { popup, open(data, event), close }
+```
+
+- Manages `{ data, x, y }` state for cursor-positioned popups
+- Registers outside-click listener to auto-dismiss
+- Used by DashboardPage (heatmap tile popup) and NewsPage (ticker badge popup)
+
+**File:** `frontend/src/components/common/ContextPopup.jsx`
+
+```jsx
+/**
+ * ContextPopup — positioned context menu at cursor location.
+ *
+ * Props:
+ *   popup    — { data, x, y } from useContextPopup, or null
+ *   onClose  — dismiss callback
+ *   children — menu items (page-specific content)
+ */
+```
+
+Renders the fixed-position container with Bloomberg-styled border/shadow. Pages provide their own children (menu items vary per page).
+
+#### 1.15.4 FilterBar
+
+**File:** `frontend/src/components/common/FilterBar.jsx`
+
+```jsx
+/**
+ * FilterBar — row of toggle filter buttons.
+ *
+ * Props:
+ *   items     — Array of { id, label }
+ *   active    — Currently selected id (string)
+ *   onChange  — Callback(id)
+ */
+```
+
+Replaces the repeated mono-font filter button pattern in DashboardPage, WatchlistPage, NewsPage, and PortfolioManagerPage. Single-select only — standalone toggle buttons (e.g., "PORTFOLIO ONLY") remain separate.
+
+#### 1.15.5 Pagination
+
+**File:** `frontend/src/components/common/Pagination.jsx`
+
+```jsx
+/**
+ * Pagination — PREV/NEXT page controls with per-page size selector.
+ *
+ * Props:
+ *   currentPage      — 1-indexed current page
+ *   totalPages       — Total number of pages
+ *   onPrev           — Callback for previous page
+ *   onNext           — Callback for next page
+ *   perPage          — Current items per page (optional)
+ *   perPageOptions   — Array of size options, e.g. [25, 50, 75, 100] (optional)
+ *   onPerPageChange  — Callback(size) (optional)
+ */
+```
+
+Extracted from NewsPage. Will also be used by TradingPage backtest history and MarketplacePage.
+
+#### 1.15.6 PeriodSelector
+
+**File:** `frontend/src/components/common/PeriodSelector.jsx`
+
+```jsx
+/**
+ * PeriodSelector — row of time period toggle buttons.
+ *
+ * Props:
+ *   periods   — Array of period strings, e.g. ["1W", "1M", "3M", "1Y", "ALL"]
+ *   active    — Currently selected period
+ *   onChange  — Callback(period)
+ */
+```
+
+Extracted from DashboardPage / ChartsPage. Will also be used by TradingPage date range selector.
+
+#### 1.15.7 StatBlock
+
+**File:** `frontend/src/components/common/StatBlock.jsx`
+
+```jsx
+/**
+ * StatBlock — single stat display (label above value).
+ *
+ * Props:
+ *   label  — Stat label (e.g. "TOTAL VALUE")
+ *   value  — Formatted value string
+ *   color  — CSS color for the value (default: "var(--bright)")
+ *   sub    — Optional sub-label below value
+ */
+```
+
+Replaces repeated stat blocks in DashboardPage, TransactionsPage, and OrdersPage. Pages arrange blocks in their own grid.
+
+#### 1.15.8 EmptyState
+
+**File:** `frontend/src/components/common/EmptyState.jsx`
+
+```jsx
+/**
+ * EmptyState — centered placeholder for empty data views.
+ *
+ * Props:
+ *   message  — Display text (e.g. "NO TRANSACTIONS FOUND")
+ */
+```
+
+Replaces the identical centered monospace empty-state blocks across nearly all pages.
+
+#### 1.15.9 Existing Page Updates
+
+Each existing page is updated to import and use the shared modules:
+
+| Page | Shared modules consumed |
+|------|------------------------|
+| DashboardPage | formatters, PeriodSelector, StatBlock, EmptyState, ContextPopup, FilterBar |
+| PortfolioManagerPage | formatters, MODAL_BACKDROP, FilterBar, EmptyState |
+| WatchlistPage | formatters, MODAL_BACKDROP, FilterBar, EmptyState |
+| NewsPage | formatters, Pagination, FilterBar, ContextPopup, EmptyState |
+| TransactionsPage | formatters, StatBlock, EmptyState |
+| OrdersPage | formatters, StatBlock, EmptyState |
+| ChartsPage | formatters, PeriodSelector |
+
+Changes are mechanical replacements — inline code → import. No functional changes to any page.
 
 ---
 
@@ -1265,97 +1429,112 @@ async def paper_trade_stream(paper_trade_id: UUID, user=Depends(get_current_user
 ## IMPLEMENTATION CHECKLIST
 
 ```markdown
-PHASE 1 — Core Engine:
-1.  Create data source abstraction layer (providers/, normalizer.py)
-2.  Create Alembic migration 0015 (strategies, strategy_versions, backtest_results, trading_signals)
-3.  Add Strategy, StrategyVersion, BacktestResult, TradingSignal ORM models to models.py
-4.  Add all trading Pydantic schemas to schemas.py
-5.  Implement BacktestEngine core (engine/__init__.py)
-6.  Implement 10 built-in strategy modules (strategies/*.py)
-7.  Implement performance metrics calculator (engine/metrics.py)
-8.  Implement benchmark comparison (buy-and-hold + SPY)
-9.  Implement overfit detection
-10. Create strategy templates (5 pre-built, is_system=True)
-11. Create /api/v1/trading/* route module (trading.py)
-12. Register trading router in main.py
-13. Implement arq task worker for backtesting (trading/worker.py)
-14. Add trading-worker service to docker-compose.yml
-15. Extract OHLCVChart shared component from ChartsPage.jsx
-16. Update ChartsPage.jsx to use <OHLCVChart />
-17. Update DashboardPage.jsx to use <OHLCVChart />
-18. Build TradingPage.jsx (controls, chart, metrics, equity curve, trade log, replay)
-19. Add trading nav item + routing in App.jsx
-20. Add trading icon to Icons.jsx
-21. Add trading API methods to api/client.js
-22. Add Trading AI Disclaimer to LegalPage.jsx
-23. Add disclaimer banner to TradingPage.jsx
-24. Extend audit trail for trading events
-25. Add arq and numpy/pandas to requirements.txt
-26. Run Alembic migration 0015
-27. Test end-to-end: select strategy → run backtest → view results on chart
+PHASE 1 — Core Engine + Shared Refactor:              ✅ COMPLETED
+1.  [x] Create data source abstraction layer (providers/, normalizer.py)
+2.  [x] Create Alembic migration 0015 (strategies, strategy_versions, backtest_results, trading_signals)
+3.  [x] Add Strategy, StrategyVersion, BacktestResult, TradingSignal ORM models to models.py
+4.  [x] Add all trading Pydantic schemas to schemas.py
+5.  [x] Implement BacktestEngine core (engine/__init__.py)
+6.  [x] Implement 10 built-in strategy modules (strategies/*.py)
+7.  [x] Implement performance metrics calculator (engine/metrics.py)
+8.  [x] Implement benchmark comparison (buy-and-hold + SPY)
+9.  [x] Implement overfit detection
+10. [x] Create strategy templates (5 pre-built, is_system=True)
+11. [x] Create /api/v1/trading/* route module (trading.py)
+12. [x] Register trading router in main.py
+13. [x] Implement arq task worker for backtesting (trading/worker.py)
+14. [x] Add trading-worker service to docker-compose.yml
+15. [x] Create utils/formatters.js — shared number/date/currency/volume formatters
+16. [x] Create styles/shared.js — shared style exports (MODAL_BACKDROP)
+17. [x] Create hooks/useContextPopup.js + components/common/ContextPopup.jsx
+18. [x] Create components/common/FilterBar.jsx
+19. [x] Create components/common/Pagination.jsx
+20. [x] Create components/common/PeriodSelector.jsx
+21. [x] Create components/common/StatBlock.jsx
+22. [x] Create components/common/EmptyState.jsx
+23. [x] Refactor DashboardPage — use formatters, PeriodSelector, StatBlock, EmptyState, ContextPopup, FilterBar
+24. [x] Refactor PortfolioManagerPage — use formatters, MODAL_BACKDROP, FilterBar, EmptyState
+25. [x] Refactor WatchlistPage — use formatters, MODAL_BACKDROP, FilterBar, EmptyState
+26. [x] Refactor NewsPage — use formatters, Pagination, FilterBar, ContextPopup, EmptyState
+27. [x] Refactor TransactionsPage — use formatters, StatBlock, EmptyState
+28. [x] Refactor OrdersPage — use formatters, StatBlock, EmptyState
+29. [x] Refactor ChartsPage — use formatters, PeriodSelector
+30. [x] Extract OHLCVChart shared component from ChartsPage.jsx
+31. [x] Update ChartsPage.jsx to use <OHLCVChart />
+32. [x] Update DashboardPage.jsx to use <OHLCVChart />
+33. [x] Build TradingPage.jsx (controls, chart, metrics, equity curve, trade log, replay) — consume all shared components
+34. [x] Add trading nav item + routing in App.jsx
+35. [x] Add trading icon to Icons.jsx
+36. [x] Add trading API methods to api/client.js
+37. [x] Add Trading AI Disclaimer to LegalPage.jsx
+38. [x] Add disclaimer banner to TradingPage.jsx
+39. [x] Extend audit trail for trading events
+40. [x] Add arq and numpy/pandas to requirements.txt
+41. [x] Run Alembic migration 0015
+42. [x] Test end-to-end: select strategy → run backtest → view results on chart
 
-PHASE 2 — Data & Validation:
-28. Switch Docker Postgres to timescale/timescaledb:latest-pg15
-29. Create Alembic migration 0016 (intraday_bars hypertable + compression/retention)
-30. Implement intraday data archiver worker (trading/archiver.py)
-31. Implement downsampling job (1m→5m→1h tiered)
-32. Extend normalizer for multi-timeframe data access
-33. Implement walk-forward validation engine (engine/walk_forward.py)
-34. Create Alembic migration 0017 (notifications, user_webhooks)
-35. Implement unified notification service (trading/notifications.py)
-36. Add notification API routes
-37. Implement event-aware no-trade zones (engine/events.py)
-38. Add webhook management UI to SettingsPage.jsx
-39. Add notification bell/panel to App.jsx topbar
+PHASE 2 — Data & Validation:                          ✅ COMPLETED
+43. [x] Switch Docker Postgres to timescale/timescaledb:latest-pg15
+44. [x] Create Alembic migration 0016 (intraday_bars hypertable + compression/retention)
+45. [x] Implement intraday data archiver worker (trading/archiver.py)
+46. [x] Implement downsampling job (1m→5m→1h tiered)
+47. [x] Extend normalizer for multi-timeframe data access
+48. [x] Implement walk-forward validation engine (engine/walk_forward.py)
+49. [x] Create Alembic migration 0017 (notifications, user_webhooks)
+50. [x] Implement unified notification service (trading/notifications.py)
+51. [x] Add notification API routes
+52. [x] Implement event-aware no-trade zones (engine/events.py)
+53. [x] Add webhook management UI to SettingsPage.jsx
+54. [x] Add notification bell/panel to App.jsx topbar
 
-PHASE 3 — AI & ML:
-40. Create trading-ml container (Dockerfile, api.py)
-41. Implement LSTM price predictor model
-42. Implement pattern classifier model (CNN)
-43. Implement feature classifier model (Random Forest)
-44. Implement market regime detector (HMM + rule-based hybrid)
-45. Add trading-ml service to docker-compose.yml
-46. Implement strategy researcher on Server B (strategy_researcher.py)
-47. Implement strategy learner job (strategy_learner.py)
-48. Add regime endpoint to trading routes
-49. Implement news sentiment signal filter (engine/filters.py)
-50. Implement strategy decay detection (engine/decay.py)
-51. Implement risk management / position sizing (engine/risk.py)
-52. Implement drawdown circuit breaker (engine/circuit_breaker.py)
-53. Add regime indicator to TradingPage UI
-54. Add position sizing controls to TradingPage
+PHASE 3 — AI & ML:                                    ✅ COMPLETED
+55. [x] Create trading-ml container (Dockerfile, api.py)
+56. [x] Implement LSTM price predictor model
+57. [x] Implement pattern classifier model (CNN)
+58. [x] Implement feature classifier model (Random Forest)
+59. [x] Implement market regime detector (HMM + rule-based hybrid)
+60. [x] Add trading-ml service to docker-compose.yml
+61. [x] Implement strategy researcher on Server B (strategy_researcher.py)
+62. [x] Implement strategy learner job (strategy_learner.py)
+63. [x] Add regime endpoint to trading routes
+64. [x] Implement news sentiment signal filter (engine/filters.py)
+65. [x] Implement strategy decay detection (engine/decay.py)
+66. [x] Implement risk management / position sizing (engine/risk.py)
+67. [x] Implement drawdown circuit breaker (engine/circuit_breaker.py)
+68. [x] Add regime indicator to TradingPage UI
+69. [x] Add position sizing controls to TradingPage
 
 PHASE 4 — PineScript & Composition:
-55. Define lark EBNF grammar for PineScript subset (pinescript/grammar.py)
-56. Implement deterministic transpiler (pinescript/transpiler.py)
-57. Implement LLM fallback with AST validation (pinescript/llm_fallback.py)
-58. Add PineScript API routes (validate, transpile)
-59. Add strategy version history API routes
-60. Build PineScriptEditor component (frontend)
-61. Build ParameterEditor component (frontend)
-62. Implement indicator-level strategy composition engine (engine/composition.py)
-63. Build CompositionEditor visual node editor (frontend)
-64. Add "Verified" / "AI-Translated" badges to strategy cards
+70. Define lark EBNF grammar for PineScript subset (pinescript/grammar.py)
+71. Implement deterministic transpiler (pinescript/transpiler.py)
+72. Implement LLM fallback with AST validation (pinescript/llm_fallback.py)
+73. Add PineScript API routes (validate, transpile)
+74. Add strategy version history API routes
+75. Build PineScriptEditor component (frontend)
+76. Build ParameterEditor component (frontend)
+77. Implement indicator-level strategy composition engine (engine/composition.py)
+78. Build CompositionEditor visual node editor (frontend)
+79. Add "Verified" / "AI-Translated" badges to strategy cards
 
 PHASE 5 — Social & Integration:
-65. Create Alembic migration 0018 (strategy_ratings, strategy_usage)
-66. Add marketplace API routes (browse, rate, stats, publish)
-67. Build MarketplacePage.jsx
-68. Build StrategyComparison component
-69. Implement portfolio/watchlist batch backtest integration
-70. Implement one-click order creation from signals
-71. Implement CSV/PDF export for backtest results
-72. Add marketplace nav item + routing in App.jsx
+80. Create Alembic migration 0018 (strategy_ratings, strategy_usage)
+81. Add marketplace API routes (browse, rate, stats, publish)
+82. Build MarketplacePage.jsx
+83. Build StrategyComparison component
+84. Implement portfolio/watchlist batch backtest integration
+85. Implement one-click order creation from signals
+86. Implement CSV/PDF export for backtest results
+87. Add marketplace nav item + routing in App.jsx
 
 PHASE 6 — Paper Trading:
-73. Create Alembic migration 0019 (paper_trades, paper_trade_positions, paper_trade_equity_snapshots)
-74. Implement paper trading evaluation worker (paper_worker.py)
-75. Add paper trading API routes
-76. Implement SSE endpoint for real-time updates (trading_sse.py)
-77. Build PaperTradingPanel component (frontend)
-78. Add SSE client logic to TradingPage
-79. Connect circuit breaker to paper trading positions
-80. Test end-to-end: start paper trade → receive real-time updates → stop trade
+88. Create Alembic migration 0019 (paper_trades, paper_trade_positions, paper_trade_equity_snapshots)
+89. Implement paper trading evaluation worker (paper_worker.py)
+90. Add paper trading API routes
+91. Implement SSE endpoint for real-time updates (trading_sse.py)
+92. Build PaperTradingPanel component (frontend)
+93. Add SSE client logic to TradingPage
+94. Connect circuit breaker to paper trading positions
+95. Test end-to-end: start paper trade → receive real-time updates → stop trade
 ```
 
 ---
@@ -1426,7 +1605,20 @@ server-b-worker/
   strategy_learner.py                  — Daily learning job
 
 frontend/src/
+  utils/
+    formatters.js                      — Shared number/date/currency/volume formatters
+  styles/
+    shared.js                          — Shared style exports (MODAL_BACKDROP)
+  hooks/
+    useContextPopup.js                 — Cursor-positioned popup state + outside-click dismiss
   components/
+    common/
+      ContextPopup.jsx                 — Positioned context menu at cursor location
+      FilterBar.jsx                    — Row of toggle filter buttons
+      Pagination.jsx                   — PREV/NEXT page controls with per-page selector
+      PeriodSelector.jsx               — Time period toggle buttons
+      StatBlock.jsx                    — Single stat display (label + value)
+      EmptyState.jsx                   — Centered empty-state placeholder
     charts/
       OHLCVChart.jsx                   — Shared chart component (extracted)
     trading/

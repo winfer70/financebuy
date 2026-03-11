@@ -16,7 +16,7 @@ import re
 from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, validator
+from pydantic import BaseModel, EmailStr, Field, validator, root_validator
 
 
 # ── User schemas ─────────────────────────────────────────────────────────────
@@ -914,3 +914,247 @@ class PerformancePointOut(BaseModel):
 
     date: str = Field(..., description="Date in YYYY-MM-DD format.")
     value: float = Field(..., description="Total portfolio value on this date.")
+
+
+# ── Trading AI schemas ────────────────────────────────────────────────────
+
+
+class StrategyCreate(BaseModel):
+    """Create a new trading strategy."""
+
+    name: str = Field(..., min_length=1, max_length=128, description="Strategy display name.")
+    description: Optional[str] = Field(None, description="User-facing description.")
+    strategy_type: Literal["builtin", "learned", "pinescript", "ml"] = Field(
+        ..., description="Strategy type."
+    )
+    category: Optional[Literal[
+        "trend_following", "mean_reversion", "momentum",
+        "breakout", "volatility", "ml_based", "hybrid",
+    ]] = Field(None, description="Strategy category.")
+    timeframe: Optional[Literal[
+        "scalping", "day_trading", "swing", "position",
+    ]] = Field(None, description="Target timeframe.")
+    asset_class: Optional[Literal[
+        "stocks", "etfs", "futures", "crypto",
+    ]] = Field(None, description="Target asset class.")
+    definition_json: Dict = Field(..., description="Full strategy definition (parameters, logic, source).")
+    is_public: bool = Field(False, description="Make visible in the marketplace.")
+
+
+class StrategyOut(BaseModel):
+    """Serialised strategy for API responses."""
+
+    strategy_id: UUID
+    name: str
+    description: Optional[str]
+    strategy_type: str
+    category: Optional[str]
+    timeframe: Optional[str]
+    asset_class: Optional[str]
+    definition_json: Dict
+    is_public: bool
+    is_system: bool
+    version: int
+    created_at: Optional[datetime]
+    updated_at: Optional[datetime]
+
+    class Config:
+        orm_mode = True
+
+
+class StrategyUpdate(BaseModel):
+    """Partial update payload for a strategy."""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=128)
+    description: Optional[str] = None
+    definition_json: Optional[Dict] = None
+    is_public: Optional[bool] = None
+    category: Optional[Literal[
+        "trend_following", "mean_reversion", "momentum",
+        "breakout", "volatility", "ml_based", "hybrid",
+    ]] = None
+    timeframe: Optional[Literal[
+        "scalping", "day_trading", "swing", "position",
+    ]] = None
+    asset_class: Optional[Literal[
+        "stocks", "etfs", "futures", "crypto",
+    ]] = None
+
+
+class BacktestRequest(BaseModel):
+    """Queue a backtest job.
+
+    Accepts either ``strategy_id`` (UUID) or ``strategy_slug`` (string).
+    When *strategy_slug* is provided, the route looks up the matching
+    system strategy by its ``definition_json.strategy_slug``.
+    """
+
+    strategy_id: Optional[UUID] = Field(None, description="Strategy UUID (optional if slug provided).")
+    strategy_slug: Optional[str] = Field(None, max_length=50, description="Strategy engine slug (e.g. sma_crossover).")
+    symbol: str = Field(..., min_length=1, max_length=20, description="Ticker symbol.")
+    interval: str = Field("1d", max_length=10, description="Bar interval (e.g. 1d, 1h).")
+    start_date: Optional[str] = Field(None, description="Backtest start date (YYYY-MM-DD or ISO).")
+    end_date: Optional[str] = Field(None, description="Backtest end date (YYYY-MM-DD or ISO).")
+    parameters_json: Optional[Dict] = Field(None, description="Strategy parameter overrides.")
+    params: Optional[Dict] = Field(None, description="Alias for parameters_json (frontend compat).")
+    commission_per_trade: Optional[Decimal] = Field(
+        None, max_digits=10, decimal_places=4, description="Commission per trade."
+    )
+    slippage_pct: Optional[Decimal] = Field(
+        None, max_digits=6, decimal_places=4, description="Slippage percentage (e.g. 0.0005 = 0.05%)."
+    )
+
+    @root_validator
+    def _require_id_or_slug(cls, values):
+        if not values.get("strategy_id") and not values.get("strategy_slug"):
+            raise ValueError("Either strategy_id or strategy_slug is required.")
+        return values
+
+
+class MetricsOut(BaseModel):
+    """Performance metrics from a completed backtest."""
+
+    total_return: float = Field(..., description="Total return percentage.")
+    annualized_return: float = Field(..., description="CAGR.")
+    sharpe_ratio: float = Field(..., description="Sharpe ratio (risk-free = 0).")
+    sortino_ratio: float = Field(..., description="Sortino ratio.")
+    max_drawdown: float = Field(..., description="Maximum drawdown percentage.")
+    max_drawdown_duration: int = Field(..., description="Max drawdown duration in bars.")
+    win_rate: float = Field(..., description="Winning trade percentage.")
+    profit_factor: float = Field(..., description="Gross profit / gross loss.")
+    total_trades: int = Field(..., description="Total number of trades.")
+    avg_win: float = Field(..., description="Average winning trade return.")
+    avg_loss: float = Field(..., description="Average losing trade return.")
+    expectancy: float = Field(..., description="Expected return per trade.")
+    calmar_ratio: float = Field(..., description="Annualized return / max drawdown.")
+
+
+class BacktestResultOut(BaseModel):
+    """Serialised backtest result for API responses."""
+
+    result_id: UUID
+    strategy_id: Optional[UUID]
+    symbol: str
+    interval: str
+    start_date: datetime
+    end_date: datetime
+    parameters_json: Optional[Dict]
+    results_json: Optional[Dict]
+    metrics_json: Optional[Dict]
+    benchmark_json: Optional[Dict]
+    overfit_warning: bool
+    status: str
+    error_message: Optional[str]
+    created_at: Optional[datetime]
+    completed_at: Optional[datetime]
+
+    class Config:
+        orm_mode = True
+
+
+class TradingSignalOut(BaseModel):
+    """Serialised trading signal for API responses."""
+
+    signal_id: UUID
+    strategy_id: UUID
+    symbol: str
+    signal_type: str
+    direction: str
+    price: Decimal
+    confidence: Optional[Decimal]
+    reasoning: Optional[str]
+    is_active: bool
+    triggered_at: Optional[datetime]
+    expires_at: Optional[datetime]
+    created_at: Optional[datetime]
+
+    class Config:
+        orm_mode = True
+
+
+# ── Notification schemas ─────────────────────────────────────────────────
+
+
+class NotificationOut(BaseModel):
+    """Serialised in-app notification."""
+
+    notification_id: UUID
+    event_type: str
+    title: str
+    body: Optional[str] = None
+    metadata_json: Optional[Dict[str, Any]] = None
+    is_read: bool
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+
+class NotificationMarkRead(BaseModel):
+    """Payload to mark one or more notifications as read."""
+
+    notification_ids: List[UUID] = Field(..., min_items=1, description="UUIDs of notifications to mark read.")
+
+
+class PaginatedNotificationsResponse(BaseModel):
+    """Paginated notifications wrapper."""
+
+    notifications: List[NotificationOut] = Field(default_factory=list)
+    total: int = 0
+    unread_count: int = 0
+    limit: int = 25
+    offset: int = 0
+
+
+# ── Webhook schemas ──────────────────────────────────────────────────────
+
+
+class WebhookCreate(BaseModel):
+    """Payload to register a new webhook URL."""
+
+    url: str = Field(..., min_length=10, max_length=2048, description="Webhook endpoint URL (https).")
+    events: List[str] = Field(
+        default_factory=list,
+        description="Event types to subscribe to (e.g. signal_entry, backtest_complete).",
+    )
+
+
+class WebhookOut(BaseModel):
+    """Serialised webhook returned by the API."""
+
+    webhook_id: UUID
+    url: str
+    events: List[str] = Field(default_factory=list)
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+
+class WebhookUpdate(BaseModel):
+    """Partial update payload for a webhook."""
+
+    url: Optional[str] = Field(None, min_length=10, max_length=2048)
+    events: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+
+
+# ── Market Regime schemas ─────────────────────────────────────────────────
+
+class RegimeRequest(BaseModel):
+    """Input for the market regime detection endpoint."""
+
+    symbol: str = Field(..., min_length=1, max_length=10, description="Ticker symbol")
+    interval: str = Field("1d", description="Bar interval (1d, 1h, etc.)")
+    period_days: int = Field(180, ge=60, le=1825, description="Lookback period in days")
+
+
+class RegimeResponse(BaseModel):
+    """Market regime detection result."""
+
+    symbol: str
+    regime: str = Field(..., description="trending_up | trending_down | mean_reverting | high_volatility")
+    confidence: float = Field(..., ge=0, le=1)
+    volatility_percentile: float
+    trend_strength: float
