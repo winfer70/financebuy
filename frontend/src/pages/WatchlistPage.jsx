@@ -22,29 +22,8 @@ import { Ic } from "../components/common/Icons";
 import { useCurrency } from "../context/CurrencyContext";
 import { useI18n } from "../context/I18nContext";
 import { useMarketStatus } from "../components/common";
-
-/* ── Formatters ─────────────────────────────────────────────────────────── */
-
-/**
- * fmtPct — format a number as a percentage string with sign prefix.
- * @param {number|null} n - percentage value
- * @returns {string} formatted string, e.g. "+2.45%" or "\u2014" for null
- */
-const fmtPct = (n) =>
-  n == null
-    ? "\u2014"
-    : `${parseFloat(n) >= 0 ? "+" : ""}${parseFloat(n).toFixed(2)}%`;
-
-/* ── Shared modal backdrop style ────────────────────────────────────────── */
-const BDK = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(0,0,0,.65)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 1000,
-};
+import { fmtPct } from "../utils/formatters";
+import { MODAL_BACKDROP as BDK } from "../styles/shared";
 
 /* ── Asset section IDs (labels resolved via t() inside each component) ── */
 

@@ -8,6 +8,7 @@ import { useState, useMemo } from "react";
 import api, { useApi } from "../api/client";
 import { Ic } from "../components/common/Icons";
 import { SkeletonRow, ApiError } from "../components/common";
+import FilterBar from "../components/common/FilterBar";
 import { TRANSACTIONS } from "../styles/globals";
 
 export function TransactionsPage({ onNewTx, token, accountId, goBack }) {
@@ -69,13 +70,17 @@ export function TransactionsPage({ onNewTx, token, accountId, goBack }) {
         {error && <ApiError message={error} onRetry={refetch}/>}
         {/* Filter + search bar */}
         <div style={{display:"flex",gap:12,alignItems:"center"}}>
-          <div className="filter-bar">
-            {["all","deposit","withdrawal","buy","sell"].map(f=>(
-              <button key={f} className={`filter-btn${filter===f?" active":""}`} onClick={()=>setFilter(f)}>
-                {f}
-              </button>
-            ))}
-          </div>
+          <FilterBar
+            items={[
+              { id: "all", label: "ALL" },
+              { id: "deposit", label: "DEPOSIT" },
+              { id: "withdrawal", label: "WITHDRAWAL" },
+              { id: "buy", label: "BUY" },
+              { id: "sell", label: "SELL" },
+            ]}
+            value={filter}
+            onChange={setFilter}
+          />
           <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:8}}>
             <Ic.search/>
             <input className="search-input" placeholder="Search by ID or symbol..." value={search} onChange={e=>setSearch(e.target.value)}/>

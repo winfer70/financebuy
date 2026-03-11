@@ -34,6 +34,11 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import api from "../api/client";
 import { Ic } from "../components/common/Icons";
 import { useI18n } from "../context/I18nContext";
+import { timeAgo } from "../utils/formatters";
+import FilterBar from "../components/common/FilterBar";
+import Pagination from "../components/common/Pagination";
+import useContextPopup from "../hooks/useContextPopup";
+import ContextPopup from "../components/common/ContextPopup";
 
 /* -- Page size options ---------------------------------------------------- */
 
@@ -88,25 +93,6 @@ const SENTIMENT_FILTERS = [
 ];
 
 /**
- * Format a UTC datetime string as a relative or absolute time label.
- *
- * @param {string|null} dt - ISO datetime string or null.
- * @returns {string} Human-readable time label.
- */
-function timeAgo(dt) {
-  if (!dt) return "";
-  try {
-    const diff = (Date.now() - new Date(dt).getTime()) / 1000;
-    if (diff < 60)   return "just now";
-    if (diff < 3600)  return `${Math.floor(diff / 60)}m ago`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-    return new Date(dt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  } catch {
-    return "";
-  }
-}
-
-/**
  * Check if the newest article in the list is older than 30 minutes.
  *
  * @param {Array} articles - List of article objects.
@@ -135,7 +121,7 @@ export function NewsPage({ token, initialTicker, onViewChart }) {
   const [watchlistOnly,  setWatchlistOnly]  = useState(false);
   const [watchlistTickers, setWatchlistTickers] = useState([]);
   const [searchTicker,   setSearchTicker]   = useState(initialTicker || "");
-  const [tickerPopup,    setTickerPopup]    = useState(null); /* { ticker, x, y } */
+  const tickerCtx = useContextPopup();
 
   /* -- Pagination state --------------------------------------------------- */
   const [perPage,     setPerPage]     = useState(25);
@@ -240,14 +226,6 @@ export function NewsPage({ token, initialTicker, onViewChart }) {
     setCurrentPage(p => Math.min(totalPages, p + 1));
   }, [totalPages]);
 
-  /* -- Dismiss ticker popup on outside click ------------------------------- */
-  useEffect(() => {
-    if (!tickerPopup) return;
-    const dismiss = () => setTickerPopup(null);
-    window.addEventListener("click", dismiss);
-    return () => window.removeEventListener("click", dismiss);
-  }, [tickerPopup]);
-
   /* -- Client-side sorting (within the current server-filtered page) ------- */
   /**
    * Sort the server-filtered articles for display.  All filtering (portfolio,
@@ -271,17 +249,6 @@ export function NewsPage({ token, initialTicker, onViewChart }) {
 
   /* -- Render ------------------------------------------------------------- */
   const stale = isStale(articles);
-
-  /** Shared mono style for pagination controls. */
-  const paginationBtnStyle = (disabled) => ({
-    fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 600,
-    letterSpacing: "0.5px", padding: "4px 12px",
-    background: disabled ? "transparent" : "var(--bg3)",
-    border: `1px solid ${disabled ? "var(--bg3)" : "var(--border)"}`,
-    color: disabled ? "var(--bg3)" : "var(--muted)",
-    cursor: disabled ? "default" : "pointer",
-    borderRadius: 2,
-  });
 
   return (
     <div className="page-scroll">
@@ -341,17 +308,11 @@ export function NewsPage({ token, initialTicker, onViewChart }) {
           </div>
 
           {/* Sentiment filter */}
-          <div className="filter-bar">
-            {SENTIMENT_FILTERS.map(f => (
-              <button
-                key={f.id}
-                className={`filter-btn${sentimentFilter === f.id ? " active" : ""}`}
-                onClick={() => setSentimentFilter(f.id)}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
+          <FilterBar
+            items={SENTIMENT_FILTERS}
+            value={sentimentFilter}
+            onChange={setSentimentFilter}
+          />
 
           {/* Portfolio toggle — combines with sentiment filter */}
           <button
@@ -530,7 +491,7 @@ export function NewsPage({ token, initialTicker, onViewChart }) {
                             key={ts.ticker}
                             onClick={(e) => {
                               e.stopPropagation();
-                              setTickerPopup({ ticker: ts.ticker, x: e.clientX, y: e.clientY });
+                              tickerCtx.open({ ticker: ts.ticker }, e);
                             }}
                             title={ts.reasoning || `${ts.ticker}: ${ts.score > 0 ? "+" : ""}${ts.score}`}
                             style={{
@@ -583,96 +544,32 @@ export function NewsPage({ token, initialTicker, onViewChart }) {
 
         {/* ── Pagination controls ─────────────────────────────────────────── */}
         {totalArticles > 0 && (
-          <div style={{
-            display: "flex", alignItems: "center", justifyContent: "center",
-            gap: 16, padding: "16px 0 8px",
-          }}>
-            {/* PREV button */}
-            <button
-              onClick={handlePrev}
-              disabled={currentPage <= 1}
-              style={paginationBtnStyle(currentPage <= 1)}
-            >
-              ◀ PREV
-            </button>
-
-            {/* Page indicator */}
-            <span style={{
-              fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 600,
-              color: "var(--bright)", letterSpacing: "0.5px",
-            }}>
-              PAGE {currentPage} OF {totalPages}
-            </span>
-
-            {/* NEXT button */}
-            <button
-              onClick={handleNext}
-              disabled={currentPage >= totalPages}
-              style={paginationBtnStyle(currentPage >= totalPages)}
-            >
-              NEXT ▶
-            </button>
-          </div>
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPrev={handlePrev}
+            onNext={handleNext}
+          />
         )}
       </div>
 
       {/* ── Ticker popup (click on ticker badge) ─────────────────────────── */}
-      {tickerPopup && (
-        <div
-          onClick={e => e.stopPropagation()}
-          style={{
-            position: "fixed",
-            top: tickerPopup.y,
-            left: tickerPopup.x,
-            zIndex: 1000,
-            background: "var(--bg2)",
-            border: "1px solid var(--border)",
-            borderRadius: 3,
-            padding: "6px 0",
-            boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
-            fontFamily: "var(--font-mono)",
-            fontSize: 10,
-            minWidth: 140,
-          }}
-        >
-          <div style={{
-            padding: "4px 12px", color: "var(--amber)",
-            fontWeight: 600, letterSpacing: "0.5px", borderBottom: "1px solid var(--border)",
-            marginBottom: 2,
-          }}>
-            {tickerPopup.ticker}
-          </div>
-          {onViewChart && (
-            <button
-              onClick={() => { onViewChart(tickerPopup.ticker); setTickerPopup(null); }}
-              style={{
-                display: "block", width: "100%", textAlign: "left",
-                background: "none", border: "none", cursor: "pointer",
-                color: "var(--bright)", padding: "5px 12px",
-                fontFamily: "var(--font-mono)", fontSize: 10,
-                letterSpacing: "0.3px",
-              }}
-              onMouseOver={e => e.currentTarget.style.background = "var(--bg3)"}
-              onMouseOut={e => e.currentTarget.style.background = "none"}
-            >
-              VIEW CHART →
-            </button>
-          )}
-          <button
-            onClick={() => { setSearchTicker(tickerPopup.ticker); setTickerPopup(null); }}
-            style={{
-              display: "block", width: "100%", textAlign: "left",
-              background: "none", border: "none", cursor: "pointer",
-              color: "var(--bright)", padding: "5px 12px",
-              fontFamily: "var(--font-mono)", fontSize: 10,
-              letterSpacing: "0.3px",
-            }}
-            onMouseOver={e => e.currentTarget.style.background = "var(--bg3)"}
-            onMouseOut={e => e.currentTarget.style.background = "none"}
-          >
-            FILTER NEWS
-          </button>
-        </div>
+      {tickerCtx.popup && (
+        <ContextPopup
+          x={tickerCtx.popup.x}
+          y={tickerCtx.popup.y}
+          title={tickerCtx.popup.ticker}
+          actions={[
+            ...(onViewChart ? [{
+              label: "VIEW CHART →",
+              onClick: () => { onViewChart(tickerCtx.popup.ticker); tickerCtx.close(); },
+            }] : []),
+            {
+              label: "FILTER NEWS",
+              onClick: () => { setSearchTicker(tickerCtx.popup.ticker); tickerCtx.close(); },
+            },
+          ]}
+        />
       )}
     </div>
   );

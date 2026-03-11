@@ -5,9 +5,12 @@
  * - Sparkline: Compact mini chart for trend indication
  * - PortfolioChart: Interactive area chart with hover tooltips
  * - AllocationDonut: Donut chart showing portfolio allocation percentages
+ * - OHLCVChart: Reusable candlestick / line chart with volume, SMA, signals
  */
 
 import { useState, useMemo, useRef, useCallback, useEffect } from "react";
+
+export { default as OHLCVChart } from "./OHLCVChart";
 
 /**
  * Sparkline: Compact inline chart for quick trend visualization

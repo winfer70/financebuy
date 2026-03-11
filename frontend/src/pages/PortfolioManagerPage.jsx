@@ -21,19 +21,8 @@ import { Ic } from "../components/common/Icons";
 import { useMarketStatus } from "../components/common";
 import { useCurrency } from "../context/CurrencyContext";
 import { useI18n } from "../context/I18nContext";
-
-/* -- Formatters ----------------------------------------------------------- */
-const fmtUSD  = (n) => n == null ? "\u2014" : `$${parseFloat(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const fmtQty  = (n) => n == null ? "\u2014" : parseFloat(n).toLocaleString("en-US", { maximumFractionDigits: 6 });
-const fmtPct  = (n) => n == null ? "\u2014" : `${parseFloat(n) >= 0 ? "+" : ""}${parseFloat(n).toFixed(2)}%`;
-const fmtDate = (s) => {
-  if (!s) return "\u2014";
-  try { return new Date(s).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }); }
-  catch { return "\u2014"; }
-};
-
-/* -- Shared backdrop style ------------------------------------------------ */
-const BDK = { position: "fixed", inset: 0, background: "rgba(0,0,0,.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 };
+import { fmtUSD, fmtQty, fmtPct, fmtDate } from "../utils/formatters";
+import { MODAL_BACKDROP as BDK } from "../styles/shared";
 
 /* -- Asset section config ------------------------------------------------- */
 const SECTIONS = [

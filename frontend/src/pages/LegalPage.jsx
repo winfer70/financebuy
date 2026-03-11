@@ -23,6 +23,7 @@ const TABS = [
   { id: "disclaimer", label: "FINANCIAL DISCLAIMER" },
   { id: "privacy",    label: "PRIVACY POLICY" },
   { id: "terms",      label: "TERMS OF SERVICE" },
+  { id: "trading-ai", label: "TRADING AI" },
 ];
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -422,9 +423,76 @@ function TermsContent() {
   );
 }
 
+/**
+ * TradingAIDisclaimerContent — Trading AI algorithm disclaimer.
+ * Covers: educational purposes, not financial advice, no guarantee of profits,
+ * backtest limitations, algorithmic risks.
+ */
+function TradingAIDisclaimerContent() {
+  return (
+    <div className="legal-content">
+      <div className="legal-effective-date">EFFECTIVE: MARCH 10, 2026</div>
+
+      <section className="legal-section">
+        <div className="legal-section-title">Trading AI Disclaimer</div>
+        <p className="legal-text">
+          The Trading AI feature of TickerTap provides algorithmic backtesting and signal
+          generation tools <strong>for educational and informational purposes only</strong>.
+          It does <strong>not</strong> constitute financial advice, investment recommendations,
+          or an offer to buy or sell any security.
+        </p>
+      </section>
+
+      <section className="legal-section">
+        <div className="legal-subsection-title">No Guarantee of Results</div>
+        <p className="legal-text">
+          Past performance of any strategy, whether backtested or forward-tested, does
+          <strong> not guarantee future results</strong>. Trading in financial markets involves
+          substantial risk of loss. You should not invest money you cannot afford to lose.
+        </p>
+      </section>
+
+      <section className="legal-section">
+        <div className="legal-subsection-title">Backtest Limitations</div>
+        <p className="legal-text">
+          Backtests are simulations run on historical data and are subject to inherent limitations
+          including but not limited to:
+        </p>
+        <ul className="legal-list">
+          <li><strong>Survivorship bias</strong> — historical data may not include delisted securities.</li>
+          <li><strong>Look-ahead bias</strong> — strategies may inadvertently use future information.</li>
+          <li><strong>Overfitting</strong> — strategies optimised to historical data may fail on new data.</li>
+          <li><strong>Slippage and liquidity</strong> — simulated fills may not reflect real market conditions.</li>
+          <li><strong>Commission estimates</strong> — actual trading costs may differ from simulation parameters.</li>
+        </ul>
+      </section>
+
+      <section className="legal-section">
+        <div className="legal-subsection-title">Algorithmic Risk</div>
+        <p className="legal-text">
+          Algorithmic trading strategies may produce unexpected results due to market regime
+          changes, data quality issues, software bugs, or parameter sensitivity. TickerTap
+          provides an "overfit score" as a risk indicator but this metric is
+          <strong> not a guarantee</strong> of strategy robustness.
+        </p>
+      </section>
+
+      <section className="legal-section">
+        <div className="legal-subsection-title">Your Responsibility</div>
+        <p className="legal-text">
+          By using the Trading AI feature you acknowledge that: (a) you are solely responsible
+          for any trading decisions you make; (b) TickerTap and its operators bear no liability
+          for losses incurred; (c) you have read and understood this disclaimer in its entirety.
+        </p>
+        <p className="legal-text">
+          <strong>If you do not agree with these terms, do not use the Trading AI feature.</strong>
+        </p>
+      </section>
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
-   LEGAL PAGE — Main exported component
-═══════════════════════════════════════════════════════════════════════════ */
 
 /**
  * LegalPage — Tabbed legal information page.
@@ -463,6 +531,7 @@ export function LegalPage({ initialTab = "disclaimer", onBack, standalone }) {
       {activeTab === "disclaimer" && <DisclaimerContent />}
       {activeTab === "privacy"    && <PrivacyContent />}
       {activeTab === "terms"      && <TermsContent />}
+      {activeTab === "trading-ai" && <TradingAIDisclaimerContent />}
     </div>
   );
 

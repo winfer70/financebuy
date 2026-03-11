@@ -4,7 +4,9 @@ models.py — SQLAlchemy ORM models for TickerTap.
 Defines all database tables: users, accounts, transactions, securities,
 holdings, orders, password_reset_tokens, email_verification_tokens,
 user_reports, audit_log, news_articles, news_article_tickers,
-score_outcomes, scoring_rules, watchlists, and watchlist_items.
+score_outcomes, scoring_rules, watchlists, watchlist_items,
+strategies, strategy_versions, backtest_results, trading_signals,
+notifications, and user_webhooks.
 
 All foreign keys specify ondelete behaviour and nullable=False where
 a parent reference is required, ensuring referential integrity.
@@ -553,3 +555,186 @@ class WatchlistItem(Base):
     position_order = Column(Integer, server_default="0", nullable=False)
     price_when_added = Column(Numeric(18, 4), nullable=True)
     added_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ── Trading AI Models ─────────────────────────────────────────────────────
+
+
+class Strategy(Base):
+    """Trading strategy definition (user-created, system built-in, or AI-learned)."""
+
+    __tablename__ = "strategies"
+    __table_args__ = (
+        Index("idx_strategies_user_id", "user_id"),
+        Index("idx_strategies_type", "strategy_type"),
+        Index(
+            "idx_strategies_public",
+            "is_public",
+            postgresql_where="is_public = TRUE",
+        ),
+    )
+
+    strategy_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=True,  # NULL for system strategies
+    )
+    name = Column(String(128), nullable=False)
+    description = Column(Text, nullable=True)
+    strategy_type = Column(String(30), nullable=False)  # builtin | learned | pinescript | ml
+    category = Column(String(30), nullable=True)  # trend_following | mean_reversion | momentum | breakout | volatility | ml_based | hybrid
+    timeframe = Column(String(20), nullable=True)  # scalping | day_trading | swing | position
+    asset_class = Column(String(20), nullable=True)  # stocks | etfs | futures | crypto
+    definition_json = Column(JSONB, nullable=False)
+    is_public = Column(Boolean, server_default="FALSE", nullable=False)
+    is_system = Column(Boolean, server_default="FALSE", nullable=False)
+    version = Column(Integer, server_default="1", nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class StrategyVersion(Base):
+    """Immutable snapshot of a strategy definition at a specific version."""
+
+    __tablename__ = "strategy_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "strategy_id", "version_number",
+            name="uq_strategy_versions_strategy_version",
+        ),
+    )
+
+    version_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    strategy_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("strategies.strategy_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    version_number = Column(Integer, nullable=False)
+    definition_json = Column(JSONB, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class BacktestResult(Base):
+    """Queued or completed backtest job with full results and metrics."""
+
+    __tablename__ = "backtest_results"
+    __table_args__ = (
+        Index("idx_backtest_results_user_id", "user_id"),
+        Index("idx_backtest_results_strategy_id", "strategy_id"),
+        Index("idx_backtest_results_status", "status"),
+    )
+
+    result_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    strategy_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("strategies.strategy_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    symbol = Column(String(20), nullable=False)
+    interval = Column(String(10), nullable=False)
+    start_date = Column(DateTime(timezone=True), nullable=False)
+    end_date = Column(DateTime(timezone=True), nullable=False)
+    parameters_json = Column(JSONB, nullable=True)
+    commission_per_trade = Column(Numeric(10, 4), server_default="1.00", nullable=False)
+    slippage_pct = Column(Numeric(6, 4), server_default="0.0005", nullable=False)
+    results_json = Column(JSONB, nullable=True)  # Trades, equity curve, signals
+    metrics_json = Column(JSONB, nullable=True)  # Sharpe, drawdown, win rate, etc.
+    benchmark_json = Column(JSONB, nullable=True)  # Buy-and-hold + SPY comparison
+    overfit_warning = Column(Boolean, server_default="FALSE", nullable=False)
+    status = Column(String(20), server_default="pending", nullable=False)  # pending | running | completed | failed
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class TradingSignal(Base):
+    """Forward-looking entry/exit/stop-loss signal generated by a strategy."""
+
+    __tablename__ = "trading_signals"
+    __table_args__ = (
+        Index("idx_trading_signals_user_strategy", "user_id", "strategy_id"),
+        Index("idx_trading_signals_symbol", "symbol"),
+        Index(
+            "idx_trading_signals_active",
+            "is_active",
+            postgresql_where="is_active = TRUE",
+        ),
+    )
+
+    signal_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    strategy_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("strategies.strategy_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    symbol = Column(String(20), nullable=False)
+    signal_type = Column(String(10), nullable=False)  # entry | exit | stop_loss
+    direction = Column(String(10), nullable=False)  # long | short
+    price = Column(Numeric(18, 4), nullable=False)
+    confidence = Column(Numeric(5, 2), nullable=True)  # 0.00–1.00
+    reasoning = Column(Text, nullable=True)
+    is_active = Column(Boolean, server_default="TRUE", nullable=False)
+    triggered_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ── Notification & Webhook Models ────────────────────────────────────────
+
+
+class Notification(Base):
+    """In-app notification delivered to a user (signal alerts, backtest results, etc.)."""
+
+    __tablename__ = "notifications"
+    __table_args__ = (
+        Index(
+            "idx_notifications_user_unread",
+            "user_id",
+            postgresql_where="is_read = FALSE",
+        ),
+    )
+
+    notification_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    event_type = Column(String(50), nullable=False)
+    title = Column(String(200), nullable=False)
+    body = Column(Text, nullable=True)
+    metadata_json = Column(JSONB, nullable=True)
+    is_read = Column(Boolean, server_default="FALSE", nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class UserWebhook(Base):
+    """User-configured webhook URL for outbound notification delivery."""
+
+    __tablename__ = "user_webhooks"
+    __table_args__ = (
+        Index("idx_user_webhooks_user", "user_id"),
+    )
+
+    webhook_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    url = Column(Text, nullable=False)
+    events = Column(JSONB, server_default="'[]'::jsonb", nullable=False)
+    is_active = Column(Boolean, server_default="TRUE", nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

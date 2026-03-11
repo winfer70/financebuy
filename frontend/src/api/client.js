@@ -559,6 +559,96 @@ const api = {
    */
   confirmEmailChange: (token) =>
     apiFetch("/auth/confirm-email-change", { method: "POST", body: { token } }),
+
+  // ── Trading AI ────────────────────────────────────────────────────────────
+
+  /** List available strategies (built-in + user-created). */
+  listStrategies: (token) =>
+    apiFetch("/trading/strategies", { token }),
+
+  /** Create a new custom strategy. */
+  createStrategy: (body, token) =>
+    apiFetch("/trading/strategies", { method: "POST", body, token }),
+
+  /** Update an existing strategy. */
+  updateStrategy: (strategyId, body, token) =>
+    apiFetch(`/trading/strategies/${strategyId}`, { method: "PATCH", body, token }),
+
+  /** Delete a strategy. */
+  deleteStrategy: (strategyId, token) =>
+    apiFetch(`/trading/strategies/${strategyId}`, { method: "DELETE", token }),
+
+  /** Clone a strategy. */
+  cloneStrategy: (strategyId, token) =>
+    apiFetch(`/trading/strategies/${strategyId}/clone`, { method: "POST", token }),
+
+  /** Queue a backtest job. Returns { backtest_id }. */
+  queueBacktest: (body, token) =>
+    apiFetch("/trading/backtest", { method: "POST", body, token }),
+
+  /** Poll backtest status/result. */
+  getBacktestResult: (backtestId, token) =>
+    apiFetch(`/trading/backtest/${backtestId}`, { token }),
+
+  /** Get backtest history for the current user. */
+  listBacktests: (token) =>
+    apiFetch("/trading/backtest/history", { token }),
+
+  /** Get active signals for a strategy. */
+  getSignals: (strategyId, token) =>
+    apiFetch(`/trading/signals/${strategyId}`, { token }),
+
+  /** Get signals for a specific symbol across all strategies. */
+  getSignalsBySymbol: (symbol, token) =>
+    apiFetch(`/trading/signals/symbol/${symbol}`, { token }),
+
+  // ── Notifications ───────────────────────────────────────────────────────
+
+  /** List notifications (paginated). */
+  listNotifications: (params = {}, token) => {
+    const qs = new URLSearchParams();
+    if (params.limit) qs.set("limit", params.limit);
+    if (params.offset) qs.set("offset", params.offset);
+    if (params.unread_only) qs.set("unread_only", "true");
+    return apiFetch(`/trading/notifications?${qs}`, { token });
+  },
+
+  /** Mark specific notifications as read. */
+  markNotificationsRead: (notificationIds, token) =>
+    apiFetch("/trading/notifications/read", { method: "POST", body: { notification_ids: notificationIds }, token }),
+
+  /** Mark all notifications as read. */
+  markAllNotificationsRead: (token) =>
+    apiFetch("/trading/notifications/read-all", { method: "POST", token }),
+
+  // ── Webhooks ────────────────────────────────────────────────────────────
+
+  /** List user's webhooks. */
+  listWebhooks: (token) =>
+    apiFetch("/trading/webhooks", { token }),
+
+  /** Create a new webhook. */
+  createWebhook: (body, token) =>
+    apiFetch("/trading/webhooks", { method: "POST", body, token }),
+
+  /** Update a webhook. */
+  updateWebhook: (webhookId, body, token) =>
+    apiFetch(`/trading/webhooks/${webhookId}`, { method: "PATCH", body, token }),
+
+  /** Delete a webhook. */
+  deleteWebhook: (webhookId, token) =>
+    apiFetch(`/trading/webhooks/${webhookId}`, { method: "DELETE", token }),
+
+  // ── Market Regime ─────────────────────────────────────────────────────
+
+  /**
+   * Detect the current market regime for a symbol.
+   * @param {object} body  - { symbol, interval?, period_days? }
+   * @param {string} token - JWT access token
+   * @returns {Promise<{symbol, regime, confidence, volatility_percentile, trend_strength}>}
+   */
+  detectRegime: (body, token) =>
+    apiFetch("/trading/regime", { method: "POST", body, token }),
 };
 
 export default api;
