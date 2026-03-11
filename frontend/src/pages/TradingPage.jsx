@@ -207,7 +207,7 @@ export function TradingPage({ token, onViewChart }) {
             setBacktestStatus("completed");
             // Load OHLCV data for the chart
             try {
-              const bars = await api.getOhlcv(symbol, res.start_date, res.end_date, token);
+              const bars = await api.getOhlcv(symbol, token, 2);
               setOhlcvData(
                 (bars || []).map((b) => ({
                   date: b.date || b.timestamp,
