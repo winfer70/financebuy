@@ -121,8 +121,8 @@ services:
     restart: unless-stopped
     command: ["arq", "app.trading.worker.WorkerSettings"]
     healthcheck:
-      # arq has no HTTP endpoint — just check the process is alive
-      test: ["CMD-SHELL", "pgrep -f 'arq' || exit 1"]
+      # arq has no HTTP endpoint — verify PID 1 (arq) is still running
+      test: ["CMD-SHELL", "test -d /proc/1 || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
