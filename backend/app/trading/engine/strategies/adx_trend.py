@@ -128,6 +128,52 @@ def generate_signals(bars: List[OHLCVBar], params: Dict[str, Any]) -> List[Signa
     return signals
 
 
+def indicator_outputs(bars: List[OHLCVBar], params: Dict[str, Any]) -> Dict[str, List[float]]:
+    """Expose indicator series for the composition engine.
+
+    Args:
+        bars:   Chronological OHLCV bars.
+        params: Strategy parameters.
+
+    Returns:
+        Dict mapping indicator names to float series.
+    """
+    period = params.get("period", 14)
+    n = len(bars)
+    tr_list = [0.0] * n
+    plus_dm = [0.0] * n
+    minus_dm = [0.0] * n
+    for i in range(1, n):
+        high_diff = bars[i].high - bars[i - 1].high
+        low_diff = bars[i - 1].low - bars[i].low
+        tr_list[i] = max(
+            bars[i].high - bars[i].low,
+            abs(bars[i].high - bars[i - 1].close),
+            abs(bars[i].low - bars[i - 1].close),
+        )
+        plus_dm[i] = high_diff if high_diff > low_diff and high_diff > 0 else 0
+        minus_dm[i] = low_diff if low_diff > high_diff and low_diff > 0 else 0
+    atr_vals = _wilder_smooth(tr_list, period)
+    plus_di_raw = _wilder_smooth(plus_dm, period)
+    minus_di_raw = _wilder_smooth(minus_dm, period)
+    plus_di = [0.0] * n
+    minus_di = [0.0] * n
+    for i in range(n):
+        if atr_vals[i] > 0:
+            plus_di[i] = (plus_di_raw[i] / atr_vals[i]) * 100
+            minus_di[i] = (minus_di_raw[i] / atr_vals[i]) * 100
+    dx = [0.0] * n
+    for i in range(n):
+        di_sum = plus_di[i] + minus_di[i]
+        dx[i] = (abs(plus_di[i] - minus_di[i]) / di_sum * 100) if di_sum > 0 else 0
+    adx_vals = _wilder_smooth(dx, period)
+    return {
+        "adx": adx_vals,
+        "plus_di": plus_di,
+        "minus_di": minus_di,
+    }
+
+
 register(
     slug="adx_trend",
     name="ADX Trend",

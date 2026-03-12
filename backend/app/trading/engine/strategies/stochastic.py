@@ -92,6 +92,35 @@ def generate_signals(bars: List[OHLCVBar], params: Dict[str, Any]) -> List[Signa
     return signals
 
 
+def indicator_outputs(bars: List[OHLCVBar], params: Dict[str, Any]) -> Dict[str, List[float]]:
+    """Expose indicator series for the composition engine.
+
+    Args:
+        bars:   Chronological OHLCV bars.
+        params: Strategy parameters.
+
+    Returns:
+        Dict mapping indicator names to float series.
+    """
+    k_period = params.get("k_period", 14)
+    d_period = params.get("d_period", 3)
+    n = len(bars)
+    pct_k = [0.0] * n
+    for i in range(k_period - 1, n):
+        window = bars[i - k_period + 1 : i + 1]
+        highest = max(b.high for b in window)
+        lowest = min(b.low for b in window)
+        rng = highest - lowest
+        pct_k[i] = ((bars[i].close - lowest) / rng * 100) if rng > 0 else 50.0
+    pct_d = [0.0] * n
+    for i in range(k_period + d_period - 2, n):
+        pct_d[i] = sum(pct_k[i - d_period + 1 : i + 1]) / d_period
+    return {
+        "pct_k": pct_k,
+        "pct_d": pct_d,
+    }
+
+
 register(
     slug="stochastic",
     name="Stochastic Oscillator",

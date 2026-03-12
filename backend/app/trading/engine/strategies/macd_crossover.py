@@ -100,6 +100,40 @@ def generate_signals(bars: List[OHLCVBar], params: Dict[str, Any]) -> List[Signa
     return signals
 
 
+def indicator_outputs(bars: List[OHLCVBar], params: Dict[str, Any]) -> Dict[str, List[float]]:
+    """Expose indicator series for the composition engine.
+
+    Args:
+        bars:   Chronological OHLCV bars.
+        params: Strategy parameters.
+
+    Returns:
+        Dict mapping indicator names to float series.
+    """
+    closes = [b.close for b in bars]
+    fast_p = params.get("fast", 12)
+    slow_p = params.get("slow", 26)
+    sig_p = params.get("signal", 9)
+    fast_ema = _ema(closes, fast_p)
+    slow_ema = _ema(closes, slow_p)
+    macd_line = [0.0] * len(closes)
+    for i in range(slow_p - 1, len(closes)):
+        if fast_ema[i] and slow_ema[i]:
+            macd_line[i] = fast_ema[i] - slow_ema[i]
+    macd_values = macd_line[slow_p - 1:]
+    sig_ema = _ema(macd_values, sig_p)
+    signal_line = [0.0] * len(closes)
+    offset = slow_p - 1
+    for i in range(len(sig_ema)):
+        signal_line[offset + i] = sig_ema[i]
+    histogram = [macd_line[i] - signal_line[i] for i in range(len(closes))]
+    return {
+        "macd_line": macd_line,
+        "signal_line": signal_line,
+        "histogram": histogram,
+    }
+
+
 register(
     slug="macd_crossover",
     name="MACD Crossover",

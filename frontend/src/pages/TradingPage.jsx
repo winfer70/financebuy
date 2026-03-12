@@ -26,6 +26,9 @@ import { fmtUSD, fmtPct, fmtDate } from "../utils/formatters";
 import PeriodSelector from "../components/common/PeriodSelector";
 import StatBlock from "../components/common/StatBlock";
 import EmptyState from "../components/common/EmptyState";
+import ParameterEditor from "../components/trading/ParameterEditor";
+import PineScriptEditor from "../components/trading/PineScriptEditor";
+import CompositionEditor from "../components/trading/CompositionEditor";
 
 /* -- Constants ------------------------------------------------------------ */
 
@@ -60,6 +63,7 @@ const DISCLAIMER =
 
 export function TradingPage({ token, onViewChart }) {
   /* -- State: controls ---------------------------------------------------- */
+  const [strategyMode, setStrategyMode] = useState("builtin"); // builtin | pinescript | compose
   const [symbol, setSymbol] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
@@ -410,54 +414,91 @@ export function TradingPage({ token, onViewChart }) {
               </div>
             </div>
 
-            {/* Strategy selector */}
+            {/* Strategy mode selector + content */}
             <div className="panel" style={{ padding: 12 }}>
               <div className="panel-title" style={{ marginBottom: 8 }}>STRATEGY</div>
-              <select
-                className="form-control"
-                value={selectedStrategy?.slug || ""}
-                onChange={handleStrategyChange}
-              >
-                <option value="">-- Select --</option>
-                {strategies.map((s) => (
-                  <option key={s.slug || s.strategy_id} value={s.slug}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
 
-              {/* Dynamic parameter sliders */}
-              {selectedStrategy?.param_schema &&
-                selectedStrategy.param_schema.map((p) => (
-                  <div key={p.name} style={{ marginTop: 10 }}>
-                    <label
-                      className="form-label"
-                      style={{ display: "flex", justifyContent: "space-between" }}
-                    >
-                      <span>{p.label || p.name}</span>
-                      <span style={{ color: "var(--amber)" }}>
-                        {params[p.name] ?? p.default}
-                      </span>
-                    </label>
-                    <input
-                      type="range"
-                      min={p.min}
-                      max={p.max}
-                      step={p.step}
-                      value={params[p.name] ?? p.default}
-                      onChange={(e) =>
-                        updateParam(
-                          p.name,
-                          p.type === "float"
-                            ? parseFloat(e.target.value)
-                            : parseInt(e.target.value, 10),
-                        )
-                      }
-                      style={{ width: "100%", accentColor: "var(--amber)" }}
-                    />
-                  </div>
+              {/* Mode selector tabs */}
+              <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
+                {[
+                  { id: "builtin", label: "BUILT-IN" },
+                  { id: "pinescript", label: "PINESCRIPT" },
+                  { id: "compose", label: "COMPOSE" },
+                ].map((m) => (
+                  <button
+                    key={m.id}
+                    className={`filter-btn${strategyMode === m.id ? " active" : ""}`}
+                    style={{ padding: "4px 10px", fontSize: 9 }}
+                    onClick={() => setStrategyMode(m.id)}
+                  >
+                    {m.label}
+                  </button>
                 ))}
+              </div>
+
+              {/* BUILT-IN mode: strategy dropdown + ParameterEditor */}
+              {strategyMode === "builtin" && (
+                <>
+                  <select
+                    className="form-control"
+                    value={selectedStrategy?.slug || ""}
+                    onChange={handleStrategyChange}
+                  >
+                    <option value="">-- Select --</option>
+                    {strategies.map((s) => (
+                      <option key={s.slug || s.strategy_id} value={s.slug}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* Strategy badge */}
+                  {selectedStrategy && (
+                    <div style={{ marginTop: 6, display: "flex", gap: 4 }}>
+                      <span style={{
+                        fontSize: 8, padding: "2px 6px", borderRadius: 3,
+                        background: "rgba(0,200,100,0.15)", color: "#00c864", border: "1px solid rgba(0,200,100,0.3)",
+                      }}>
+                        VERIFIED
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Parameter sliders */}
+                  {selectedStrategy?.param_schema && (
+                    <ParameterEditor
+                      paramSchema={selectedStrategy.param_schema}
+                      params={params}
+                      onChange={updateParam}
+                      onReset={() => {
+                        if (selectedStrategy?.default_params) setParams({ ...selectedStrategy.default_params });
+                      }}
+                    />
+                  )}
+                </>
+              )}
             </div>
+
+            {/* PINESCRIPT mode: PineScriptEditor below strategy panel */}
+            {strategyMode === "pinescript" && (
+              <PineScriptEditor
+                token={token}
+                onTranspiled={(def, sid) => {
+                  // After PineScript transpile, show AI-Translated badge info
+                  // and optionally auto-select for backtest
+                }}
+              />
+            )}
+
+            {/* COMPOSE mode: CompositionEditor */}
+            {strategyMode === "compose" && (
+              <CompositionEditor
+                token={token}
+                onCreated={(sid) => {
+                  // Composed strategy created — could auto-select for backtest
+                }}
+              />
+            )}
 
             {/* Interval + Period */}
             <div className="panel" style={{ padding: 12 }}>

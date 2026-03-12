@@ -90,6 +90,25 @@ def generate_signals(bars: List[OHLCVBar], params: Dict[str, Any]) -> List[Signa
     return signals
 
 
+def indicator_outputs(bars: List[OHLCVBar], params: Dict[str, Any]) -> Dict[str, List[float]]:
+    """Expose indicator series for the composition engine.
+
+    Args:
+        bars:   Chronological OHLCV bars.
+        params: Strategy parameters.
+
+    Returns:
+        Dict mapping indicator names to float series.
+    """
+    closes = [b.close for b in bars]
+    fast_p = params.get("fast_period", 9)
+    slow_p = params.get("slow_period", 21)
+    return {
+        "fast_ema": _ema(closes, fast_p),
+        "slow_ema": _ema(closes, slow_p),
+    }
+
+
 register(
     slug="ema_crossover",
     name="EMA Crossover",

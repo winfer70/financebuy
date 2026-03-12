@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-10
 **Project:** TickerTap
-**Status:** Phases 1–3 implemented and deployed
+**Status:** Phases 1–4 implemented and deployed
 
 ---
 
@@ -1505,16 +1505,16 @@ PHASE 3 — AI & ML:                                    ✅ COMPLETED
 69. [x] Add position sizing controls to TradingPage
 
 PHASE 4 — PineScript & Composition:
-70. Define lark EBNF grammar for PineScript subset (pinescript/grammar.py)
-71. Implement deterministic transpiler (pinescript/transpiler.py)
-72. Implement LLM fallback with AST validation (pinescript/llm_fallback.py)
-73. Add PineScript API routes (validate, transpile)
-74. Add strategy version history API routes
-75. Build PineScriptEditor component (frontend)
-76. Build ParameterEditor component (frontend)
-77. Implement indicator-level strategy composition engine (engine/composition.py)
-78. Build CompositionEditor visual node editor (frontend)
-79. Add "Verified" / "AI-Translated" badges to strategy cards
+70. [x] Define lark EBNF grammar for PineScript subset (pinescript/grammar.py)
+71. [x] Implement deterministic transpiler (pinescript/transpiler.py)
+72. [x] Implement LLM fallback with AST validation (pinescript/llm_fallback.py)
+73. [x] Add PineScript API routes (validate, transpile)
+74. [x] Add strategy version history API routes
+75. [x] Build PineScriptEditor component (frontend)
+76. [x] Build ParameterEditor component (frontend)
+77. [x] Implement indicator-level strategy composition engine (engine/composition.py)
+78. [x] Build CompositionEditor visual node editor (frontend)
+79. [x] Add "Verified" / "AI-Translated" badges to strategy cards
 
 PHASE 5 — Social & Integration:
 80. Create Alembic migration 0018 (strategy_ratings, strategy_usage)

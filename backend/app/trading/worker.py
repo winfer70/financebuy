@@ -132,7 +132,7 @@ async def run_backtest(ctx: dict, backtest_id: str) -> None:
             await session.commit()
             return
 
-        # Resolve signal generator from the built-in registry
+        # Resolve signal generator based on strategy type
         definition = strategy.definition_json or {}
         slug = definition.get("strategy_slug", "")
         params = definition.get("params", {})
@@ -141,16 +141,27 @@ async def run_backtest(ctx: dict, backtest_id: str) -> None:
         if bt.parameters_json:
             params.update(bt.parameters_json)
 
-        try:
-            strat_module = get_strategy(slug)
-        except KeyError:
-            bt.status = "failed"
-            bt.error_message = f"Unknown strategy slug: {slug}"
-            bt.completed_at = datetime.utcnow()
-            await session.commit()
-            return
+        strategy_type = strategy.strategy_type or "builtin"
 
-        signal_fn = strat_module["generate_signals"]
+        if strategy_type == "pinescript":
+            # PineScript strategy — use the PineScript executor
+            from .pinescript.executor import resolve_pinescript_signals
+            signal_fn = resolve_pinescript_signals(definition)
+        elif strategy_type == "composed":
+            # Composed strategy — use the composition engine
+            from .engine.composition import resolve_composed_signals
+            signal_fn = resolve_composed_signals(definition)
+        else:
+            # Built-in / learned / ml — resolve from the registry
+            try:
+                strat_module = get_strategy(slug)
+            except KeyError:
+                bt.status = "failed"
+                bt.error_message = f"Unknown strategy slug: {slug}"
+                bt.completed_at = datetime.utcnow()
+                await session.commit()
+                return
+            signal_fn = strat_module["generate_signals"]
 
         # 4. Fetch OHLCV data
         provider = YFinanceProvider()

@@ -112,7 +112,16 @@ _SYSTEM_PROMPT = (
     "- Interface: Collapsible sidebar (icons-only mode) with preference saved automatically, "
     "breadcrumb in topbar shows translated page names, sidebar state persisted across sessions, "
     "full browser back/forward navigation support with pushState/popstate, "
-    "sidebar hover tooltips on all navigation buttons"
+    "sidebar hover tooltips on all navigation buttons\n"
+    "- Trading AI: 10 built-in strategies (SMA Crossover, EMA Crossover, RSI Mean Reversion, "
+    "MACD Crossover, Bollinger Squeeze, Stochastic, ADX Trend, VWAP Bounce, Breakout, "
+    "Ichimoku Cloud), backtest on historical OHLCV data with configurable parameters, "
+    "full metrics (Sharpe, Sortino, max drawdown, win rate, profit factor), equity curve, "
+    "trade log, signal overlays on chart, market regime detection, "
+    "PineScript editor for custom strategies with syntax validation and automatic transpilation, "
+    "LLM fallback for complex PineScript (AST-validated for safety), "
+    "Strategy Composer for visual indicator composition with boolean entry/exit expressions, "
+    "strategy version history with revert capability, Verified/AI-Translated badges"
 )
 
 

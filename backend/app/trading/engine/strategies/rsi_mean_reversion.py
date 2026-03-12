@@ -114,6 +114,23 @@ def generate_signals(bars: List[OHLCVBar], params: Dict[str, Any]) -> List[Signa
     return signals
 
 
+def indicator_outputs(bars: List[OHLCVBar], params: Dict[str, Any]) -> Dict[str, List[float]]:
+    """Expose indicator series for the composition engine.
+
+    Args:
+        bars:   Chronological OHLCV bars.
+        params: Strategy parameters.
+
+    Returns:
+        Dict mapping indicator names to float series.
+    """
+    closes = [b.close for b in bars]
+    period = params.get("period", 14)
+    return {
+        "rsi": _rsi(closes, period),
+    }
+
+
 register(
     slug="rsi_mean_reversion",
     name="RSI Mean Reversion",

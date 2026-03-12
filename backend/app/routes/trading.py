@@ -32,6 +32,9 @@ from ..schemas import (
     NotificationOut, NotificationMarkRead, PaginatedNotificationsResponse,
     WebhookCreate, WebhookOut, WebhookUpdate,
     RegimeRequest, RegimeResponse,
+    PineScriptValidateRequest, PineScriptValidateResponse,
+    PineScriptTranspileRequest, PineScriptTranspileResponse,
+    StrategyVersionOut, CompositionRequest,
 )
 from ..limiter import limiter
 from .auth_routes import get_current_user
@@ -165,6 +168,7 @@ async def create_strategy(
         new_values={"name": body.name, "type": body.strategy_type},
     )
     await db.commit()
+    await db.refresh(strategy)
     return strategy
 
 
@@ -254,6 +258,7 @@ async def update_strategy(
         new_values=updates,
     )
     await db.commit()
+    await db.refresh(strategy)
     return strategy
 
 
@@ -342,7 +347,356 @@ async def clone_strategy(
     )
     db.add(clone)
     await db.commit()
+    await db.refresh(clone)
     return clone
+
+
+# ── PineScript routes ────────────────────────────────────────────────
+
+
+@router.post("/pinescript/validate", response_model=PineScriptValidateResponse)
+@limiter.limit("60/minute")
+async def validate_pinescript(
+    body: PineScriptValidateRequest,
+    request: Request,
+    current_user=Depends(get_current_user),
+):
+    """Validate PineScript source code syntax.
+
+    Parses the code with the lark grammar and returns any syntax errors.
+    Does not create a strategy — use /pinescript/transpile for that.
+
+    Args:
+        body: Source code to validate.
+
+    Returns:
+        Validation result with boolean and error list.
+    """
+    from ..trading.pinescript import validate as ps_validate
+    result = ps_validate(body.source_code)
+    return PineScriptValidateResponse(
+        valid=result.valid,
+        errors=result.errors,
+    )
+
+
+@router.post("/pinescript/transpile", response_model=PineScriptTranspileResponse)
+@limiter.limit("20/minute")
+async def transpile_pinescript(
+    body: PineScriptTranspileRequest,
+    request: Request,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Transpile PineScript source and create a strategy.
+
+    Attempts deterministic lark transpilation first. If that fails and
+    ``use_llm_fallback`` is True, falls back to Ollama LLM translation.
+
+    Args:
+        body: PineScript source, name, description, and LLM fallback flag.
+
+    Returns:
+        Transpilation result with strategy ID and compiled definition.
+    """
+    from ..trading.pinescript import transpile as ps_transpile
+    from ..trading.pinescript import PineScriptError
+
+    definition = None
+    warnings = []
+
+    # Try deterministic transpilation first
+    try:
+        definition = ps_transpile(body.source_code)
+    except PineScriptError as exc:
+        if not body.use_llm_fallback:
+            return PineScriptTranspileResponse(
+                success=False,
+                errors=[str(exc)],
+            )
+        # Fall through to LLM fallback
+        warnings.append(f"Lark parse failed: {exc}. Attempting LLM fallback.")
+
+    # LLM fallback
+    if definition is None and body.use_llm_fallback:
+        try:
+            from ..trading.pinescript.llm_fallback import llm_transpile, LLMTranspileError
+            definition = await llm_transpile(body.source_code)
+        except LLMTranspileError as exc:
+            return PineScriptTranspileResponse(
+                success=False,
+                errors=[f"LLM fallback failed: {exc}"],
+                warnings=warnings,
+            )
+
+    if definition is None:
+        return PineScriptTranspileResponse(
+            success=False,
+            errors=["Transpilation failed."],
+            warnings=warnings,
+        )
+
+    # Create a Strategy row
+    strategy = Strategy(
+        strategy_id=uuid.uuid4(),
+        user_id=current_user.user_id,
+        name=body.name,
+        description=body.description,
+        strategy_type="pinescript",
+        definition_json=definition,
+    )
+    db.add(strategy)
+    await _audit(
+        db, current_user.user_id, "strategy_created",
+        record_id=strategy.strategy_id,
+        new_values={"name": body.name, "type": "pinescript",
+                    "transpile_method": definition.get("transpile_method")},
+    )
+    await db.commit()
+
+    return PineScriptTranspileResponse(
+        success=True,
+        strategy_id=strategy.strategy_id,
+        transpile_method=definition.get("transpile_method"),
+        definition_json=definition,
+        warnings=warnings,
+    )
+
+
+# ── Strategy Version History routes ──────────────────────────────────
+
+
+@router.get("/strategies/{strategy_id}/versions", response_model=list)
+async def list_strategy_versions(
+    strategy_id: uuid.UUID,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List version history for a strategy.
+
+    Args:
+        strategy_id: UUID of the strategy.
+
+    Returns:
+        List of version snapshots (newest first).
+    """
+    # Verify access
+    strat_stmt = select(Strategy).where(
+        Strategy.strategy_id == strategy_id,
+        or_(
+            Strategy.user_id == current_user.user_id,
+            Strategy.is_system == True,  # noqa: E712
+        ),
+    )
+    strat_result = await db.execute(strat_stmt)
+    if not strat_result.scalar_one_or_none():
+        raise HTTPException(404, "Strategy not found.")
+
+    stmt = (
+        select(StrategyVersion)
+        .where(StrategyVersion.strategy_id == strategy_id)
+        .order_by(StrategyVersion.version_number.desc())
+    )
+    result = await db.execute(stmt)
+    versions = result.scalars().all()
+    return [
+        {
+            "version_id": str(v.version_id),
+            "strategy_id": str(v.strategy_id),
+            "version_number": v.version_number,
+            "definition_json": v.definition_json,
+            "created_at": v.created_at.isoformat() if v.created_at else None,
+        }
+        for v in versions
+    ]
+
+
+@router.get("/strategies/{strategy_id}/versions/{version_number}")
+async def get_strategy_version(
+    strategy_id: uuid.UUID,
+    version_number: int,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get a specific version of a strategy.
+
+    Args:
+        strategy_id:    UUID of the strategy.
+        version_number: Numeric version to retrieve.
+
+    Returns:
+        Version snapshot dict.
+    """
+    stmt = select(StrategyVersion).where(
+        StrategyVersion.strategy_id == strategy_id,
+        StrategyVersion.version_number == version_number,
+    )
+    result = await db.execute(stmt)
+    version = result.scalar_one_or_none()
+    if not version:
+        raise HTTPException(404, "Version not found.")
+    return {
+        "version_id": str(version.version_id),
+        "strategy_id": str(version.strategy_id),
+        "version_number": version.version_number,
+        "definition_json": version.definition_json,
+        "created_at": version.created_at.isoformat() if version.created_at else None,
+    }
+
+
+@router.post("/strategies/{strategy_id}/revert/{version_number}", response_model=StrategyOut)
+@limiter.limit("10/minute")
+async def revert_strategy_version(
+    strategy_id: uuid.UUID,
+    version_number: int,
+    request: Request,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revert a strategy to a previous version.
+
+    Creates a new version snapshot of the current state, then replaces
+    the definition with the specified historical version.
+
+    Args:
+        strategy_id:    UUID of the strategy.
+        version_number: Version to revert to.
+
+    Returns:
+        Updated strategy.
+    """
+    # Load the strategy
+    strat_stmt = select(Strategy).where(
+        Strategy.strategy_id == strategy_id,
+        Strategy.user_id == current_user.user_id,
+    )
+    strat_result = await db.execute(strat_stmt)
+    strategy = strat_result.scalar_one_or_none()
+    if not strategy:
+        raise HTTPException(404, "Strategy not found or not owned by you.")
+    if strategy.is_system:
+        raise HTTPException(403, "Cannot modify system strategies.")
+
+    # Load the target version
+    ver_stmt = select(StrategyVersion).where(
+        StrategyVersion.strategy_id == strategy_id,
+        StrategyVersion.version_number == version_number,
+    )
+    ver_result = await db.execute(ver_stmt)
+    target_version = ver_result.scalar_one_or_none()
+    if not target_version:
+        raise HTTPException(404, f"Version {version_number} not found.")
+
+    # Snapshot current state before reverting
+    snapshot = StrategyVersion(
+        version_id=uuid.uuid4(),
+        strategy_id=strategy.strategy_id,
+        version_number=strategy.version,
+        definition_json=strategy.definition_json,
+    )
+    db.add(snapshot)
+
+    # Revert
+    strategy.definition_json = target_version.definition_json
+    strategy.version += 1
+    strategy.updated_at = datetime.utcnow()
+
+    await _audit(
+        db, current_user.user_id, "strategy_reverted",
+        record_id=strategy.strategy_id,
+        new_values={"reverted_to_version": version_number},
+    )
+    await db.commit()
+    await db.refresh(strategy)
+    return strategy
+
+
+# ── Composition route ────────────────────────────────────────────────
+
+
+@router.post("/compose", response_model=StrategyOut, status_code=201)
+@limiter.limit("20/minute")
+async def create_composed_strategy(
+    body: CompositionRequest,
+    request: Request,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a composed strategy from indicator nodes and logic expressions.
+
+    The composition_json should contain:
+      - indicators: list of indicator node definitions
+      - entry_expr: boolean expression for entry (e.g. "fast_sma > slow_sma")
+      - exit_expr: boolean expression for exit
+      - stop_loss: optional stop loss config
+      - params: default parameter values
+      - param_schema: parameter definitions for the UI
+
+    Args:
+        body: Composition creation payload.
+
+    Returns:
+        The newly created strategy.
+    """
+    # Validate expressions are safe
+    from ..trading.engine.composition import _validate_expression
+    comp = body.composition_json
+
+    entry_expr = comp.get("entry_expr", "")
+    exit_expr = comp.get("exit_expr", "")
+
+    if entry_expr:
+        try:
+            _validate_expression(entry_expr)
+        except ValueError as exc:
+            raise HTTPException(400, f"Invalid entry expression: {exc}")
+    if exit_expr:
+        try:
+            _validate_expression(exit_expr)
+        except ValueError as exc:
+            raise HTTPException(400, f"Invalid exit expression: {exc}")
+
+    # Build definition_json — normalize node format to fn/args
+    raw_nodes = comp.get("nodes", comp.get("indicators", []))
+    indicators = []
+    for node in raw_nodes:
+        indicators.append({
+            "fn": node.get("fn", node.get("indicator", "")),
+            "args": node.get("args", node.get("params", {})),
+            "output_var": node.get("output_var", ""),
+        })
+
+    definition = {
+        "strategy_slug": f"composed_{uuid.uuid4().hex[:8]}",
+        "source_type": "composed",
+        "compiled": {
+            "indicators": indicators,
+            "entry_expr": entry_expr,
+            "exit_expr": exit_expr,
+            "stop_loss": comp.get("stop_loss"),
+            "stop_loss_pct": comp.get("stop_loss_pct"),
+        },
+        "params": comp.get("params", {}),
+        "param_schema": comp.get("param_schema", []),
+    }
+
+    strategy = Strategy(
+        strategy_id=uuid.uuid4(),
+        user_id=current_user.user_id,
+        name=body.name,
+        description=body.description,
+        strategy_type="composed",
+        definition_json=definition,
+    )
+    db.add(strategy)
+    await _audit(
+        db, current_user.user_id, "strategy_created",
+        record_id=strategy.strategy_id,
+        new_values={"name": body.name, "type": "composed"},
+    )
+    await db.commit()
+    await db.refresh(strategy)
+    return strategy
 
 
 # ── Backtest routes ───────────────────────────────────────────────────────
