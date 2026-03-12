@@ -73,6 +73,33 @@ def generate_signals(bars: List[OHLCVBar], params: Dict[str, Any]) -> List[Signa
     return signals
 
 
+def indicator_outputs(bars: List[OHLCVBar], params: Dict[str, Any]) -> Dict[str, List[float]]:
+    """Expose indicator series for the composition engine.
+
+    Args:
+        bars:   Chronological OHLCV bars.
+        params: Strategy parameters.
+
+    Returns:
+        Dict mapping indicator names to float series.
+    """
+    lookback = params.get("lookback", 20)
+    n = len(bars)
+    highest_high = [0.0] * n
+    lowest_low = [0.0] * n
+    avg_volume = [0.0] * n
+    for i in range(lookback, n):
+        window = bars[i - lookback : i]
+        highest_high[i] = max(b.high for b in window)
+        lowest_low[i] = min(b.low for b in window)
+        avg_volume[i] = sum(b.volume for b in window) / lookback
+    return {
+        "highest_high": highest_high,
+        "lowest_low": lowest_low,
+        "avg_volume": avg_volume,
+    }
+
+
 register(
     slug="breakout",
     name="Breakout",

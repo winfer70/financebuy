@@ -94,6 +94,27 @@ def generate_signals(bars: List[OHLCVBar], params: Dict[str, Any]) -> List[Signa
     return signals
 
 
+def indicator_outputs(bars: List[OHLCVBar], params: Dict[str, Any]) -> Dict[str, List[float]]:
+    """Expose indicator series for the composition engine.
+
+    Args:
+        bars:   Chronological OHLCV bars.
+        params: Strategy parameters.
+
+    Returns:
+        Dict mapping indicator names to float series.
+    """
+    deviation = params.get("deviation", 0.02)
+    vwap_vals = _compute_vwap(bars)
+    lower_band = [v * (1 - deviation) if v > 0 else 0.0 for v in vwap_vals]
+    upper_band = [v * (1 + deviation) if v > 0 else 0.0 for v in vwap_vals]
+    return {
+        "vwap": vwap_vals,
+        "vwap_lower": lower_band,
+        "vwap_upper": upper_band,
+    }
+
+
 register(
     slug="vwap_bounce",
     name="VWAP Bounce",

@@ -89,6 +89,40 @@ def generate_signals(bars: List[OHLCVBar], params: Dict[str, Any]) -> List[Signa
     return signals
 
 
+def indicator_outputs(bars: List[OHLCVBar], params: Dict[str, Any]) -> Dict[str, List[float]]:
+    """Expose indicator series for the composition engine.
+
+    Args:
+        bars:   Chronological OHLCV bars.
+        params: Strategy parameters.
+
+    Returns:
+        Dict mapping indicator names to float series.
+    """
+    closes = [b.close for b in bars]
+    period = params.get("period", 20)
+    num_std = params.get("std_dev", 2.0)
+    n = len(closes)
+    bb_sma = [0.0] * n
+    bb_upper = [0.0] * n
+    bb_lower = [0.0] * n
+    bb_bandwidth = [0.0] * n
+    for i in range(period - 1, n):
+        window = closes[i - period + 1 : i + 1]
+        mean = sum(window) / period
+        std = math.sqrt(sum((x - mean) ** 2 for x in window) / period)
+        bb_sma[i] = mean
+        bb_upper[i] = mean + num_std * std
+        bb_lower[i] = mean - num_std * std
+        bb_bandwidth[i] = (bb_upper[i] - bb_lower[i]) / mean if mean > 0 else 0
+    return {
+        "bb_sma": bb_sma,
+        "bb_upper": bb_upper,
+        "bb_lower": bb_lower,
+        "bb_bandwidth": bb_bandwidth,
+    }
+
+
 register(
     slug="bollinger_squeeze",
     name="Bollinger Band Squeeze",

@@ -649,6 +649,36 @@ const api = {
    */
   detectRegime: (body, token) =>
     apiFetch("/trading/regime", { method: "POST", body, token }),
+
+  // ── PineScript ─────────────────────────────────────────────────────
+
+  /** Validate PineScript syntax. */
+  validatePinescript: (sourceCode, token) =>
+    apiFetch("/trading/pinescript/validate", { method: "POST", body: { source_code: sourceCode }, token }),
+
+  /** Transpile PineScript and create a strategy. */
+  transpilePinescript: (body, token) =>
+    apiFetch("/trading/pinescript/transpile", { method: "POST", body, token }),
+
+  // ── Strategy Composition ──────────────────────────────────────────
+
+  /** Create a composed strategy from indicator nodes + expressions. */
+  createComposedStrategy: (body, token) =>
+    apiFetch("/trading/compose", { method: "POST", body, token }),
+
+  // ── Strategy Version History ──────────────────────────────────────
+
+  /** List version history for a strategy. */
+  listStrategyVersions: (strategyId, token) =>
+    apiFetch(`/trading/strategies/${strategyId}/versions`, { token }),
+
+  /** Get a specific version of a strategy. */
+  getStrategyVersion: (strategyId, versionNumber, token) =>
+    apiFetch(`/trading/strategies/${strategyId}/versions/${versionNumber}`, { token }),
+
+  /** Revert a strategy to a previous version. */
+  revertStrategyVersion: (strategyId, versionNumber, token) =>
+    apiFetch(`/trading/strategies/${strategyId}/revert/${versionNumber}`, { method: "POST", token }),
 };
 
 export default api;

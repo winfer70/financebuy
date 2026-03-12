@@ -219,6 +219,22 @@ const FEATURES = [
       "Sidebar state persisted across sessions",
     ],
   },
+  {
+    title: "TRADING AI",
+    icon: "chart",
+    items: [
+      "10 built-in strategies: SMA Crossover, EMA Crossover, RSI Mean Reversion, MACD Crossover, Bollinger Squeeze, Stochastic, ADX Trend, VWAP Bounce, Breakout, Ichimoku Cloud",
+      "Backtest any strategy on historical OHLCV data with configurable commission, slippage, and date ranges",
+      "Full performance metrics: Sharpe ratio, Sortino, max drawdown, win rate, profit factor, Calmar ratio",
+      "Equity curve chart and detailed trade log with entry/exit prices and P&L",
+      "Market regime detection: trending, mean reverting, or high volatility",
+      "PineScript editor: write TradingView-compatible code, syntax validation, and automatic transpilation to executable strategies",
+      "LLM fallback: complex PineScript is translated via AI with safety validation (AST whitelist)",
+      "Strategy Composer: visually combine indicators (SMA, EMA, RSI, MACD, BB, ATR, ADX, Stochastic, VWAP) with boolean entry/exit expressions",
+      "Strategy version history: every edit is snapshotted, view or revert to any previous version",
+      "Verified/AI-Translated badges distinguish built-in strategies from user-authored ones",
+    ],
+  },
 ];
 
 /* ── FAQ entries (static answers) ─────────────────────────────────────────── */
@@ -338,6 +354,22 @@ const FAQ_ITEMS = [
   {
     q: "Can I filter news by my watchlist?",
     a: "Yes — click the WATCHLIST toggle button on the News page to show only articles related to tickers in your watchlists. This is mutually exclusive with the PORTFOLIO filter, so activating one deactivates the other.",
+  },
+  {
+    q: "How do I write a PineScript strategy?",
+    a: "Go to the Trading page and select the PINESCRIPT mode tab. A code editor with syntax highlighting appears with a default SMA crossover template. Write your strategy using supported ta.* functions (sma, ema, rsi, macd, atr, adx, stoch, vwap, crossover, crossunder), input.* for parameters, and strategy.entry/exit for signals. Click VALIDATE to check syntax, then TRANSPILE & CREATE to compile it into a backtestable strategy.",
+  },
+  {
+    q: "What is the LLM fallback for PineScript?",
+    a: "When the deterministic parser can't handle complex PineScript syntax, you can enable the 'LLM fallback' checkbox. This sends your code to a local AI model which translates it into the strategy format. AI-translated strategies receive an 'AI-Translated' badge. The generated code is safety-validated through an AST whitelist before use.",
+  },
+  {
+    q: "How do I compose a strategy without coding?",
+    a: "Select the COMPOSE mode on the Trading page. Click indicators from the palette (SMA, EMA, RSI, MACD, etc.) to add them as nodes. Configure each node's parameters (period, source, etc.). Write entry and exit conditions as simple expressions referencing the indicator output variables (e.g. 'sma_0 > sma_1 and rsi_2 < 30'). Click CREATE COMPOSED STRATEGY.",
+  },
+  {
+    q: "Can I view or revert strategy version history?",
+    a: "Yes — every time you update a strategy, a version snapshot is automatically saved. Use the API endpoints GET /strategies/{id}/versions to list versions and POST /strategies/{id}/revert/{version} to revert. Version history UI integration is available in the strategy management section.",
   },
 ];
 

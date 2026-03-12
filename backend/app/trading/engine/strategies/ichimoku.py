@@ -122,6 +122,43 @@ def generate_signals(bars: List[OHLCVBar], params: Dict[str, Any]) -> List[Signa
     return signals
 
 
+def indicator_outputs(bars: List[OHLCVBar], params: Dict[str, Any]) -> Dict[str, List[float]]:
+    """Expose indicator series for the composition engine.
+
+    Args:
+        bars:   Chronological OHLCV bars.
+        params: Strategy parameters.
+
+    Returns:
+        Dict mapping indicator names to float series.
+    """
+    tenkan_p = params.get("tenkan", 9)
+    kijun_p = params.get("kijun", 26)
+    senkou_b_p = params.get("senkou_b", 52)
+    n = len(bars)
+    tenkan_vals = [0.0] * n
+    for i in range(tenkan_p - 1, n):
+        hh, ll = _period_high_low(bars, i, tenkan_p)
+        tenkan_vals[i] = (hh + ll) / 2
+    kijun_vals = [0.0] * n
+    for i in range(kijun_p - 1, n):
+        hh, ll = _period_high_low(bars, i, kijun_p)
+        kijun_vals[i] = (hh + ll) / 2
+    senkou_a_vals = [0.0] * n
+    senkou_b_vals = [0.0] * n
+    for i in range(kijun_p - 1, n):
+        senkou_a_vals[i] = (tenkan_vals[i] + kijun_vals[i]) / 2
+        if i >= senkou_b_p - 1:
+            hh, ll = _period_high_low(bars, i, senkou_b_p)
+            senkou_b_vals[i] = (hh + ll) / 2
+    return {
+        "tenkan_sen": tenkan_vals,
+        "kijun_sen": kijun_vals,
+        "senkou_span_a": senkou_a_vals,
+        "senkou_span_b": senkou_b_vals,
+    }
+
+
 register(
     slug="ichimoku",
     name="Ichimoku Cloud",

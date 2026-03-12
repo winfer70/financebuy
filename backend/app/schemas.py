@@ -924,7 +924,7 @@ class StrategyCreate(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=128, description="Strategy display name.")
     description: Optional[str] = Field(None, description="User-facing description.")
-    strategy_type: Literal["builtin", "learned", "pinescript", "ml"] = Field(
+    strategy_type: Literal["builtin", "learned", "pinescript", "composed", "ml"] = Field(
         ..., description="Strategy type."
     )
     category: Optional[Literal[
@@ -1158,3 +1158,70 @@ class RegimeResponse(BaseModel):
     confidence: float = Field(..., ge=0, le=1)
     volatility_percentile: float
     trend_strength: float
+
+
+# ── PineScript & Strategy Composition schemas (Phase 4) ─────────────────
+
+
+class PineScriptValidateRequest(BaseModel):
+    """PineScript syntax validation request."""
+
+    source_code: str = Field(
+        ..., min_length=10, max_length=50000,
+        description="Raw PineScript source code to validate.",
+    )
+
+
+class PineScriptValidateResponse(BaseModel):
+    """PineScript syntax validation result."""
+
+    valid: bool = Field(..., description="True if the script is syntactically valid.")
+    errors: List[Dict] = Field(default_factory=list, description="Syntax error details.")
+
+
+class PineScriptTranspileRequest(BaseModel):
+    """PineScript transpilation request — creates a strategy from PineScript code."""
+
+    source_code: str = Field(
+        ..., min_length=10, max_length=50000,
+        description="Raw PineScript source code.",
+    )
+    name: str = Field(..., min_length=1, max_length=128, description="Strategy display name.")
+    description: Optional[str] = Field(None, description="Strategy description.")
+    use_llm_fallback: bool = Field(
+        False, description="Use Ollama LLM translation if deterministic parse fails.",
+    )
+
+
+class PineScriptTranspileResponse(BaseModel):
+    """Transpilation result with compiled IR and strategy metadata."""
+
+    success: bool = Field(..., description="True if transpilation succeeded.")
+    strategy_id: Optional[UUID] = Field(None, description="Created strategy UUID.")
+    transpile_method: Optional[str] = Field(None, description="'lark' or 'llm'.")
+    definition_json: Optional[Dict] = Field(None, description="Full compiled definition.")
+    errors: List[str] = Field(default_factory=list, description="Error messages.")
+    warnings: List[str] = Field(default_factory=list, description="Non-fatal warnings.")
+
+
+class StrategyVersionOut(BaseModel):
+    """A single version in the strategy version history."""
+
+    version_id: UUID
+    strategy_id: UUID
+    version_number: int
+    definition_json: Dict
+    created_at: Optional[datetime]
+
+    class Config:
+        orm_mode = True
+
+
+class CompositionRequest(BaseModel):
+    """Create a composed strategy from indicator nodes and expressions."""
+
+    name: str = Field(..., min_length=1, max_length=128, description="Strategy display name.")
+    description: Optional[str] = Field(None, description="Strategy description.")
+    composition_json: Dict = Field(
+        ..., description="Composition definition: indicators, entry_expr, exit_expr, stop_loss, params, param_schema.",
+    )

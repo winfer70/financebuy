@@ -17,3 +17,4 @@ redis>=4.0
 arq>=0.25
 numpy>=1.24
 pandas>=2.0
+lark>=1.1
