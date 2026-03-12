@@ -211,7 +211,8 @@ export function TradingPage({ token, onViewChart }) {
             setBacktestStatus("completed");
             // Load OHLCV data for the chart
             try {
-              const bars = await api.getOhlcv(symbol, token, 2);
+              const resp = await api.getOhlcv(symbol, token, 2);
+              const bars = resp.bars || resp;
               setOhlcvData(
                 (bars || []).map((b) => ({
                   date: b.date || b.timestamp,
@@ -240,7 +241,7 @@ export function TradingPage({ token, onViewChart }) {
 
   /* -- Signal markers for the chart --------------------------------------- */
   const signalMarkers = useMemo(() => {
-    if (!backtestResult?.trades || ohlcvData.length === 0) return [];
+    if (!backtestResult?.results_json?.trades || ohlcvData.length === 0) return [];
     const markers = [];
     const dateMap = {};
     ohlcvData.forEach((bar, idx) => {
@@ -248,9 +249,9 @@ export function TradingPage({ token, onViewChart }) {
       dateMap[key] = idx;
     });
 
-    for (const trade of backtestResult.trades) {
-      const entryDate = (trade.entry_time || "").slice(0, 10);
-      const exitDate = (trade.exit_time || "").slice(0, 10);
+    for (const trade of backtestResult.results_json.trades) {
+      const entryDate = (trade.entry_date || "").slice(0, 10);
+      const exitDate = (trade.exit_date || "").slice(0, 10);
       if (dateMap[entryDate] !== undefined) {
         markers.push({
           index: dateMap[entryDate],
@@ -272,12 +273,13 @@ export function TradingPage({ token, onViewChart }) {
   }, [backtestResult, ohlcvData]);
 
   /* -- Metrics helper ----------------------------------------------------- */
-  const metrics = backtestResult?.metrics || {};
+  const metrics = backtestResult?.metrics_json || {};
+  const benchmarkData = backtestResult?.benchmark_json || {};
 
   /* -- Equity curve data -------------------------------------------------- */
   const equityCurve = useMemo(() => {
-    if (!backtestResult?.equity_curve) return [];
-    return backtestResult.equity_curve;
+    if (!backtestResult?.results_json?.equity_curve) return [];
+    return backtestResult.results_json.equity_curve;
   }, [backtestResult]);
 
   /* -- Replay logic ------------------------------------------------------- */
@@ -613,9 +615,9 @@ export function TradingPage({ token, onViewChart }) {
               <div className="panel" style={{ padding: 12 }}>
                 <div className="panel-title" style={{ marginBottom: 8 }}>PERFORMANCE</div>
                 {[
-                  { lbl: "TOTAL RETURN", val: fmtPct(metrics.total_return_pct), cls: (metrics.total_return_pct || 0) >= 0 ? "green" : "red" },
+                  { lbl: "TOTAL RETURN", val: fmtPct(metrics.total_return), cls: (metrics.total_return || 0) >= 0 ? "green" : "red" },
                   { lbl: "SHARPE RATIO", val: (metrics.sharpe_ratio || 0).toFixed(2), cls: "" },
-                  { lbl: "MAX DRAWDOWN", val: fmtPct(-(metrics.max_drawdown_pct || 0)), cls: "red" },
+                  { lbl: "MAX DRAWDOWN", val: fmtPct(-(metrics.max_drawdown || 0)), cls: "red" },
                   { lbl: "WIN RATE", val: fmtPct(metrics.win_rate), cls: "" },
                   { lbl: "PROFIT FACTOR", val: (metrics.profit_factor || 0).toFixed(2), cls: "" },
                   { lbl: "TOTAL TRADES", val: metrics.total_trades || 0, cls: "" },
@@ -637,7 +639,7 @@ export function TradingPage({ token, onViewChart }) {
                   </div>
                 ))}
                 {/* Overfit warning */}
-                {metrics.overfit_score > 0.5 && (
+                {metrics.overfit_warning && (
                   <div
                     style={{
                       marginTop: 8,
@@ -650,7 +652,7 @@ export function TradingPage({ token, onViewChart }) {
                       letterSpacing: "0.3px",
                     }}
                   >
-                    OVERFIT RISK: {(metrics.overfit_score * 100).toFixed(0)}%
+                    OVERFIT RISK DETECTED
                   </div>
                 )}
               </div>
@@ -788,8 +790,8 @@ export function TradingPage({ token, onViewChart }) {
                   <div>
                     <div className="grid-stats stagger" style={{ marginBottom: 16 }}>
                       {[
-                        { label: "TOTAL RETURN", value: fmtPct(metrics.total_return_pct), cls: (metrics.total_return_pct || 0) >= 0 ? "green" : "red" },
-                        { label: "ANNUALIZED", value: fmtPct(metrics.annualized_return_pct), cls: (metrics.annualized_return_pct || 0) >= 0 ? "green" : "red" },
+                        { label: "TOTAL RETURN", value: fmtPct(metrics.total_return), cls: (metrics.total_return || 0) >= 0 ? "green" : "red" },
+                        { label: "ANNUALIZED", value: fmtPct(metrics.annualized_return), cls: (metrics.annualized_return || 0) >= 0 ? "green" : "red" },
                         { label: "SHARPE", value: (metrics.sharpe_ratio || 0).toFixed(2), cls: "" },
                         { label: "SORTINO", value: (metrics.sortino_ratio || 0).toFixed(2), cls: "" },
                         { label: "WIN RATE", value: fmtPct(metrics.win_rate), cls: "" },
@@ -798,7 +800,7 @@ export function TradingPage({ token, onViewChart }) {
                       ))}
                     </div>
                     {/* Benchmark comparison */}
-                    {metrics.benchmark_return_pct != null && (
+                    {benchmarkData.buy_hold_return != null && (
                       <div
                         style={{
                           display: "flex",
@@ -811,20 +813,20 @@ export function TradingPage({ token, onViewChart }) {
                       >
                         <span>
                           <span style={{ color: "var(--muted)" }}>BUY & HOLD: </span>
-                          <span className={metrics.benchmark_return_pct >= 0 ? "green" : "red"}>
-                            {fmtPct(metrics.benchmark_return_pct)}
+                          <span className={benchmarkData.buy_hold_return >= 0 ? "green" : "red"}>
+                            {fmtPct(benchmarkData.buy_hold_return)}
                           </span>
                         </span>
                         <span>
                           <span style={{ color: "var(--muted)" }}>STRATEGY: </span>
-                          <span className={(metrics.total_return_pct || 0) >= 0 ? "green" : "red"}>
-                            {fmtPct(metrics.total_return_pct)}
+                          <span className={(metrics.total_return || 0) >= 0 ? "green" : "red"}>
+                            {fmtPct(metrics.total_return)}
                           </span>
                         </span>
                         <span>
                           <span style={{ color: "var(--muted)" }}>ALPHA: </span>
-                          <span className={(metrics.total_return_pct - metrics.benchmark_return_pct) >= 0 ? "green" : "red"}>
-                            {fmtPct((metrics.total_return_pct || 0) - (metrics.benchmark_return_pct || 0))}
+                          <span className={((metrics.total_return || 0) - benchmarkData.buy_hold_return) >= 0 ? "green" : "red"}>
+                            {fmtPct((metrics.total_return || 0) - (benchmarkData.buy_hold_return || 0))}
                           </span>
                         </span>
                       </div>
@@ -837,14 +839,14 @@ export function TradingPage({ token, onViewChart }) {
 
               {/* EQUITY CURVE tab */}
               {bottomTab === "equity" && (
-                backtestResult?.equity_curve?.length > 0 ? (
+                backtestResult?.results_json?.equity_curve?.length > 0 ? (
                   <OHLCVChart
                     data={equityCurve.map((pt) => ({
                       date: pt.date || pt.timestamp,
-                      open: pt.value,
-                      high: pt.value,
-                      low: pt.value,
-                      close: pt.value,
+                      open: pt.equity,
+                      high: pt.equity,
+                      low: pt.equity,
+                      close: pt.equity,
                       volume: 0,
                     }))}
                     chartType="line"
@@ -860,7 +862,7 @@ export function TradingPage({ token, onViewChart }) {
 
               {/* TRADE LOG tab */}
               {bottomTab === "trades" && (
-                backtestResult?.trades?.length > 0 ? (
+                backtestResult?.results_json?.trades?.length > 0 ? (
                   <div style={{ maxHeight: 200, overflowY: "auto" }}>
                     <table className="data-table">
                       <thead>
@@ -872,17 +874,17 @@ export function TradingPage({ token, onViewChart }) {
                           <th className="right">EXIT $</th>
                           <th className="right">P&L</th>
                           <th className="right">P&L %</th>
-                          <th>REASON</th>
+                          <th className="right">BARS</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {backtestResult.trades.map((t, i) => {
+                        {backtestResult.results_json.trades.map((t, i) => {
                           const pnl = (t.exit_price - t.entry_price) * (t.direction === "long" ? 1 : -1);
                           const pnlPct = t.entry_price ? (pnl / t.entry_price) * 100 : 0;
                           return (
                             <tr key={i}>
-                              <td>{fmtDate(t.entry_time)}</td>
-                              <td>{fmtDate(t.exit_time)}</td>
+                              <td>{fmtDate(t.entry_date)}</td>
+                              <td>{fmtDate(t.exit_date)}</td>
                               <td>
                                 <span className={`type-chip ${t.direction === "long" ? "tc-buy" : "tc-sell"}`}>
                                   {t.direction?.toUpperCase()}
@@ -896,9 +898,9 @@ export function TradingPage({ token, onViewChart }) {
                               <td className={`right ${pnl >= 0 ? "pnl-pos" : "pnl-neg"}`}>
                                 {fmtPct(pnlPct)}
                               </td>
-                              <td>
+                              <td className="right">
                                 <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--muted)", letterSpacing: "0.3px" }}>
-                                  {(t.exit_reason || "signal").toUpperCase()}
+                                  {t.bars_held || "—"}
                                 </span>
                               </td>
                             </tr>
