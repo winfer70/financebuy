@@ -46,6 +46,8 @@ PINESCRIPT_GRAMMAR = r"""
 
     // Variable declaration: var float x = expr  OR  float x = expr  OR  x = expr
     var_decl: "var"? type_hint NAME "=" expr
+            | "var" NAME "=" expr
+            | NAME "=" expr
     type_hint: "float" | "int" | "bool" | "string" | "series"
 
     // Assignment: x := expr
@@ -83,9 +85,9 @@ PINESCRIPT_GRAMMAR = r"""
     ?not_expr: "not" not_expr                    -> not_expr
              | comparison
 
-    ?comparison: add_expr (comp_op add_expr)?    -> comparison
+    ?comparison: add_expr (COMP_OP add_expr)?    -> comparison
 
-    comp_op: ">" | "<" | ">=" | "<=" | "==" | "!="
+    COMP_OP: ">" | "<" | ">=" | "<=" | "==" | "!="
 
     ?add_expr: mul_expr (("+"|"-") mul_expr)*    -> add_expr
 
@@ -168,6 +170,33 @@ class ValidationResult:
     errors: List[Dict[str, object]] = field(default_factory=list)
 
 
+# ── Keyword Argument Pre-processor ─────────────────────────────────────
+
+# Regex: match a kwarg pattern (NAME = value) inside function call parens.
+# Lookbehind: preceded by ( or , (the boundaries of function args).
+# Captures NAME, then = (not ==), leaving the value expression untouched.
+# Replacement turns  name=value  into  "__kw__name", value  so the parser
+# only sees positional string + value — avoiding Earley ambiguity between
+# NAME-as-atom and NAME-as-kwarg.
+_KWARG_RE = re.compile(r"(?<=[(,])\s*([a-zA-Z_]\w*)\s*=(?!=)")
+
+
+def _preprocess_kwargs(source: str) -> str:
+    """Convert keyword arguments into marker-pair positional arguments.
+
+    Transforms  ``name=expr``  inside function calls into
+    ``"__kw__name", expr``  so the Earley parser never encounters the
+    ambiguous ``NAME "=" expr`` production.
+
+    Args:
+        source: Raw PineScript source (newline-normalised).
+
+    Returns:
+        Source with kwargs replaced by marker pairs.
+    """
+    return _KWARG_RE.sub(r' "__kw__\1", ', source)
+
+
 # ── Public API ──────────────────────────────────────────────────────────
 
 def parse(source: str) -> Tree:
@@ -184,6 +213,8 @@ def parse(source: str) -> Tree:
     """
     # Normalise line endings and ensure trailing newline
     source = source.replace("\r\n", "\n").strip() + "\n"
+    # Convert kwargs (name=value) to marker pairs before parsing
+    source = _preprocess_kwargs(source)
     parser = _get_parser()
     return parser.parse(source)
 

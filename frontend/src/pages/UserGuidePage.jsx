@@ -227,12 +227,55 @@ const FEATURES = [
       "Backtest any strategy on historical OHLCV data with configurable commission, slippage, and date ranges",
       "Full performance metrics: Sharpe ratio, Sortino, max drawdown, win rate, profit factor, Calmar ratio",
       "Equity curve chart and detailed trade log with entry/exit prices and P&L",
+      "Interactive backtest chart with scroll-wheel zoom, click-drag pan, 9 drawing tools, chart type/overlay toggles, and stats bar (same features as the Charts page)",
       "Market regime detection: trending, mean reverting, or high volatility",
       "PineScript editor: write TradingView-compatible code, syntax validation, and automatic transpilation to executable strategies",
       "LLM fallback: complex PineScript is translated via AI with safety validation (AST whitelist)",
       "Strategy Composer: visually combine indicators (SMA, EMA, RSI, MACD, BB, ATR, ADX, Stochastic, VWAP) with boolean entry/exit expressions",
       "Strategy version history: every edit is snapshotted, view or revert to any previous version",
       "Verified/AI-Translated badges distinguish built-in strategies from user-authored ones",
+    ],
+  },
+  {
+    title: "PAPER TRADING",
+    icon: "📊",
+    items: [
+      {
+        heading: "Overview",
+        text: "Paper trading lets you simulate live trading with virtual capital. Your chosen strategy evaluates real market data every 60 seconds, automatically generating buy/sell signals and managing positions — all without risking real money.",
+      },
+      {
+        heading: "Starting a Paper Trade",
+        text: "Open the PAPER tab in Trading AI, select a strategy and symbol, set your initial capital (default $10,000), then click START. The system will begin monitoring the market and executing simulated trades based on your strategy's signals.",
+      },
+      {
+        heading: "Managing Sessions",
+        text: "Active paper trades can be paused (temporarily halt signal evaluation), resumed, or stopped permanently. Stopping a session closes all open positions and locks in the final equity. Use the detail view to monitor equity curves and position history in real time.",
+      },
+      {
+        heading: "Circuit Breaker",
+        text: "A built-in safety mechanism automatically stops a paper trade if the drawdown exceeds 15% from peak equity. This protects your simulated portfolio from runaway losses and teaches risk management discipline.",
+      },
+      {
+        heading: "Equity & Positions",
+        text: "Each paper trade tracks an equity curve updated every evaluation cycle. View your position history (entry/exit prices, P&L) and overall performance metrics. Use this data to refine your strategy before considering real trading.",
+      },
+    ],
+  },
+  {
+    title: "MARKETPLACE",
+    icon: "marketplace",
+    items: [
+      "Strategy Marketplace: browse, search, filter, and sort publicly shared trading strategies by category, timeframe, and rating",
+      "Featured strategies: top-rated public strategies highlighted at the top of the marketplace",
+      "Rate and review public strategies (1–5 stars with optional text review)",
+      "Clone any public strategy to your own account with one click",
+      "Strategy stats: view clone count, average rating, rating count, and backtest count for any strategy",
+      "Publish/unpublish your strategies to share them on the marketplace",
+      "Strategy Comparison: select 2–3 strategies and run side-by-side backtests with overlaid equity curves and metric comparison table",
+      "Batch Backtest: run a strategy across all your watchlist symbols at once (up to 20 symbols)",
+      "One-click order creation from trade log entries — pre-fills symbol, side, quantity, and price",
+      "CSV export of backtest results including summary metrics and full trade log",
     ],
   },
 ];
@@ -371,6 +414,34 @@ const FAQ_ITEMS = [
     q: "Can I view or revert strategy version history?",
     a: "Yes — every time you update a strategy, a version snapshot is automatically saved. Use the API endpoints GET /strategies/{id}/versions to list versions and POST /strategies/{id}/revert/{version} to revert. Version history UI integration is available in the strategy management section.",
   },
+  {
+    q: "Does the Trading page chart support zoom, pan, and drawing tools?",
+    a: "Yes — the backtest chart on the Trading page now has the same interactive features as the Charts page: scroll-wheel zoom, click-drag pan, 9 drawing tools (trend line, horizontal line, ray, rectangle, Fibonacci retracement, pitchfork, arrow, text, ruler), chart type toggle (candle/line), overlay toggles (volume, SMA 50, SMA 200), and a stats bar showing OHLCV values plus a 52-week range indicator. Drawings are persisted per symbol in local storage.",
+  },
+  {
+    q: "How do I share my strategy on the marketplace?",
+    a: "Open the Marketplace page and find your strategy, or use the PUBLISH button on the Trading page. Toggling publish makes your strategy visible to all users. Other users can browse, rate, and clone it. You can unpublish at any time.",
+  },
+  {
+    q: "How do I compare strategies?",
+    a: "On the Trading page, switch to the COMPARE tab in the bottom panel. Select 2–3 strategies from the dropdown, then click COMPARE. The system runs backtests for each strategy on the same symbol and period, then displays side-by-side metrics (Sharpe, return, drawdown, win rate, etc.) and overlaid equity curves.",
+  },
+  {
+    q: "What is batch backtest?",
+    a: "Batch backtest lets you run a single strategy across all your watchlist symbols at once (up to 20). Click 'RUN ON WATCHLIST' on the Trading page, then switch to the BATCH tab to see results for each symbol including return, Sharpe, win rate, and drawdown.",
+  },
+  {
+    q: "How do I export backtest results?",
+    a: "After running a backtest, click the 'EXPORT CSV' button next to the RUN BACKTEST button. This downloads a CSV file with a summary of metrics followed by the full trade log.",
+  },
+  {
+    q: "What is paper trading and how does it work?",
+    a: "Paper trading simulates live trading using real market data but virtual money. Select a strategy and symbol in the PAPER tab, set your capital, and start. The system evaluates your strategy every 60 seconds, automatically opening and closing positions based on signals. No real money is at risk.",
+  },
+  {
+    q: "Why did my paper trade stop automatically?",
+    a: "The circuit breaker trips when drawdown exceeds 15% from peak equity, automatically stopping the trade and closing all positions. This built-in safety mechanism prevents excessive simulated losses. You can start a new paper trade with adjusted parameters.",
+  },
 ];
 
 
@@ -486,7 +557,15 @@ export function UserGuidePage({ token, goBack }) {
                           <span style={{
                             position: "absolute", left: 0, color: "var(--amber)",
                           }}>·</span>
-                          {item}
+                          {/* Support both plain string items and {heading, text} objects */}
+                          {typeof item === "string" ? item : (
+                            <>
+                              <span style={{ color: "var(--bright)", fontWeight: 600 }}>
+                                {item.heading}:
+                              </span>{" "}
+                              {item.text}
+                            </>
+                          )}
                         </div>
                       ))}
                     </div>

@@ -1516,25 +1516,29 @@ PHASE 4 — PineScript & Composition:
 78. [x] Build CompositionEditor visual node editor (frontend)
 79. [x] Add "Verified" / "AI-Translated" badges to strategy cards
 
-PHASE 5 — Social & Integration:
-80. Create Alembic migration 0018 (strategy_ratings, strategy_usage)
-81. Add marketplace API routes (browse, rate, stats, publish)
-82. Build MarketplacePage.jsx
-83. Build StrategyComparison component
-84. Implement portfolio/watchlist batch backtest integration
-85. Implement one-click order creation from signals
-86. Implement CSV/PDF export for backtest results
-87. Add marketplace nav item + routing in App.jsx
+PHASE 5 — Social & Integration:                      ✅ COMPLETED
+80. [x] Create Alembic migration 0018 (strategy_ratings, strategy_usage)
+81. [x] Add marketplace API routes (browse, rate, stats, publish)
+82. [x] Build MarketplacePage.jsx
+83. [x] Build StrategyComparison component
+84. [x] Implement portfolio/watchlist batch backtest integration
+85. [x] Implement one-click order creation from signals
+86. [x] Implement CSV/PDF export for backtest results
+87. [x] Add marketplace nav item + routing in App.jsx
 
-PHASE 6 — Paper Trading:
-88. Create Alembic migration 0019 (paper_trades, paper_trade_positions, paper_trade_equity_snapshots)
-89. Implement paper trading evaluation worker (paper_worker.py)
-90. Add paper trading API routes
-91. Implement SSE endpoint for real-time updates (trading_sse.py)
-92. Build PaperTradingPanel component (frontend)
-93. Add SSE client logic to TradingPage
-94. Connect circuit breaker to paper trading positions
-95. Test end-to-end: start paper trade → receive real-time updates → stop trade
+PHASE 6 — Paper Trading:                              ✅ COMPLETED
+88. [x] Create Alembic migration 0019 (paper_trades, paper_trade_positions, paper_trade_equity_snapshots)
+89. [x] Implement paper trading evaluation worker (paper_worker.py)
+90. [x] Add paper trading API routes
+91. [x] Implement SSE endpoint for real-time updates (trading_sse.py)
+92. [x] Build PaperTradingPanel component (frontend)
+93. [x] Add SSE client logic to TradingPage
+94. [x] Connect circuit breaker to paper trading positions
+95. [x] Test end-to-end: start paper trade → receive real-time updates → stop trade
+
+NOTE: Rate limiting on trading endpoints is currently disabled for testing.
+      All @limiter.limit() decorators in trading.py are commented out and
+      must be re-enabled before production release.
 ```
 
 ---

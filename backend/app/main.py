@@ -72,20 +72,25 @@ async def _seed_system_strategies():
     from .db import AsyncSessionLocal
     from .models import Strategy
     from .trading.templates import TEMPLATES
-    from sqlalchemy import select, func
+    from sqlalchemy import select
 
     async with AsyncSessionLocal() as session:
-        # Check if system strategies already exist
-        count_stmt = select(func.count(Strategy.strategy_id)).where(
+        # Load existing system strategy slugs
+        existing_stmt = select(Strategy).where(
             Strategy.is_system == True  # noqa: E712
         )
-        count = (await session.execute(count_stmt)).scalar() or 0
-        if count > 0:
-            logger.info("System strategies already seeded (%d found). Skipping.", count)
-            return
+        existing = (await session.execute(existing_stmt)).scalars().all()
+        existing_slugs = {
+            (s.definition_json or {}).get("strategy_slug")
+            for s in existing
+        }
 
-        # Insert each template
+        # Insert only templates whose slug is not already in the DB
+        inserted = 0
         for tmpl in TEMPLATES:
+            slug = tmpl["definition_json"].get("strategy_slug")
+            if slug in existing_slugs:
+                continue
             strategy = Strategy(
                 strategy_id=uuid.uuid4(),
                 user_id=None,
@@ -100,9 +105,13 @@ async def _seed_system_strategies():
                 is_system=True,
             )
             session.add(strategy)
+            inserted += 1
 
-        await session.commit()
-        logger.info("Seeded %d system strategies from templates.", len(TEMPLATES))
+        if inserted:
+            await session.commit()
+            logger.info("Seeded %d new system strategies from templates.", inserted)
+        else:
+            logger.info("System strategies already seeded (%d found). Skipping.", len(existing))
 
 
 @app.on_event("startup")

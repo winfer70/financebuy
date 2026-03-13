@@ -679,6 +679,161 @@ const api = {
   /** Revert a strategy to a previous version. */
   revertStrategyVersion: (strategyId, versionNumber, token) =>
     apiFetch(`/trading/strategies/${strategyId}/revert/${versionNumber}`, { method: "POST", token }),
+
+  // ── Marketplace ───────────────────────────────────────────────────────
+
+  /** Browse public strategy marketplace (paginated, filterable). */
+  browseMarketplace: (params, token) => {
+    const qs = new URLSearchParams(params).toString();
+    return apiFetch(`/trading/marketplace?${qs}`, { token });
+  },
+
+  /** Get top-10 featured public strategies. */
+  getFeaturedStrategies: (token) =>
+    apiFetch("/trading/marketplace/featured", { token }),
+
+  /** Rate a public strategy (upsert — stars 1-5, optional review). */
+  rateStrategy: (strategyId, body, token) =>
+    apiFetch(`/trading/strategies/${strategyId}/rate`, { method: "POST", body, token }),
+
+  /** List ratings for a strategy (paginated). */
+  getStrategyRatings: (strategyId, params, token) => {
+    const qs = params ? new URLSearchParams(params).toString() : "";
+    return apiFetch(`/trading/strategies/${strategyId}/ratings${qs ? `?${qs}` : ""}`, { token });
+  },
+
+  /** Get aggregate stats for a strategy (clones, rating, backtests). */
+  getStrategyStats: (strategyId, token) =>
+    apiFetch(`/trading/strategies/${strategyId}/stats`, { token }),
+
+  /** Toggle a strategy's public/private visibility (owner only). */
+  publishStrategy: (strategyId, token) =>
+    apiFetch(`/trading/strategies/${strategyId}/publish`, { method: "POST", token }),
+
+  // ── Backtest Export & Batch ───────────────────────────────────────────
+
+  /** Export backtest results as CSV (returns blob). */
+  exportBacktest: async (resultId, format, token) => {
+    const resp = await fetch(`/api/v1/trading/backtest/${resultId}/export?format=${format}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!resp.ok) throw new Error("Export failed");
+    return resp.blob();
+  },
+
+  /** Queue backtests for a strategy across multiple symbols. */
+  queueBatchBacktest: (body, token) =>
+    apiFetch("/trading/backtest/batch", { method: "POST", body, token }),
+
+  // ── Orders (create) ───────────────────────────────────────────────────
+
+  /** Create a new order. */
+  createOrder: (body, token) =>
+    apiFetch("/orders/", { method: "POST", body, token }),
+
+  // ── Paper Trading ────────────────────────────────────────────────────
+
+  /**
+   * Start a new paper trading session.
+   * @param {object} body  - { strategy_slug, symbol, initial_capital }
+   * @param {string} token - JWT access token
+   * @returns {Promise<object>} Created paper trade
+   */
+  startPaperTrade: (body, token) =>
+    apiFetch("/trading/paper", { method: "POST", body, token }),
+
+  /**
+   * List all paper trades for the authenticated user.
+   * @param {string} token - JWT access token
+   * @returns {Promise<Array<object>>} Array of paper trade objects
+   */
+  listPaperTrades: (token) =>
+    apiFetch("/trading/paper", { token }),
+
+  /**
+   * Get details for a single paper trade.
+   * @param {string} id    - Paper trade ID
+   * @param {string} token - JWT access token
+   * @returns {Promise<object>} Paper trade detail
+   */
+  getPaperTrade: (id, token) =>
+    apiFetch(`/trading/paper/${id}`, { token }),
+
+  /**
+   * Pause an active paper trade.
+   * @param {string} id    - Paper trade ID
+   * @param {string} token - JWT access token
+   * @returns {Promise<object>} Updated paper trade
+   */
+  pausePaperTrade: (id, token) =>
+    apiFetch(`/trading/paper/${id}/pause`, { method: "POST", token }),
+
+  /**
+   * Resume a paused paper trade.
+   * @param {string} id    - Paper trade ID
+   * @param {string} token - JWT access token
+   * @returns {Promise<object>} Updated paper trade
+   */
+  resumePaperTrade: (id, token) =>
+    apiFetch(`/trading/paper/${id}/resume`, { method: "POST", token }),
+
+  /**
+   * Stop (terminate) a paper trade permanently.
+   * @param {string} id    - Paper trade ID
+   * @param {string} token - JWT access token
+   * @returns {Promise<object>} Updated paper trade
+   */
+  stopPaperTrade: (id, token) =>
+    apiFetch(`/trading/paper/${id}/stop`, { method: "POST", token }),
+
+  /**
+   * Fetch equity snapshots (time series) for a paper trade.
+   * @param {string} id    - Paper trade ID
+   * @param {string} token - JWT access token
+   * @returns {Promise<Array<{timestamp: string, equity: number}>>} Equity curve data
+   */
+  getPaperEquity: (id, token) =>
+    apiFetch(`/trading/paper/${id}/equity`, { token }),
+
+  /**
+   * Fetch position history for a paper trade.
+   * @param {string} id    - Paper trade ID
+   * @param {string} token - JWT access token
+   * @returns {Promise<Array<object>>} Position history records
+   */
+  getPaperPositions: (id, token) =>
+    apiFetch(`/trading/paper/${id}/positions`, { token }),
+
+  /**
+   * subscribePaperTrade — Stream paper trade updates via SSE.
+   * Uses fetch + ReadableStream because EventSource does not support
+   * custom Authorization headers.
+   *
+   * @param {string} paperTradeId - Paper trade UUID
+   * @param {string} token        - JWT access token
+   * @returns {AsyncGenerator<object>} Yields parsed JSON events
+   */
+  async *subscribePaperTrade(paperTradeId, token) {
+    const res = await fetch(`${API_BASE}/trading/paper/${paperTradeId}/stream`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const parts = buf.split("\n\n");
+      buf = parts.pop();
+      for (const part of parts) {
+        const line = part.replace(/^data: /, "");
+        if (line) {
+          try { yield JSON.parse(line); } catch { /* skip malformed frames */ }
+        }
+      }
+    }
+  },
 };
 
 export default api;

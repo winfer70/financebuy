@@ -29,6 +29,8 @@ import EmptyState from "../components/common/EmptyState";
 import ParameterEditor from "../components/trading/ParameterEditor";
 import PineScriptEditor from "../components/trading/PineScriptEditor";
 import CompositionEditor from "../components/trading/CompositionEditor";
+import StrategyComparison from "../components/trading/StrategyComparison";
+import { PaperTradingPanel } from "../components/trading/PaperTradingPanel";
 
 /* -- Constants ------------------------------------------------------------ */
 
@@ -51,6 +53,9 @@ const BOTTOM_TABS = [
   { id: "equity", label: "EQUITY CURVE" },
   { id: "trades", label: "TRADE LOG" },
   { id: "replay", label: "REPLAY" },
+  { id: "compare", label: "COMPARE" },
+  { id: "batch", label: "BATCH" },
+  { id: "paper", label: "PAPER" },
 ];
 
 /** Disclaimer text displayed at the top of the page. */
@@ -97,6 +102,14 @@ export function TradingPage({ token, onViewChart }) {
   const [replaySpeed, setReplaySpeed] = useState(1);
   const replayTimer = useRef(null);
   const searchTimeoutRef = useRef(null);
+
+  /* -- State: batch backtest ---------------------------------------------- */
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchResults, setBatchResults] = useState([]); // { symbol, status, result_id, metrics }
+  const [batchIds, setBatchIds] = useState([]);
+
+  /* -- State: order creation ---------------------------------------------- */
+  const [orderCreating, setOrderCreating] = useState(null); // index of trade being submitted
 
   /* -- Load strategies on mount ------------------------------------------- */
   useEffect(() => {
@@ -223,7 +236,7 @@ export function TradingPage({ token, onViewChart }) {
                   volume: b.volume,
                 })),
               );
-            } catch { /* chart data optional */ }
+            } catch (err) { console.error("OHLCV fetch failed:", err); }
             break;
           }
           if (res.status === "failed") {
@@ -284,22 +297,26 @@ export function TradingPage({ token, onViewChart }) {
 
   /* -- Replay logic ------------------------------------------------------- */
   useEffect(() => {
-    if (!replayPlaying || ohlcvData.length === 0) {
-      clearInterval(replayTimer.current);
-      return;
-    }
-    const delay = Math.max(20, 200 / replaySpeed);
-    replayTimer.current = setInterval(() => {
-      setReplayIdx((prev) => {
-        const next = prev + 1;
-        if (next >= ohlcvData.length) {
-          setReplayPlaying(false);
-          return prev;
-        }
-        return next;
-      });
-    }, delay);
-    return () => clearInterval(replayTimer.current);
+    if (!replayPlaying || ohlcvData.length === 0) return;
+    let raf;
+    let last = performance.now();
+    const delay = Math.max(16, 200 / replaySpeed);
+    const step = (now) => {
+      if (now - last >= delay) {
+        last = now;
+        setReplayIdx((prev) => {
+          const next = prev + 1;
+          if (next >= ohlcvData.length) {
+            setReplayPlaying(false);
+            return prev;
+          }
+          return next;
+        });
+      }
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
   }, [replayPlaying, replaySpeed, ohlcvData.length]);
 
   const replayData = useMemo(() => {
@@ -311,6 +328,137 @@ export function TradingPage({ token, onViewChart }) {
     if (replayIdx < 0 || bottomTab !== "replay") return signalMarkers;
     return signalMarkers.filter((s) => s.index <= replayIdx);
   }, [replayIdx, bottomTab, signalMarkers]);
+
+  /* -- Batch backtest: run strategy across a set of symbols --------------- */
+  const _runBatch = useCallback(async (fetchSymbols, emptyMsg) => {
+    if (!selectedStrategy || batchRunning) return;
+    setBatchRunning(true);
+    setBatchResults([]);
+    setBatchIds([]);
+    setBottomTab("batch");
+    try {
+      const symbols = await fetchSymbols();
+      if (!symbols.length) {
+        setBatchResults([{ symbol: "—", status: emptyMsg, metrics: {} }]);
+        setBatchRunning(false);
+        return;
+      }
+
+      const end = new Date();
+      const start = new Date();
+      start.setDate(start.getDate() - (PERIOD_DAYS[period] || 365));
+
+      const body = {
+        strategy_slug: selectedStrategy.slug,
+        symbols: symbols.slice(0, 20),
+        interval,
+        start_date: start.toISOString().slice(0, 10),
+        end_date: end.toISOString().slice(0, 10),
+        parameters: params,
+        initial_capital: initialCapital,
+        commission,
+        slippage,
+      };
+
+      const res = await api.queueBatchBacktest(body, token);
+      const ids = res.backtest_ids || [];
+      setBatchIds(ids);
+
+      // Initialize results with queued status
+      const usedSymbols = body.symbols;
+      setBatchResults(usedSymbols.map((s, i) => ({
+        symbol: s,
+        status: "queued",
+        result_id: ids[i],
+        metrics: {},
+      })));
+
+      // Poll each backtest result
+      const settled = new Set();
+      for (let attempt = 0; attempt < 120 && settled.size < ids.length; attempt++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        for (let i = 0; i < ids.length; i++) {
+          if (settled.has(i)) continue;
+          try {
+            const poll = await apiFetch(`/trading/backtest/${ids[i]}`, { token });
+            if (poll.status === "completed" || poll.status === "failed") {
+              settled.add(i);
+              setBatchResults((prev) => {
+                const next = [...prev];
+                next[i] = {
+                  ...next[i],
+                  status: poll.status,
+                  metrics: poll.metrics_json || {},
+                  results: poll.results_json || {},
+                };
+                return next;
+              });
+            }
+          } catch { /* retry next loop */ }
+        }
+      }
+    } catch (err) {
+      setBatchResults([{ symbol: "—", status: `Error: ${err.message}`, metrics: {} }]);
+    } finally {
+      setBatchRunning(false);
+    }
+  }, [selectedStrategy, batchRunning, token, period, interval, params, initialCapital, commission, slippage]);
+
+  /* -- Fetch watchlist symbols and run batch ------------------------------- */
+  const runBatchWatchlist = useCallback(() => _runBatch(async () => {
+    const lists = await api.getWatchlists(token);
+    if (!lists?.length) return [];
+    // Fetch items from the first watchlist (primary)
+    const detail = await api.getWatchlist(lists[0].watchlist_id, token);
+    return (detail?.items || []).map((it) => it.symbol).filter(Boolean);
+  }, "No watchlist items found"), [_runBatch, token]);
+
+  /* -- Fetch portfolio positions and run batch ----------------------------- */
+  const runBatchPortfolio = useCallback(() => _runBatch(async () => {
+    const portfolios = await api.listPortfolios(token);
+    if (!portfolios?.length) return [];
+    // Collect tickers from all portfolios, deduplicate
+    const allTickers = new Set();
+    for (const p of portfolios) {
+      const positions = await api.listPositions(p.portfolio_id, token);
+      (positions || []).forEach((pos) => { if (pos.ticker) allTickers.add(pos.ticker); });
+    }
+    return [...allTickers];
+  }, "No portfolio positions found"), [_runBatch, token]);
+
+  /* -- Export backtest result as CSV --------------------------------------- */
+  const handleExport = useCallback(async (format = "csv") => {
+    if (!backtestResult?.result_id) return;
+    try {
+      const blob = await api.exportBacktest(backtestResult.result_id, format, token);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `backtest_${backtestResult.result_id.slice(0, 8)}.${format}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Export failed:", err);
+    }
+  }, [backtestResult, token]);
+
+  /* -- Create order from trade log entry ---------------------------------- */
+  const handleCreateOrder = useCallback(async (trade, index) => {
+    setOrderCreating(index);
+    try {
+      await api.createOrder({
+        symbol,
+        side: trade.direction === "long" ? "buy" : "sell",
+        order_type: "limit",
+        quantity: trade.quantity || 1,
+        limit_price: trade.entry_price,
+      }, token);
+    } catch (err) {
+      console.error("Order creation failed:", err);
+    } finally {
+      setOrderCreating(null);
+    }
+  }, [symbol, token]);
 
   /* ====================================================================== */
   /* -- Render ------------------------------------------------------------- */
@@ -610,6 +758,35 @@ export function TradingPage({ token, onViewChart }) {
               )}
             </button>
 
+            {/* Batch + Export row */}
+            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+              <button
+                className="btn btn-outline"
+                style={{ flex: 1, justifyContent: "center", fontSize: 9, padding: "6px 0", letterSpacing: "0.8px" }}
+                disabled={!selectedStrategy || batchRunning}
+                onClick={runBatchWatchlist}
+              >
+                {batchRunning ? "RUNNING..." : "WATCHLIST"}
+              </button>
+              <button
+                className="btn btn-outline"
+                style={{ flex: 1, justifyContent: "center", fontSize: 9, padding: "6px 0", letterSpacing: "0.8px" }}
+                disabled={!selectedStrategy || batchRunning}
+                onClick={runBatchPortfolio}
+              >
+                {batchRunning ? "RUNNING..." : "PORTFOLIO"}
+              </button>
+              {backtestResult && (
+                <button
+                  className="btn btn-outline"
+                  style={{ fontSize: 9, padding: "6px 10px", letterSpacing: "0.8px" }}
+                  onClick={() => handleExport("csv")}
+                >
+                  EXPORT CSV
+                </button>
+              )}
+            </div>
+
             {/* Metrics summary (when results available) */}
             {backtestResult && (
               <div className="panel" style={{ padding: 12 }}>
@@ -710,7 +887,7 @@ export function TradingPage({ token, onViewChart }) {
             )}
 
             {/* Chart area */}
-            <div className="panel" style={{ height: 420, overflow: "hidden" }}>
+            <div className="panel" style={{ height: 520, overflow: "hidden" }}>
               {ohlcvData.length > 0 ? (
                 <OHLCVChart
                   data={bottomTab === "replay" ? replayData : ohlcvData}
@@ -722,7 +899,54 @@ export function TradingPage({ token, onViewChart }) {
                     { period: 50, color: "#3d7ef5" },
                     { period: 200, color: "#f59e0b", dashed: true },
                   ]}
+                  enableZoom
+                  enableDrawingTools
+                  enableControls
+                  showStatsBar
+                  symbol={symbol}
+                  chartId="tradingMain"
                 />
+              ) : batchResults.some((r) => r.status === "completed" && r.metrics.total_return != null) ? (
+                /* Batch returns bar chart — fills the main chart area */
+                (() => {
+                  const completed = batchResults
+                    .filter((r) => r.status === "completed" && r.metrics.total_return != null)
+                    .sort((a, b) => b.metrics.total_return - a.metrics.total_return);
+                  const maxAbs = Math.max(...completed.map((r) => Math.abs(r.metrics.total_return)), 1);
+                  const barH = Math.max(16, Math.min(32, Math.floor(460 / completed.length) - 6));
+                  const chartH = completed.length * (barH + 6) + 40;
+                  const labelW = 70;
+                  const valueW = 80;
+                  const barArea = 500;
+                  const svgW = labelW + barArea + valueW + 10;
+                  return (
+                    <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", overflowY: "auto" }}>
+                      <div style={{ fontFamily: "var(--font-disp)", fontSize: 14, color: "var(--muted)", letterSpacing: "1px", marginBottom: 12 }}>
+                        BATCH RETURNS — {selectedStrategy?.name || "Strategy"} · {completed.length} SYMBOLS
+                      </div>
+                      <svg width={svgW} height={chartH} style={{ display: "block" }}>
+                        {/* Zero line */}
+                        <line x1={labelW + barArea / 2} y1={10} x2={labelW + barArea / 2} y2={chartH - 10} stroke="var(--border)" strokeWidth={1} />
+                        <text x={labelW + barArea / 2} y={chartH - 1} textAnchor="middle" fill="var(--muted)" fontSize={9} fontFamily="monospace">0%</text>
+                        {completed.map((r, i) => {
+                          const val = r.metrics.total_return;
+                          const pct = val / maxAbs;
+                          const w = Math.abs(pct) * (barArea / 2 - 8);
+                          const y = i * (barH + 6) + 14;
+                          const x = val >= 0 ? labelW + barArea / 2 : labelW + barArea / 2 - w;
+                          const fill = val >= 0 ? "#00d97e" : "#f04438";
+                          return (
+                            <g key={i}>
+                              <text x={labelW - 6} y={y + barH / 2 + 4} textAnchor="end" fill="var(--amber)" fontSize={10} fontWeight="600" fontFamily="monospace">{r.symbol}</text>
+                              <rect x={x} y={y} width={Math.max(w, 2)} height={barH} rx={3} fill={fill} opacity={0.8} />
+                              <text x={labelW + barArea + 6} y={y + barH / 2 + 4} fill={fill} fontSize={10} fontWeight="600" fontFamily="monospace">{val >= 0 ? "+" : ""}{val.toFixed(1)}%</text>
+                            </g>
+                          );
+                        })}
+                      </svg>
+                    </div>
+                  );
+                })()
               ) : (
                 <div
                   style={{
@@ -742,7 +966,7 @@ export function TradingPage({ token, onViewChart }) {
                       letterSpacing: "1px",
                     }}
                   >
-                    SELECT A SYMBOL & RUN BACKTEST
+                    {batchRunning ? "RUNNING BATCH BACKTEST..." : "SELECT A SYMBOL & RUN BACKTEST"}
                   </div>
                   <div
                     style={{
@@ -832,6 +1056,32 @@ export function TradingPage({ token, onViewChart }) {
                       </div>
                     )}
                   </div>
+                ) : batchResults.some((r) => r.status === "completed") ? (
+                  /* Batch aggregate metrics */
+                  (() => {
+                    const done = batchResults.filter((r) => r.status === "completed" && r.metrics.total_return != null);
+                    const avg = (key) => done.reduce((s, r) => s + (r.metrics[key] || 0), 0) / (done.length || 1);
+                    const best = done.reduce((b, r) => (r.metrics.total_return || 0) > (b.metrics.total_return || 0) ? r : b, done[0]);
+                    const worst = done.reduce((w, r) => (r.metrics.total_return || 0) < (w.metrics.total_return || 0) ? r : w, done[0]);
+                    return (
+                      <div>
+                        <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", marginBottom: 12, letterSpacing: "0.8px" }}>
+                          BATCH SUMMARY — {done.length} SYMBOLS
+                        </div>
+                        <div className="grid-stats stagger" style={{ marginBottom: 16 }}>
+                          {[
+                            { label: "AVG RETURN", value: fmtPct(avg("total_return")), cls: avg("total_return") >= 0 ? "green" : "red" },
+                            { label: "AVG SHARPE", value: avg("sharpe_ratio").toFixed(2), cls: "" },
+                            { label: "AVG WIN RATE", value: fmtPct(avg("win_rate")), cls: "" },
+                            { label: "BEST", value: `${best?.symbol} ${fmtPct(best?.metrics.total_return)}`, cls: "green" },
+                            { label: "WORST", value: `${worst?.symbol} ${fmtPct(worst?.metrics.total_return)}`, cls: "red" },
+                          ].map((s, i) => (
+                            <StatBlock key={i} label={s.label} value={s.value} cls={s.cls} />
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()
                 ) : (
                   <EmptyState message="Run a backtest to view performance metrics." />
                 )
@@ -854,7 +1104,61 @@ export function TradingPage({ token, onViewChart }) {
                     showCrosshair
                     height={180}
                     currencySymbol="$"
+                    chartId="tradingEquity"
                   />
+                ) : batchResults.some((r) => r.status === "completed" && r.results?.equity_curve?.length > 0) ? (
+                  /* Overlaid batch equity curves as normalized % returns */
+                  (() => {
+                    const COLORS = ["#00d97e", "#3d7ef5", "#f59e0b", "#f04438", "#a855f7", "#06b6d4", "#ec4899", "#84cc16", "#f97316", "#6366f1",
+                      "#14b8a6", "#e879f9", "#facc15", "#22d3ee", "#fb923c", "#818cf8", "#4ade80", "#f472b6", "#38bdf8", "#a3e635"];
+                    const series = batchResults
+                      .filter((r) => r.status === "completed" && r.results?.equity_curve?.length > 1)
+                      .map((r, i) => {
+                        const curve = r.results.equity_curve;
+                        const base = curve[0]?.equity || 1;
+                        return { symbol: r.symbol, color: COLORS[i % COLORS.length], points: curve.map((pt) => ((pt.equity / base) - 1) * 100) };
+                      });
+                    if (!series.length) return <EmptyState message="No equity data available." />;
+                    const allPts = series.flatMap((s) => s.points);
+                    const minY = Math.min(...allPts, 0);
+                    const maxY = Math.max(...allPts, 0);
+                    const rangeY = maxY - minY || 1;
+                    const W = 700, H = 170, PAD = { t: 10, b: 22, l: 50, r: 10 };
+                    const plotW = W - PAD.l - PAD.r, plotH = H - PAD.t - PAD.b;
+                    const toX = (i, len) => PAD.l + (i / (len - 1)) * plotW;
+                    const toY = (v) => PAD.t + plotH - ((v - minY) / rangeY) * plotH;
+                    return (
+                      <div style={{ overflowX: "auto" }}>
+                        <svg width={W} height={H} style={{ display: "block" }}>
+                          {/* Zero line */}
+                          <line x1={PAD.l} y1={toY(0)} x2={W - PAD.r} y2={toY(0)} stroke="var(--border)" strokeWidth={1} strokeDasharray="4,3" />
+                          <text x={PAD.l - 4} y={toY(0) + 3} textAnchor="end" fill="var(--muted)" fontSize={8} fontFamily="monospace">0%</text>
+                          <text x={PAD.l - 4} y={toY(maxY) + 3} textAnchor="end" fill="var(--muted)" fontSize={8} fontFamily="monospace">{maxY.toFixed(0)}%</text>
+                          <text x={PAD.l - 4} y={toY(minY) + 3} textAnchor="end" fill="var(--muted)" fontSize={8} fontFamily="monospace">{minY.toFixed(0)}%</text>
+                          {/* Equity lines */}
+                          {series.map((s) => (
+                            <polyline
+                              key={s.symbol}
+                              fill="none"
+                              stroke={s.color}
+                              strokeWidth={1.5}
+                              opacity={0.85}
+                              points={s.points.map((v, i) => `${toX(i, s.points.length)},${toY(v)}`).join(" ")}
+                            />
+                          ))}
+                        </svg>
+                        {/* Legend */}
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px", padding: "4px 0 0 50px" }}>
+                          {series.map((s) => (
+                            <span key={s.symbol} style={{ fontSize: 9, fontFamily: "var(--font-mono)", display: "flex", alignItems: "center", gap: 4 }}>
+                              <span style={{ width: 10, height: 3, background: s.color, borderRadius: 1, display: "inline-block" }} />
+                              {s.symbol}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()
                 ) : (
                   <EmptyState message="Run a backtest to view the equity curve." />
                 )
@@ -875,6 +1179,7 @@ export function TradingPage({ token, onViewChart }) {
                           <th className="right">P&L</th>
                           <th className="right">P&L %</th>
                           <th className="right">BARS</th>
+                          <th className="right">ORDER</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -903,9 +1208,62 @@ export function TradingPage({ token, onViewChart }) {
                                   {t.bars_held || "—"}
                                 </span>
                               </td>
+                              <td className="right">
+                                <button
+                                  className="btn btn-outline"
+                                  style={{ padding: "2px 6px", fontSize: 8, letterSpacing: "0.3px" }}
+                                  disabled={orderCreating === i}
+                                  onClick={(e) => { e.stopPropagation(); handleCreateOrder(t, i); }}
+                                >
+                                  {orderCreating === i ? "..." : "ORDER"}
+                                </button>
+                              </td>
                             </tr>
                           );
                         })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : batchResults.some((r) => r.status === "completed" && r.results?.trades?.length > 0) ? (
+                  /* Combined batch trade log */
+                  <div style={{ maxHeight: 200, overflowY: "auto" }}>
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>SYMBOL</th>
+                          <th>ENTRY</th>
+                          <th>EXIT</th>
+                          <th>DIR</th>
+                          <th className="right">ENTRY $</th>
+                          <th className="right">EXIT $</th>
+                          <th className="right">P&L %</th>
+                          <th className="right">BARS</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {batchResults
+                          .filter((r) => r.status === "completed" && r.results?.trades?.length > 0)
+                          .flatMap((r) => r.results.trades.map((t) => ({ ...t, _symbol: r.symbol })))
+                          .map((t, i) => {
+                            const pnl = (t.exit_price - t.entry_price) * (t.direction === "long" ? 1 : -1);
+                            const pnlPct = t.entry_price ? (pnl / t.entry_price) * 100 : 0;
+                            return (
+                              <tr key={i}>
+                                <td style={{ color: "var(--amber)", fontWeight: 600 }}>{t._symbol}</td>
+                                <td>{fmtDate(t.entry_date)}</td>
+                                <td>{fmtDate(t.exit_date)}</td>
+                                <td>
+                                  <span className={`type-chip ${t.direction === "long" ? "tc-buy" : "tc-sell"}`}>
+                                    {t.direction?.toUpperCase()}
+                                  </span>
+                                </td>
+                                <td className="right">{fmtUSD(t.entry_price)}</td>
+                                <td className="right">{fmtUSD(t.exit_price)}</td>
+                                <td className={`right ${pnl >= 0 ? "pnl-pos" : "pnl-neg"}`}>{fmtPct(pnlPct)}</td>
+                                <td className="right" style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--muted)" }}>{t.bars_held || "—"}</td>
+                              </tr>
+                            );
+                          })}
                       </tbody>
                     </table>
                   </div>
@@ -972,8 +1330,112 @@ export function TradingPage({ token, onViewChart }) {
                     </span>
                   </div>
                 ) : (
-                  <EmptyState message="Run a backtest first to enable replay." />
+                  <EmptyState message={batchResults.length > 0 ? "Replay requires a single-symbol backtest. Select a symbol above and run a backtest." : "Run a backtest first to enable replay."} />
                 )
+              )}
+
+              {/* COMPARE tab */}
+              {bottomTab === "compare" && (
+                <StrategyComparison
+                  token={token}
+                  symbol={symbol}
+                  interval={interval}
+                  period={period}
+                />
+              )}
+
+              {/* BATCH tab */}
+              {bottomTab === "batch" && (
+                batchResults.length > 0 ? (
+                  <div style={{ display: "flex", gap: 12, maxHeight: 250, overflow: "hidden" }}>
+                    {/* Returns bar chart */}
+                    {(() => {
+                      const completed = batchResults.filter((r) => r.status === "completed" && r.metrics.total_return != null);
+                      if (!completed.length) return null;
+                      const maxAbs = Math.max(...completed.map((r) => Math.abs(r.metrics.total_return)), 1);
+                      const barH = Math.max(12, Math.min(20, Math.floor(220 / completed.length) - 4));
+                      const chartH = completed.length * (barH + 4) + 20;
+                      const labelW = 52;
+                      const valueW = 60;
+                      const barArea = 200;
+                      const svgW = labelW + barArea + valueW + 10;
+                      return (
+                        <div style={{ minWidth: svgW, overflowY: "auto", flexShrink: 0 }}>
+                          <svg width={svgW} height={chartH} style={{ display: "block" }}>
+                            {/* Zero line */}
+                            <line x1={labelW + barArea / 2} y1={0} x2={labelW + barArea / 2} y2={chartH} stroke="var(--border)" strokeWidth={1} strokeDasharray="3,3" />
+                            {completed.map((r, i) => {
+                              const val = r.metrics.total_return;
+                              const pct = val / maxAbs;
+                              const w = Math.abs(pct) * (barArea / 2 - 4);
+                              const y = i * (barH + 4) + 2;
+                              const x = val >= 0 ? labelW + barArea / 2 : labelW + barArea / 2 - w;
+                              const fill = val >= 0 ? "#00d97e" : "#f04438";
+                              return (
+                                <g key={i}>
+                                  <text x={labelW - 4} y={y + barH / 2 + 4} textAnchor="end" fill="var(--amber)" fontSize={9} fontFamily="monospace">{r.symbol}</text>
+                                  <rect x={x} y={y} width={Math.max(w, 1)} height={barH} rx={2} fill={fill} opacity={0.75} />
+                                  <text x={labelW + barArea + 4} y={y + barH / 2 + 4} fill={fill} fontSize={9} fontFamily="monospace">{val >= 0 ? "+" : ""}{val.toFixed(1)}%</text>
+                                </g>
+                              );
+                            })}
+                          </svg>
+                        </div>
+                      );
+                    })()}
+                    {/* Results table */}
+                    <div style={{ flex: 1, overflowY: "auto" }}>
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>SYMBOL</th>
+                            <th>STATUS</th>
+                            <th className="right">RETURN</th>
+                            <th className="right">SHARPE</th>
+                            <th className="right">WIN RATE</th>
+                            <th className="right">DRAWDOWN</th>
+                            <th className="right">TRADES</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {batchResults.map((r, i) => (
+                            <tr key={i}>
+                              <td style={{ color: "var(--amber)", fontWeight: 600 }}>{r.symbol}</td>
+                              <td>
+                                <span style={{
+                                  fontSize: 9,
+                                  padding: "2px 6px",
+                                  borderRadius: 2,
+                                  background: r.status === "completed" ? "rgba(0,217,126,0.1)" : r.status === "failed" ? "rgba(240,68,56,0.1)" : "rgba(251,191,36,0.1)",
+                                  color: r.status === "completed" ? "#00d97e" : r.status === "failed" ? "#f04438" : "#fbbf24",
+                                }}>
+                                  {r.status.toUpperCase()}
+                                </span>
+                              </td>
+                              <td className={`right ${(r.metrics.total_return || 0) >= 0 ? "pnl-pos" : "pnl-neg"}`}>
+                                {r.metrics.total_return != null ? fmtPct(r.metrics.total_return) : "—"}
+                              </td>
+                              <td className="right">{r.metrics.sharpe_ratio != null ? r.metrics.sharpe_ratio.toFixed(2) : "—"}</td>
+                              <td className="right">{r.metrics.win_rate != null ? fmtPct(r.metrics.win_rate) : "—"}</td>
+                              <td className="right pnl-neg">{r.metrics.max_drawdown != null ? fmtPct(-r.metrics.max_drawdown) : "—"}</td>
+                              <td className="right">{r.metrics.total_trades ?? "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : (
+                  <EmptyState message="Click WATCHLIST or PORTFOLIO to batch-backtest across multiple symbols." />
+                )
+              )}
+
+              {/* PAPER tab */}
+              {bottomTab === "paper" && (
+                <PaperTradingPanel
+                  token={token}
+                  strategies={strategies.map((s) => ({ slug: s.slug, name: s.name }))}
+                />
               )}
             </div>
           </div>

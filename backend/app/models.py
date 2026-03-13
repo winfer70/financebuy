@@ -691,6 +691,59 @@ class TradingSignal(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+# ── Social / Marketplace Models ─────────────────────────────────────────
+
+
+class StrategyRating(Base):
+    """User rating (1–5 stars) and optional review for a public strategy."""
+
+    __tablename__ = "strategy_ratings"
+    __table_args__ = (
+        UniqueConstraint(
+            "strategy_id", "user_id",
+            name="uq_strategy_ratings_strategy_user",
+        ),
+        Index("idx_strategy_ratings_strategy_id", "strategy_id"),
+    )
+
+    rating_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    strategy_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("strategies.strategy_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    stars = Column(SmallInteger, nullable=False)
+    review = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class StrategyUsage(Base):
+    """Tracks when a user clones a strategy from the marketplace."""
+
+    __tablename__ = "strategy_usage"
+    __table_args__ = (
+        Index("idx_strategy_usage_strategy_id", "strategy_id"),
+    )
+
+    usage_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    strategy_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("strategies.strategy_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    cloned_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 # ── Notification & Webhook Models ────────────────────────────────────────
 
 
@@ -738,3 +791,61 @@ class UserWebhook(Base):
     events = Column(JSONB, server_default="'[]'::jsonb", nullable=False)
     is_active = Column(Boolean, server_default="TRUE", nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ── Paper Trading Models ─────────────────────────────────────────────────
+
+
+class PaperTrade(Base):
+    """Virtual paper trading session tracking simulated positions and equity."""
+
+    __tablename__ = "paper_trades"
+    __table_args__ = (
+        Index("idx_paper_trades_user_id", "user_id"),
+        Index("idx_paper_trades_status", "status"),
+    )
+
+    paper_trade_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
+    strategy_id = Column(UUID(as_uuid=True), ForeignKey("strategies.strategy_id", ondelete="SET NULL"), nullable=True)
+    symbol = Column(String(20), nullable=False)
+    initial_capital = Column(Numeric(18, 2), nullable=False)
+    current_equity = Column(Numeric(18, 2), nullable=False)
+    status = Column(String(20), server_default="active", nullable=False)
+    parameters_json = Column(JSONB, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    stopped_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class PaperTradePosition(Base):
+    """Individual position (open or closed) within a paper trade session."""
+
+    __tablename__ = "paper_trade_positions"
+    __table_args__ = (
+        Index("idx_paper_positions_trade_id", "paper_trade_id"),
+    )
+
+    position_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    paper_trade_id = Column(UUID(as_uuid=True), ForeignKey("paper_trades.paper_trade_id", ondelete="CASCADE"), nullable=False)
+    side = Column(String(10), nullable=False)
+    entry_price = Column(Numeric(18, 4), nullable=False)
+    entry_date = Column(DateTime(timezone=True), nullable=False)
+    exit_price = Column(Numeric(18, 4), nullable=True)
+    exit_date = Column(DateTime(timezone=True), nullable=True)
+    quantity = Column(Numeric(18, 6), nullable=False)
+    pnl = Column(Numeric(18, 4), nullable=True)
+    status = Column(String(20), server_default="open", nullable=False)
+
+
+class PaperTradeEquitySnapshot(Base):
+    """Point-in-time equity snapshot for charting paper trade performance."""
+
+    __tablename__ = "paper_trade_equity_snapshots"
+    __table_args__ = (
+        Index("idx_paper_equity_trade_id", "paper_trade_id"),
+    )
+
+    snapshot_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    paper_trade_id = Column(UUID(as_uuid=True), ForeignKey("paper_trades.paper_trade_id", ondelete="CASCADE"), nullable=False)
+    equity = Column(Numeric(18, 4), nullable=False)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
