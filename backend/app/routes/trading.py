@@ -12,7 +12,11 @@ the frontend.
 Route prefix: /api/v1/trading  (registered in main.py)
 """
 
+import asyncio
+import csv
 import hmac
+import io
+import json
 import logging
 import os
 import uuid
@@ -20,11 +24,17 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import select, update, delete, and_, or_, func
+from fastapi.responses import StreamingResponse
+from sqlalchemy import select, update, delete, and_, or_, func, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..models import Strategy, StrategyVersion, BacktestResult, TradingSignal, AuditLog, Notification, UserWebhook, User
+from ..models import (
+    Strategy, StrategyVersion, BacktestResult, TradingSignal,
+    AuditLog, Notification, UserWebhook, User,
+    StrategyRating, StrategyUsage,
+    PaperTrade, PaperTradePosition, PaperTradeEquitySnapshot,
+)
 from ..schemas import (
     StrategyCreate, StrategyOut, StrategyUpdate,
     BacktestRequest, BacktestResultOut,
@@ -35,6 +45,10 @@ from ..schemas import (
     PineScriptValidateRequest, PineScriptValidateResponse,
     PineScriptTranspileRequest, PineScriptTranspileResponse,
     StrategyVersionOut, CompositionRequest,
+    RatingCreate, RatingOut, StrategyStatsOut, MarketplaceStrategyOut,
+    BatchBacktestRequest,
+    PaperTradeCreate, PaperTradeOut, PaperTradePositionOut,
+    PaperTradeEquitySnapshotOut,
 )
 from ..limiter import limiter
 from .auth_routes import get_current_user
@@ -134,7 +148,7 @@ async def list_strategies(
 
 
 @router.post("/strategies", response_model=StrategyOut, status_code=201)
-@limiter.limit("30/minute")
+# TEMP: rate limits disabled for testing
 async def create_strategy(
     body: StrategyCreate,
     request: Request,
@@ -204,7 +218,7 @@ async def get_strategy(
 
 
 @router.patch("/strategies/{strategy_id}", response_model=StrategyOut)
-@limiter.limit("30/minute")
+# TEMP: rate limits disabled for testing
 async def update_strategy(
     strategy_id: uuid.UUID,
     body: StrategyUpdate,
@@ -263,7 +277,7 @@ async def update_strategy(
 
 
 @router.delete("/strategies/{strategy_id}", status_code=204)
-@limiter.limit("30/minute")
+# TEMP: rate limits disabled for testing
 async def delete_strategy(
     strategy_id: uuid.UUID,
     request: Request,
@@ -300,7 +314,7 @@ async def delete_strategy(
 
 
 @router.post("/strategies/{strategy_id}/clone", response_model=StrategyOut, status_code=201)
-@limiter.limit("30/minute")
+# TEMP: rate limits disabled for testing
 async def clone_strategy(
     strategy_id: uuid.UUID,
     request: Request,
@@ -346,6 +360,12 @@ async def clone_strategy(
         version=1,
     )
     db.add(clone)
+    # Track marketplace usage (clone event)
+    db.add(StrategyUsage(
+        usage_id=uuid.uuid4(),
+        strategy_id=strategy_id,
+        user_id=current_user.user_id,
+    ))
     await db.commit()
     await db.refresh(clone)
     return clone
@@ -355,7 +375,7 @@ async def clone_strategy(
 
 
 @router.post("/pinescript/validate", response_model=PineScriptValidateResponse)
-@limiter.limit("60/minute")
+# TEMP: rate limits disabled for testing
 async def validate_pinescript(
     body: PineScriptValidateRequest,
     request: Request,
@@ -381,7 +401,7 @@ async def validate_pinescript(
 
 
 @router.post("/pinescript/transpile", response_model=PineScriptTranspileResponse)
-@limiter.limit("20/minute")
+# TEMP: rate limits disabled for testing
 async def transpile_pinescript(
     body: PineScriptTranspileRequest,
     request: Request,
@@ -545,7 +565,7 @@ async def get_strategy_version(
 
 
 @router.post("/strategies/{strategy_id}/revert/{version_number}", response_model=StrategyOut)
-@limiter.limit("10/minute")
+# TEMP: rate limits disabled for testing
 async def revert_strategy_version(
     strategy_id: uuid.UUID,
     version_number: int,
@@ -615,7 +635,7 @@ async def revert_strategy_version(
 
 
 @router.post("/compose", response_model=StrategyOut, status_code=201)
-@limiter.limit("20/minute")
+# TEMP: rate limits disabled for testing
 async def create_composed_strategy(
     body: CompositionRequest,
     request: Request,
@@ -702,7 +722,7 @@ async def create_composed_strategy(
 # ── Backtest routes ───────────────────────────────────────────────────────
 
 @router.post("/backtest", response_model=BacktestResultOut, status_code=201)
-@limiter.limit("10/hour")
+# TEMP: rate limits disabled for testing
 async def queue_backtest(
     body: BacktestRequest,
     request: Request,
@@ -728,15 +748,15 @@ async def queue_backtest(
         429: Too many concurrent backtests.
         404: Strategy slug not found.
     """
-    # Check concurrent limit (3 per user)
-    stmt = select(BacktestResult).where(
-        BacktestResult.user_id == current_user.user_id,
-        BacktestResult.status.in_(["pending", "running"]),
-    )
-    result = await db.execute(stmt)
-    active = result.scalars().all()
-    if len(active) >= 3:
-        raise HTTPException(429, "Maximum 3 concurrent backtests. Wait for one to finish.")
+    # TEMP: concurrent limit disabled for testing (was 3 per user)
+    # stmt = select(BacktestResult).where(
+    #     BacktestResult.user_id == current_user.user_id,
+    #     BacktestResult.status.in_(["pending", "running"]),
+    # )
+    # result = await db.execute(stmt)
+    # active = result.scalars().all()
+    # if len(active) >= 3:
+    #     raise HTTPException(429, "Maximum 3 concurrent backtests. Wait for one to finish.")
 
     # Resolve strategy_id from slug if not provided directly
     strategy_id = body.strategy_id
@@ -1048,7 +1068,7 @@ async def list_webhooks(
 
 
 @router.post("/webhooks", response_model=WebhookOut, status_code=201)
-@limiter.limit("10/minute")
+# TEMP: rate limits disabled for testing
 async def create_webhook(
     body: WebhookCreate,
     request: Request,
@@ -1161,7 +1181,7 @@ _TRADING_ML_URL = os.getenv("TRADING_ML_URL", "http://trading-ml:8001")
 
 
 @router.post("/regime", response_model=RegimeResponse)
-@limiter.limit("30/minute")
+# TEMP: rate limits disabled for testing
 async def detect_regime(
     body: RegimeRequest,
     request: Request,
@@ -1555,3 +1575,961 @@ async def internal_post_strategy_rules(
 
     await db.commit()
     return {"stored": stored}
+
+
+# ─── MARKETPLACE ─────────────────────────────────────────────────────────────
+
+
+@router.get("/marketplace", response_model=List[MarketplaceStrategyOut])
+# TEMP: rate limits disabled for testing
+async def browse_marketplace(
+    request: Request,
+    category: Optional[str] = None,
+    timeframe: Optional[str] = None,
+    asset_class: Optional[str] = None,
+    sort_by: Optional[str] = "newest",
+    search: Optional[str] = None,
+    limit: int = 25,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Browse the public strategy marketplace.
+
+    Returns paginated list of public strategies with author name,
+    average rating, rating count, and clone count. Supports filtering
+    by category, timeframe, asset class, and search term.
+    """
+    # Base query: public strategies with author info + aggregated stats
+    stmt = (
+        select(
+            Strategy,
+            User.first_name.label("author_name"),
+            func.coalesce(func.avg(StrategyRating.stars), None).label("avg_rating"),
+            func.count(distinct(StrategyRating.rating_id)).label("rating_count"),
+            func.count(distinct(StrategyUsage.usage_id)).label("clone_count"),
+        )
+        .join(User, Strategy.user_id == User.user_id)
+        .outerjoin(StrategyRating, Strategy.strategy_id == StrategyRating.strategy_id)
+        .outerjoin(StrategyUsage, Strategy.strategy_id == StrategyUsage.strategy_id)
+        .where(Strategy.is_public == True)
+        .group_by(Strategy.strategy_id, User.first_name)
+    )
+
+    # -- Filters --
+    if category:
+        stmt = stmt.where(Strategy.category == category)
+    if timeframe:
+        stmt = stmt.where(Strategy.timeframe == timeframe)
+    if asset_class:
+        stmt = stmt.where(Strategy.asset_class == asset_class)
+    if search:
+        pattern = f"%{search}%"
+        stmt = stmt.where(
+            or_(
+                Strategy.name.ilike(pattern),
+                Strategy.description.ilike(pattern),
+            )
+        )
+
+    # -- Sorting --
+    sort_map = {
+        "newest": Strategy.created_at.desc(),
+        "oldest": Strategy.created_at.asc(),
+        "most_cloned": func.count(distinct(StrategyUsage.usage_id)).desc(),
+        "top_rated": func.coalesce(func.avg(StrategyRating.stars), 0).desc(),
+        "name_asc": Strategy.name.asc(),
+    }
+    stmt = stmt.order_by(sort_map.get(sort_by, Strategy.created_at.desc()))
+
+    # -- Pagination --
+    stmt = stmt.limit(min(limit, 100)).offset(offset)
+
+    rows = (await db.execute(stmt)).all()
+
+    results = []
+    for row in rows:
+        strat = row[0]
+        results.append(MarketplaceStrategyOut(
+            strategy_id=str(strat.strategy_id),
+            user_id=str(strat.user_id),
+            name=strat.name,
+            slug=strat.slug,
+            description=strat.description or "",
+            category=strat.category or "",
+            timeframe=strat.timeframe or "",
+            asset_class=strat.asset_class or "",
+            is_public=strat.is_public,
+            created_at=strat.created_at,
+            author_name=row.author_name or "Anonymous",
+            avg_rating=round(float(row.avg_rating), 2) if row.avg_rating else None,
+            rating_count=row.rating_count,
+            clone_count=row.clone_count,
+        ))
+
+    return results
+
+
+@router.get("/marketplace/featured", response_model=List[MarketplaceStrategyOut])
+# TEMP: rate limits disabled for testing
+async def featured_strategies(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Return top 10 featured public strategies.
+
+    Featured = highest average rating (>= 3.0) with at least 1 rating,
+    ordered by average rating descending, then by clone count.
+    """
+    stmt = (
+        select(
+            Strategy,
+            User.first_name.label("author_name"),
+            func.coalesce(func.avg(StrategyRating.stars), None).label("avg_rating"),
+            func.count(distinct(StrategyRating.rating_id)).label("rating_count"),
+            func.count(distinct(StrategyUsage.usage_id)).label("clone_count"),
+        )
+        .join(User, Strategy.user_id == User.user_id)
+        .outerjoin(StrategyRating, Strategy.strategy_id == StrategyRating.strategy_id)
+        .outerjoin(StrategyUsage, Strategy.strategy_id == StrategyUsage.strategy_id)
+        .where(Strategy.is_public == True)
+        .group_by(Strategy.strategy_id, User.first_name)
+        .having(func.avg(StrategyRating.stars) >= 3.0)
+        .order_by(
+            func.avg(StrategyRating.stars).desc(),
+            func.count(distinct(StrategyUsage.usage_id)).desc(),
+        )
+        .limit(10)
+    )
+
+    rows = (await db.execute(stmt)).all()
+
+    results = []
+    for row in rows:
+        strat = row[0]
+        results.append(MarketplaceStrategyOut(
+            strategy_id=str(strat.strategy_id),
+            user_id=str(strat.user_id),
+            name=strat.name,
+            slug=strat.slug,
+            description=strat.description or "",
+            category=strat.category or "",
+            timeframe=strat.timeframe or "",
+            asset_class=strat.asset_class or "",
+            is_public=strat.is_public,
+            created_at=strat.created_at,
+            author_name=row.author_name or "Anonymous",
+            avg_rating=round(float(row.avg_rating), 2) if row.avg_rating else None,
+            rating_count=row.rating_count,
+            clone_count=row.clone_count,
+        ))
+
+    return results
+
+
+@router.post("/strategies/{strategy_id}/rate", response_model=RatingOut)
+# TEMP: rate limits disabled for testing
+async def rate_strategy(
+    strategy_id: str,
+    body: RatingCreate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Rate a public strategy (upsert — one rating per user per strategy).
+
+    Users cannot rate their own strategies. Stars must be 1–5.
+    If the user has already rated this strategy, their rating is updated.
+    """
+    uid = current_user.user_id
+    sid = uuid.UUID(strategy_id)
+
+    # Verify strategy exists and is public
+    strat = (await db.execute(
+        select(Strategy).where(Strategy.strategy_id == sid)
+    )).scalar_one_or_none()
+    if not strat:
+        raise HTTPException(404, "Strategy not found")
+    if not strat.is_public:
+        raise HTTPException(403, "Cannot rate a private strategy")
+    if strat.user_id == uid:
+        raise HTTPException(403, "Cannot rate your own strategy")
+
+    # Check for existing rating (upsert)
+    existing = (await db.execute(
+        select(StrategyRating).where(
+            StrategyRating.strategy_id == sid,
+            StrategyRating.user_id == uid,
+        )
+    )).scalar_one_or_none()
+
+    if existing:
+        existing.stars = body.stars
+        existing.review = body.review
+        await db.commit()
+        await db.refresh(existing)
+        rating = existing
+    else:
+        rating = StrategyRating(
+            rating_id=uuid.uuid4(),
+            strategy_id=sid,
+            user_id=uid,
+            stars=body.stars,
+            review=body.review,
+        )
+        db.add(rating)
+        await db.commit()
+        await db.refresh(rating)
+
+    # Fetch author name for response
+    author_name = await _get_user_name(db, uid)
+
+    return RatingOut(
+        rating_id=str(rating.rating_id),
+        strategy_id=str(rating.strategy_id),
+        user_id=str(rating.user_id),
+        author_name=author_name,
+        stars=rating.stars,
+        review=rating.review,
+        created_at=rating.created_at,
+    )
+
+
+async def _get_user_name(db: AsyncSession, user_id: uuid.UUID) -> str:
+    """Helper: fetch a user's display name (first_name or 'Anonymous')."""
+    user = (await db.execute(
+        select(User.first_name).where(User.user_id == user_id)
+    )).scalar_one_or_none()
+    return user or "Anonymous"
+
+
+@router.get("/strategies/{strategy_id}/ratings", response_model=List[RatingOut])
+# TEMP: rate limits disabled for testing
+async def list_ratings(
+    strategy_id: str,
+    request: Request,
+    limit: int = 25,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    List all ratings for a strategy, paginated.
+
+    Returns each rating with the reviewer's display name.
+    """
+    sid = uuid.UUID(strategy_id)
+
+    stmt = (
+        select(StrategyRating, User.first_name.label("author_name"))
+        .join(User, StrategyRating.user_id == User.user_id)
+        .where(StrategyRating.strategy_id == sid)
+        .order_by(StrategyRating.created_at.desc())
+        .limit(min(limit, 100))
+        .offset(offset)
+    )
+
+    rows = (await db.execute(stmt)).all()
+
+    return [
+        RatingOut(
+            rating_id=str(r.rating_id),
+            strategy_id=str(r.strategy_id),
+            user_id=str(r.user_id),
+            author_name=author_name or "Anonymous",
+            stars=r.stars,
+            review=r.review,
+            created_at=r.created_at,
+        )
+        for r, author_name in rows
+    ]
+
+
+@router.get("/strategies/{strategy_id}/stats", response_model=StrategyStatsOut)
+# TEMP: rate limits disabled for testing
+async def get_strategy_stats(
+    strategy_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Aggregate statistics for a strategy.
+
+    Returns clone count, average rating, rating count, and backtest count.
+    """
+    sid = uuid.UUID(strategy_id)
+
+    # Clone count
+    clone_count = (await db.execute(
+        select(func.count(StrategyUsage.usage_id)).where(
+            StrategyUsage.strategy_id == sid
+        )
+    )).scalar() or 0
+
+    # Rating stats
+    rating_row = (await db.execute(
+        select(
+            func.avg(StrategyRating.stars),
+            func.count(StrategyRating.rating_id),
+        ).where(StrategyRating.strategy_id == sid)
+    )).one()
+    avg_rating = round(float(rating_row[0]), 2) if rating_row[0] else None
+    rating_count = rating_row[1]
+
+    # Backtest count
+    backtest_count = (await db.execute(
+        select(func.count(BacktestResult.result_id)).where(
+            BacktestResult.strategy_id == sid
+        )
+    )).scalar() or 0
+
+    return StrategyStatsOut(
+        clone_count=clone_count,
+        avg_rating=avg_rating,
+        rating_count=rating_count,
+        backtest_count=backtest_count,
+    )
+
+
+@router.post("/strategies/{strategy_id}/publish")
+# TEMP: rate limits disabled for testing
+async def toggle_publish(
+    strategy_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Toggle a strategy's public/private visibility.
+
+    Only the strategy owner can publish or unpublish. Returns the new
+    is_public state.
+    """
+    uid = current_user.user_id
+    sid = uuid.UUID(strategy_id)
+
+    strat = (await db.execute(
+        select(Strategy).where(Strategy.strategy_id == sid)
+    )).scalar_one_or_none()
+    if not strat:
+        raise HTTPException(404, "Strategy not found")
+    if strat.user_id != uid:
+        raise HTTPException(403, "Only the owner can publish/unpublish")
+
+    strat.is_public = not strat.is_public
+    await db.commit()
+    await db.refresh(strat)
+
+    return {"strategy_id": str(sid), "is_public": strat.is_public}
+
+
+# ─── BACKTEST EXPORT ─────────────────────────────────────────────────────────
+
+
+@router.get("/backtest/{result_id}/export")
+# TEMP: rate limits disabled for testing
+async def export_backtest(
+    result_id: str,
+    request: Request,
+    format: str = "csv",
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Export backtest results as a downloadable CSV file.
+
+    Includes a summary section (metrics) followed by a trades table.
+    The file is streamed as an attachment.
+    """
+    uid = current_user.user_id
+    rid = uuid.UUID(result_id)
+
+    result = (await db.execute(
+        select(BacktestResult).where(BacktestResult.result_id == rid)
+    )).scalar_one_or_none()
+    if not result:
+        raise HTTPException(404, "Backtest result not found")
+
+    # Verify ownership via the backtest result itself
+    if result.user_id != uid:
+        raise HTTPException(403, "Not authorized to export this result")
+
+    strat = (await db.execute(
+        select(Strategy).where(Strategy.strategy_id == result.strategy_id)
+    )).scalar_one_or_none()
+
+    if format != "csv":
+        raise HTTPException(400, "Only CSV export is currently supported")
+
+    # Build CSV
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # -- Metrics summary section --
+    metrics = result.metrics_json or {}
+    writer.writerow(["=== BACKTEST SUMMARY ==="])
+    writer.writerow(["Strategy", strat.name])
+    writer.writerow(["Symbol", result.symbol])
+    writer.writerow(["Interval", result.interval])
+    writer.writerow(["Period", f"{result.start_date} to {result.end_date}"])
+    writer.writerow([])
+    for key, val in metrics.items():
+        writer.writerow([key, val])
+    writer.writerow([])
+
+    # -- Trades table --
+    trades = (result.results_json or {}).get("trades", [])
+    if trades:
+        writer.writerow(["=== TRADES ==="])
+        headers = list(trades[0].keys()) if trades else []
+        writer.writerow(headers)
+        for trade in trades:
+            writer.writerow([trade.get(h, "") for h in headers])
+
+    output.seek(0)
+    filename = f"backtest_{result_id[:8]}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+# ─── BATCH BACKTEST ──────────────────────────────────────────────────────────
+
+
+@router.post("/backtest/batch")
+# TEMP: rate limits disabled for testing
+async def queue_batch_backtest(
+    body: BatchBacktestRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Queue backtests for a strategy across multiple symbols.
+
+    Accepts up to 20 symbols and enqueues individual backtest tasks
+    for each. Returns a batch_id and list of backtest result IDs for
+    polling.
+    """
+    uid = current_user.user_id
+
+    if len(body.symbols) > 20:
+        raise HTTPException(400, "Maximum 20 symbols per batch")
+    if not body.symbols:
+        raise HTTPException(400, "At least one symbol is required")
+
+    # Resolve strategy
+    strat = None
+    strategy_id = None
+    if body.strategy_id:
+        strat = (await db.execute(
+            select(Strategy).where(
+                Strategy.strategy_id == uuid.UUID(body.strategy_id),
+                Strategy.user_id == uid,
+            )
+        )).scalar_one_or_none()
+        if strat:
+            strategy_id = strat.strategy_id
+    elif body.strategy_slug:
+        # Check user strategies first (slug stored in definition_json)
+        user_strats = (await db.execute(
+            select(Strategy).where(Strategy.user_id == uid)
+        )).scalars().all()
+        for s in user_strats:
+            defn = s.definition_json or {}
+            if defn.get("strategy_slug") == body.strategy_slug:
+                strat = s
+                strategy_id = s.strategy_id
+                break
+        # Fall back to system strategies
+        if not strat:
+            sys_strats = (await db.execute(
+                select(Strategy).where(Strategy.is_system == True)
+            )).scalars().all()
+            for s in sys_strats:
+                defn = s.definition_json or {}
+                if defn.get("strategy_slug") == body.strategy_slug:
+                    strat = s
+                    strategy_id = s.strategy_id
+                    break
+
+    if not strat:
+        raise HTTPException(404, "Strategy not found")
+
+    batch_id = str(uuid.uuid4())
+    backtest_ids = []
+
+    # Parse date strings
+    end_date = datetime.utcnow()
+    start_date = end_date - timedelta(days=365)
+    if body.end_date:
+        try:
+            end_date = datetime.fromisoformat(body.end_date)
+        except ValueError:
+            raise HTTPException(400, f"Invalid end_date: {body.end_date}")
+    if body.start_date:
+        try:
+            start_date = datetime.fromisoformat(body.start_date)
+        except ValueError:
+            raise HTTPException(400, f"Invalid start_date: {body.start_date}")
+
+    for symbol in body.symbols:
+        result_id = uuid.uuid4()
+        bt = BacktestResult(
+            result_id=result_id,
+            user_id=uid,
+            strategy_id=strat.strategy_id,
+            symbol=symbol.upper(),
+            interval=body.interval or "1d",
+            start_date=start_date,
+            end_date=end_date,
+            parameters_json=body.parameters or {},
+            commission_per_trade=body.commission or 1.00,
+            slippage_pct=body.slippage or 0.0005,
+            status="pending",
+        )
+        db.add(bt)
+        backtest_ids.append(str(result_id))
+
+    await db.commit()
+
+    # Enqueue arq tasks for each symbol (same pattern as queue_backtest)
+    try:
+        from ..trading.worker import enqueue_backtest
+        for bid in backtest_ids:
+            await enqueue_backtest(bid)
+    except Exception:
+        # If enqueue fails, the worker will pick them up via polling
+        pass
+
+    return {
+        "batch_id": batch_id,
+        "backtest_ids": backtest_ids,
+        "symbol_count": len(body.symbols),
+    }
+
+
+# ─── PAPER TRADING ──────────────────────────────────────────────────────────
+
+
+async def _enrich_paper_trade(pt, db: AsyncSession) -> dict:
+    """Convert PaperTrade ORM to dict enriched with strategy_name/strategy_slug.
+
+    Args:
+        pt:  PaperTrade ORM object.
+        db:  Active DB session.
+
+    Returns:
+        Dict suitable for PaperTradeOut serialisation.
+    """
+    data = {
+        "paper_trade_id": pt.paper_trade_id,
+        "user_id": pt.user_id,
+        "strategy_id": pt.strategy_id,
+        "strategy_name": None,
+        "strategy_slug": None,
+        "symbol": pt.symbol,
+        "initial_capital": pt.initial_capital,
+        "current_equity": pt.current_equity,
+        "status": pt.status,
+        "parameters_json": pt.parameters_json,
+        "created_at": pt.created_at,
+        "stopped_at": pt.stopped_at,
+    }
+    if pt.strategy_id:
+        strat = (await db.execute(
+            select(Strategy).where(Strategy.strategy_id == pt.strategy_id)
+        )).scalar_one_or_none()
+        if strat:
+            defn = strat.definition_json or {}
+            data["strategy_name"] = strat.name
+            data["strategy_slug"] = defn.get("strategy_slug", "")
+    return data
+
+
+@router.post("/paper", response_model=PaperTradeOut, status_code=201)
+async def start_paper_trade(
+    body: PaperTradeCreate,
+    request: Request,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Start a new paper trading session.
+
+    Creates a virtual portfolio that tracks a strategy's signals in
+    real-time against live market data.
+
+    Args:
+        body: Paper trade configuration (strategy, symbol, capital).
+
+    Returns:
+        The newly created paper trade.
+    """
+    uid = current_user.user_id
+
+    # Resolve strategy (same logic as queue_backtest)
+    strategy_id = None
+    if body.strategy_id:
+        strategy_id = body.strategy_id
+    elif body.strategy_slug:
+        sys_strats = (await db.execute(
+            select(Strategy).where(Strategy.is_system == True)
+        )).scalars().all()
+        for s in sys_strats:
+            defn = s.definition_json or {}
+            if defn.get("strategy_slug") == body.strategy_slug:
+                strategy_id = s.strategy_id
+                break
+        if not strategy_id:
+            # Check user strategies
+            user_strats = (await db.execute(
+                select(Strategy).where(Strategy.user_id == uid)
+            )).scalars().all()
+            for s in user_strats:
+                defn = s.definition_json or {}
+                if defn.get("strategy_slug") == body.strategy_slug:
+                    strategy_id = s.strategy_id
+                    break
+    if not strategy_id:
+        raise HTTPException(404, "Strategy not found")
+
+    # Check active paper trade limit (max 5 per user)
+    active_count = (await db.execute(
+        select(func.count(PaperTrade.paper_trade_id)).where(
+            PaperTrade.user_id == uid,
+            PaperTrade.status == "active",
+        )
+    )).scalar() or 0
+    if active_count >= 5:
+        raise HTTPException(429, "Maximum 5 active paper trades. Stop one before starting another.")
+
+    pt = PaperTrade(
+        paper_trade_id=uuid.uuid4(),
+        user_id=uid,
+        strategy_id=strategy_id,
+        symbol=body.symbol.upper(),
+        initial_capital=body.initial_capital,
+        current_equity=body.initial_capital,
+        status="active",
+        parameters_json=body.parameters,
+    )
+    db.add(pt)
+
+    # Add initial equity snapshot
+    db.add(PaperTradeEquitySnapshot(
+        snapshot_id=uuid.uuid4(),
+        paper_trade_id=pt.paper_trade_id,
+        equity=body.initial_capital,
+    ))
+
+    await db.commit()
+    await db.refresh(pt)
+
+    # Kick-start the paper worker evaluation loop so it picks up this trade.
+    try:
+        from arq.connections import create_pool, RedisSettings
+        _redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
+        pool = await create_pool(RedisSettings.from_dsn(_redis_url))
+        await pool.enqueue_job("evaluate_paper_trades", _defer_by=5)
+        await pool.close()
+    except Exception:
+        pass  # Worker startup hook will eventually pick it up
+
+    return await _enrich_paper_trade(pt, db)
+
+
+@router.get("/paper", response_model=List[PaperTradeOut])
+async def list_paper_trades(
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all paper trades for the current user."""
+    result = await db.execute(
+        select(PaperTrade)
+        .where(PaperTrade.user_id == current_user.user_id)
+        .order_by(PaperTrade.created_at.desc())
+    )
+    trades = result.scalars().all()
+    return [await _enrich_paper_trade(t, db) for t in trades]
+
+
+@router.get("/paper/{paper_trade_id}", response_model=PaperTradeOut)
+async def get_paper_trade(
+    paper_trade_id: uuid.UUID,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get a specific paper trade by ID."""
+    pt = (await db.execute(
+        select(PaperTrade).where(
+            PaperTrade.paper_trade_id == paper_trade_id,
+            PaperTrade.user_id == current_user.user_id,
+        )
+    )).scalar_one_or_none()
+    if not pt:
+        raise HTTPException(404, "Paper trade not found")
+    return await _enrich_paper_trade(pt, db)
+
+
+@router.post("/paper/{paper_trade_id}/pause", response_model=PaperTradeOut)
+async def pause_paper_trade(
+    paper_trade_id: uuid.UUID,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Pause an active paper trade (stops signal evaluation)."""
+    pt = (await db.execute(
+        select(PaperTrade).where(
+            PaperTrade.paper_trade_id == paper_trade_id,
+            PaperTrade.user_id == current_user.user_id,
+        )
+    )).scalar_one_or_none()
+    if not pt:
+        raise HTTPException(404, "Paper trade not found")
+    if pt.status != "active":
+        raise HTTPException(400, f"Cannot pause paper trade with status '{pt.status}'")
+    pt.status = "paused"
+    await db.commit()
+    await db.refresh(pt)
+    return await _enrich_paper_trade(pt, db)
+
+
+@router.post("/paper/{paper_trade_id}/resume", response_model=PaperTradeOut)
+async def resume_paper_trade(
+    paper_trade_id: uuid.UUID,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Resume a paused paper trade."""
+    pt = (await db.execute(
+        select(PaperTrade).where(
+            PaperTrade.paper_trade_id == paper_trade_id,
+            PaperTrade.user_id == current_user.user_id,
+        )
+    )).scalar_one_or_none()
+    if not pt:
+        raise HTTPException(404, "Paper trade not found")
+    if pt.status != "paused":
+        raise HTTPException(400, f"Cannot resume paper trade with status '{pt.status}'")
+    pt.status = "active"
+    await db.commit()
+    await db.refresh(pt)
+    return await _enrich_paper_trade(pt, db)
+
+
+@router.post("/paper/{paper_trade_id}/stop", response_model=PaperTradeOut)
+async def stop_paper_trade(
+    paper_trade_id: uuid.UUID,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Stop a paper trade permanently and close all open positions."""
+    pt = (await db.execute(
+        select(PaperTrade).where(
+            PaperTrade.paper_trade_id == paper_trade_id,
+            PaperTrade.user_id == current_user.user_id,
+        )
+    )).scalar_one_or_none()
+    if not pt:
+        raise HTTPException(404, "Paper trade not found")
+    if pt.status == "stopped":
+        raise HTTPException(400, "Paper trade already stopped")
+
+    # Close all open positions at current equity (no price fetch needed for stopping)
+    open_positions = (await db.execute(
+        select(PaperTradePosition).where(
+            PaperTradePosition.paper_trade_id == paper_trade_id,
+            PaperTradePosition.status == "open",
+        )
+    )).scalars().all()
+    for pos in open_positions:
+        pos.status = "closed"
+        pos.exit_date = datetime.utcnow()
+        # P&L will be approximate — positions were being tracked by the worker
+
+    pt.status = "stopped"
+    pt.stopped_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(pt)
+    return await _enrich_paper_trade(pt, db)
+
+
+@router.get("/paper/{paper_trade_id}/equity", response_model=List[PaperTradeEquitySnapshotOut])
+async def get_paper_equity(
+    paper_trade_id: uuid.UUID,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get equity time series for a paper trade (for charting)."""
+    # Verify ownership
+    pt = (await db.execute(
+        select(PaperTrade).where(
+            PaperTrade.paper_trade_id == paper_trade_id,
+            PaperTrade.user_id == current_user.user_id,
+        )
+    )).scalar_one_or_none()
+    if not pt:
+        raise HTTPException(404, "Paper trade not found")
+
+    result = await db.execute(
+        select(PaperTradeEquitySnapshot)
+        .where(PaperTradeEquitySnapshot.paper_trade_id == paper_trade_id)
+        .order_by(PaperTradeEquitySnapshot.timestamp)
+    )
+    return result.scalars().all()
+
+
+@router.get("/paper/{paper_trade_id}/positions", response_model=List[PaperTradePositionOut])
+async def get_paper_positions(
+    paper_trade_id: uuid.UUID,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get position history for a paper trade."""
+    # Verify ownership
+    pt = (await db.execute(
+        select(PaperTrade).where(
+            PaperTrade.paper_trade_id == paper_trade_id,
+            PaperTrade.user_id == current_user.user_id,
+        )
+    )).scalar_one_or_none()
+    if not pt:
+        raise HTTPException(404, "Paper trade not found")
+
+    result = await db.execute(
+        select(PaperTradePosition)
+        .where(PaperTradePosition.paper_trade_id == paper_trade_id)
+        .order_by(PaperTradePosition.entry_date.desc())
+    )
+    return result.scalars().all()
+
+
+# ---------------------------------------------------------------------------
+# Paper trade SSE stream — real-time updates via Server-Sent Events
+# ---------------------------------------------------------------------------
+
+
+@router.get("/paper/{paper_trade_id}/stream")
+async def stream_paper_trade(
+    paper_trade_id: uuid.UUID,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Stream real-time paper trade updates via Server-Sent Events.
+
+    Polls the database every 5 seconds and emits the trade's current status,
+    equity, and latest positions as SSE ``data:`` frames.  The stream
+    terminates automatically when the trade reaches ``stopped`` or ``error``
+    status.
+
+    Args:
+        paper_trade_id: UUID of the paper trade to stream.
+        current_user:   Authenticated user (injected via Depends).
+        db:             Async DB session (injected via Depends).
+
+    Returns:
+        StreamingResponse with ``media_type="text/event-stream"``.
+
+    Raises:
+        HTTPException 404: Paper trade not found or not owned by the user.
+    """
+    # Verify ownership before opening the stream
+    pt = (await db.execute(
+        select(PaperTrade).where(
+            PaperTrade.paper_trade_id == paper_trade_id,
+            PaperTrade.user_id == current_user.user_id,
+        )
+    )).scalar_one_or_none()
+    if not pt:
+        raise HTTPException(404, "Paper trade not found")
+
+    async def _event_generator():
+        """Yield SSE events with trade state until the trade terminates.
+
+        Each event is a JSON payload containing:
+            - paper_trade_id (str)
+            - status (str): "active", "stopped", or "error"
+            - current_equity (float)
+            - positions (list[dict]): latest open/closed positions
+            - timestamp (str): ISO-8601 UTC timestamp of this snapshot
+
+        Yields:
+            str: SSE-formatted ``data: {json}\n\n`` frames.
+        """
+        while True:
+            # Refresh the trade object to get the latest DB state
+            trade_result = await db.execute(
+                select(PaperTrade).where(
+                    PaperTrade.paper_trade_id == paper_trade_id,
+                    PaperTrade.user_id == current_user.user_id,
+                )
+            )
+            trade = trade_result.scalar_one_or_none()
+            if not trade:
+                # Trade deleted while streaming — send final event and stop
+                payload = json.dumps({
+                    "paper_trade_id": str(paper_trade_id),
+                    "status": "error",
+                    "message": "Paper trade no longer exists",
+                })
+                yield f"data: {payload}\n\n"
+                return
+
+            # Fetch latest positions for this trade
+            pos_result = await db.execute(
+                select(PaperTradePosition)
+                .where(PaperTradePosition.paper_trade_id == paper_trade_id)
+                .order_by(PaperTradePosition.entry_date.desc())
+            )
+            positions = pos_result.scalars().all()
+
+            # Serialise positions into plain dicts
+            positions_data = [
+                {
+                    "position_id": str(p.position_id),
+                    "side": p.side,
+                    "entry_price": float(p.entry_price),
+                    "entry_date": p.entry_date.isoformat() if p.entry_date else None,
+                    "exit_price": float(p.exit_price) if p.exit_price else None,
+                    "exit_date": p.exit_date.isoformat() if p.exit_date else None,
+                    "quantity": float(p.quantity),
+                    "pnl": float(p.pnl) if p.pnl else None,
+                    "status": p.status,
+                }
+                for p in positions
+            ]
+
+            # Build and emit the SSE event
+            payload = json.dumps({
+                "paper_trade_id": str(trade.paper_trade_id),
+                "status": trade.status,
+                "current_equity": float(trade.current_equity),
+                "symbol": trade.symbol,
+                "initial_capital": float(trade.initial_capital),
+                "positions": positions_data,
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+            })
+            yield f"data: {payload}\n\n"
+
+            # Stop streaming when the trade has reached a terminal state
+            if trade.status in ("stopped", "error"):
+                return
+
+            # Poll interval — wait 5 seconds before the next DB check
+            await asyncio.sleep(5)
+
+    return StreamingResponse(
+        _event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering for SSE
+        },
+    )

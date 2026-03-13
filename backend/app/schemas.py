@@ -1072,6 +1072,76 @@ class TradingSignalOut(BaseModel):
         orm_mode = True
 
 
+# ── Marketplace / Social schemas ────────────────────────────────────────
+
+
+class RatingCreate(BaseModel):
+    """Create or update a strategy rating."""
+
+    stars: int = Field(..., ge=1, le=5, description="Star rating (1-5).")
+    review: Optional[str] = Field(None, max_length=2000, description="Optional review text.")
+
+
+class RatingOut(BaseModel):
+    """Serialised strategy rating for API responses."""
+
+    rating_id: UUID
+    strategy_id: UUID
+    user_id: UUID
+    author_name: str = ""
+    stars: int
+    review: Optional[str]
+    created_at: Optional[datetime]
+
+    class Config:
+        orm_mode = True
+
+
+class StrategyStatsOut(BaseModel):
+    """Aggregate statistics for a strategy."""
+
+    clone_count: int = 0
+    avg_rating: Optional[float] = None
+    rating_count: int = 0
+    backtest_count: int = 0
+
+
+class MarketplaceStrategyOut(BaseModel):
+    """Strategy listing for the marketplace browse endpoint."""
+
+    strategy_id: UUID
+    name: str
+    description: Optional[str]
+    strategy_type: str
+    category: Optional[str]
+    timeframe: Optional[str]
+    asset_class: Optional[str]
+    is_public: bool
+    is_system: bool
+    version: int
+    created_at: Optional[datetime]
+    updated_at: Optional[datetime]
+    author_name: str = "Anonymous"
+    avg_rating: Optional[float] = None
+    rating_count: int = 0
+    clone_count: int = 0
+
+
+class BatchBacktestRequest(BaseModel):
+    """Queue backtests for multiple symbols."""
+
+    strategy_id: Optional[UUID] = None
+    strategy_slug: Optional[str] = None
+    symbols: List[str] = Field(..., min_items=1, max_items=20, description="Symbols to backtest.")
+    interval: str = "1d"
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    parameters: Optional[Dict] = None
+    commission: float = Field(1.0, ge=0)
+    slippage: float = Field(0.05, ge=0)
+    initial_capital: float = Field(10000, gt=0)
+
+
 # ── Notification schemas ─────────────────────────────────────────────────
 
 
@@ -1225,3 +1295,62 @@ class CompositionRequest(BaseModel):
     composition_json: Dict = Field(
         ..., description="Composition definition: indicators, entry_expr, exit_expr, stop_loss, params, param_schema.",
     )
+
+
+# ─── Paper Trading ──────────────────────────────────────────────────────────
+
+
+class PaperTradeCreate(BaseModel):
+    """Start a new paper trade."""
+    strategy_id: Optional[UUID] = Field(None, description="Strategy UUID.")
+    strategy_slug: Optional[str] = Field(None, max_length=50, description="Strategy engine slug.")
+    symbol: str = Field(..., min_length=1, max_length=20, description="Ticker symbol.")
+    initial_capital: Decimal = Field(default=Decimal("10000.00"), max_digits=18, decimal_places=2, description="Starting virtual balance.")
+    parameters: Optional[Dict] = Field(None, description="Strategy parameter overrides.")
+
+
+class PaperTradeOut(BaseModel):
+    """Serialised paper trade."""
+    paper_trade_id: UUID
+    user_id: UUID
+    strategy_id: Optional[UUID] = None
+    strategy_name: Optional[str] = None
+    strategy_slug: Optional[str] = None
+    symbol: str
+    initial_capital: Decimal
+    current_equity: Decimal
+    status: str
+    parameters_json: Optional[Dict[str, Any]] = None
+    created_at: datetime
+    stopped_at: Optional[datetime] = None
+
+    class Config:
+        orm_mode = True
+
+
+class PaperTradePositionOut(BaseModel):
+    """Serialised paper trade position."""
+    position_id: UUID
+    paper_trade_id: UUID
+    side: str
+    entry_price: Decimal
+    entry_date: datetime
+    exit_price: Optional[Decimal] = None
+    exit_date: Optional[datetime] = None
+    quantity: Decimal
+    pnl: Optional[Decimal] = None
+    status: str
+
+    class Config:
+        orm_mode = True
+
+
+class PaperTradeEquitySnapshotOut(BaseModel):
+    """Serialised equity snapshot."""
+    snapshot_id: UUID
+    paper_trade_id: UUID
+    equity: Decimal
+    timestamp: datetime
+
+    class Config:
+        orm_mode = True

@@ -61,6 +61,7 @@ import { UserGuidePage }          from "./pages/UserGuidePage";
 import { SettingsPage }           from "./pages/SettingsPage";
 import { FeedbackPage }             from "./pages/FeedbackPage";
 import { TradingPage }              from "./pages/TradingPage";
+import { MarketplacePage }          from "./pages/MarketplacePage";
 
 /* ── API ─────────────────────────────────────────────────────────────────── */
 import api from "./api/client";
@@ -158,6 +159,7 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
     { id: "watchlist",         label: t("nav.watchlist"),    Icon: Ic.watchlist    },
     { id: "portfolio-manager",label: t("nav.portfolio"),    Icon: Ic.portfolio    },
     { id: "trading",          label: "TRADING AI",           Icon: Ic.trading      },
+    { id: "marketplace",       label: "MARKETPLACE",          Icon: Ic.marketplace  },
     { id: "feedback",          label: t("nav.feedback"),     Icon: Ic.feedback     },
   ];
 
@@ -260,6 +262,7 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
                   feedback: t("nav.feedback"),
                   guide: t("nav.guide"),
                   import: t("nav.import"),
+                  marketplace: "MARKETPLACE",
                 };
                 if (page.startsWith("legal")) return t("nav.legal");
                 return breadcrumbMap[page] || page.toUpperCase();
@@ -354,6 +357,12 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
             onViewChart={navigateToChart}
           />
         )}
+        {page === "marketplace" && (
+          <MarketplacePage
+            token={authToken}
+            setPage={setPage}
+          />
+        )}
         {page.startsWith("legal") && (
           <LegalPage
             initialTab={
@@ -422,7 +431,7 @@ export default function App() {
     /* Derive initial page from URL pathname when no special query params */
     const KNOWN_PAGES = new Set([
       "dashboard", "transactions", "orders", "charts", "news", "watchlist",
-      "portfolio-manager", "trading", "feedback", "import", "settings", "guide",
+      "portfolio-manager", "trading", "marketplace", "feedback", "import", "settings", "guide",
       "legal", "legal-privacy", "legal-terms", "legal-disclaimer",
       "login", "register", "forgot-password", "reset-password",
       "verify-email", "token-action", "deactivated",

@@ -690,6 +690,11 @@ class _PineScriptVisitor:
     ) -> Tuple[List[Any], Dict[str, Any]]:
         """Parse function arguments from a func_args node.
 
+        Handles both native kwarg tree nodes and preprocessed kwarg
+        markers.  The preprocessor in grammar.py converts ``name=value``
+        into ``"__kw__name", value`` pairs, so we detect ``__kw__``
+        prefixed strings and reconstruct them as keyword arguments.
+
         Args:
             node: func_args Tree node, or None.
 
@@ -700,18 +705,34 @@ class _PineScriptVisitor:
             return [], {}
         pos: List[Any] = []
         kw: Dict[str, Any] = {}
-        for child in node.children:
-            if isinstance(child, Tree):
-                if child.data == "kwarg":
-                    key = str(child.children[0])
-                    val = self._eval_expr(child.children[1])
-                    kw[key] = val
-                elif child.data == "posarg":
-                    pos.append(self._eval_expr(child.children[0]))
+
+        # Collect only Tree children (skip separators / whitespace)
+        children = [c for c in node.children if isinstance(c, Tree)]
+        i = 0
+        while i < len(children):
+            child = children[i]
+            if child.data == "kwarg":
+                # Native kwarg node (fallback if grammar ever parses one)
+                key = str(child.children[0])
+                val = self._eval_expr(child.children[1])
+                kw[key] = val
+            elif child.data == "posarg":
+                val = self._eval_expr(child.children[0])
+                # Detect preprocessor kwarg marker: "__kw__name" followed by value
+                if (
+                    isinstance(val, str)
+                    and val.startswith("__kw__")
+                    and i + 1 < len(children)
+                    and children[i + 1].data == "posarg"
+                ):
+                    key = val[6:]  # strip __kw__ prefix
+                    i += 1
+                    kw[key] = self._eval_expr(children[i].children[0])
                 else:
-                    pos.append(self._eval_expr(child))
+                    pos.append(val)
             else:
                 pos.append(self._eval_expr(child))
+            i += 1
         return pos, kw
 
 

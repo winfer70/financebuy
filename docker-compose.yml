@@ -151,6 +151,41 @@ services:
           cpus: "0.5"
           memory: 256M
 
+  paper-worker:
+    build:
+      context:    .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    command: ["arq", "app.trading.paper_worker.WorkerSettings"]
+    healthcheck:
+      test: ["CMD-SHELL", "test -d /proc/1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-tickerTap}
+      REDIS_URL:    redis://redis:6379/0
+    networks:
+      - tickertap_net
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/app:/app/app:ro
+      - ./backend/alembic:/app/alembic:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
   trading-ml:
     build:
       context:    ./trading-ml
