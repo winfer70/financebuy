@@ -6,7 +6,7 @@ holdings, orders, password_reset_tokens, email_verification_tokens,
 user_reports, audit_log, news_articles, news_article_tickers,
 score_outcomes, scoring_rules, watchlists, watchlist_items,
 strategies, strategy_versions, backtest_results, trading_signals,
-notifications, and user_webhooks.
+price_alerts, notifications, and user_webhooks.
 
 All foreign keys specify ondelete behaviour and nullable=False where
 a parent reference is required, ensuring referential integrity.
@@ -742,6 +742,40 @@ class StrategyUsage(Base):
         nullable=False,
     )
     cloned_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ── Price Alert Models ────────────────────────────────────────────────────
+
+
+class PriceAlert(Base):
+    """
+    User-defined price alert. Triggers a notification when the target
+    price condition is met during market hours.
+    """
+
+    __tablename__ = "price_alerts"
+    __table_args__ = (
+        Index("idx_price_alerts_user", "user_id"),
+        Index(
+            "idx_price_alerts_active",
+            "user_id",
+            postgresql_where="is_active = TRUE",
+        ),
+    )
+
+    alert_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    symbol = Column(String(20), nullable=False)
+    condition = Column(String(10), nullable=False)      # "above", "below", "crosses"
+    target_price = Column(Numeric(18, 4), nullable=False)
+    note = Column(String(500), nullable=True)
+    is_active = Column(Boolean, server_default="TRUE", nullable=False)
+    triggered_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 # ── Notification & Webhook Models ────────────────────────────────────────

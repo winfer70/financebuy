@@ -25,7 +25,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import api from "../api/client";
 import { Ic } from "../components/common/Icons";
 import { SkeletonRow, useMarketStatus } from "../components/common";
-import { Sparkline, PortfolioChart, AllocationDonut, Heatmap } from "../components/charts";
+import { PortfolioChart, AllocationDonut, Heatmap } from "../components/charts";
 import { useCurrency } from "../context/CurrencyContext";
 import { useI18n } from "../context/I18nContext";
 import { useQuotes } from "../context/QuotesContext";
@@ -90,7 +90,7 @@ export function DashboardPage({ onNewTx, token, setPage, onViewChart }) {
         if (list && list.length) {
           setActivePortfolioId(prev => prev || list[0].portfolio_id);
         }
-      } catch { /* non-fatal */ }
+      } catch (e) { setFetchError(e?.message || "Failed to load data"); }
       finally { if (!cancelled) setLoadingPortfolios(false); }
     })();
     return () => { cancelled = true; };
@@ -107,7 +107,7 @@ export function DashboardPage({ onNewTx, token, setPage, onViewChart }) {
         if (cancelled) return;
         setPositions(list || []);
         sessionStorage.setItem("tickertap_positions", JSON.stringify(list || []));
-      } catch { /* non-fatal */ }
+      } catch (e) { setFetchError(e?.message || "Failed to load data"); }
       finally { if (!cancelled) setLoadingPositions(false); }
     })();
     return () => { cancelled = true; };
@@ -124,6 +124,9 @@ export function DashboardPage({ onNewTx, token, setPage, onViewChart }) {
   const [perfData, setPerfData] = useState([]);
   const [perfLoading, setPerfLoading] = useState(false);
 
+  /* ── Error state for failed data fetches ───────────────────────────────── */
+  const [fetchError, setFetchError] = useState(null);
+
   useEffect(() => {
     if (!token || positions.length === 0 || !activePortfolioId) { setPerfData([]); return; }
     let cancelled = false;
@@ -135,7 +138,7 @@ export function DashboardPage({ onNewTx, token, setPage, onViewChart }) {
            ALL range computation — no local PERIOD_DAYS map needed. */
         const series = await api.getPortfolioPerformance(activePortfolioId, chartPeriod, token);
         if (!cancelled) setPerfData(series);
-      } catch { /* non-fatal */ }
+      } catch (e) { setFetchError(e?.message || "Failed to load data"); }
       finally { if (!cancelled) setPerfLoading(false); }
     })();
     return () => { cancelled = true; };
@@ -235,6 +238,12 @@ export function DashboardPage({ onNewTx, token, setPage, onViewChart }) {
   /* ── Render ─────────────────────────────────────────────────────────────── */
   return (
     <div className="page-scroll">
+      {fetchError && (
+        <div style={{ padding:"8px 16px", background:"#7f1d1d", color:"#fca5a5", borderRadius:6, marginBottom:12, fontSize:12 }}>
+          {fetchError}
+        </div>
+      )}
+
       {/* Page header */}
       <div className="page-header">
         <div style={{ display: "flex", alignItems: "flex-end", gap: 16 }}>
@@ -373,7 +382,13 @@ export function DashboardPage({ onNewTx, token, setPage, onViewChart }) {
                 />
               </div>
               <div className="panel-body" style={{ paddingBottom: 8 }}>
-                <PortfolioChart key={activePortfolioId + chartPeriod} height={160} data={perfData} period={chartPeriod} currencySymbol={currencySymbol} />
+                {perfLoading ? (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 200, color: "var(--c-muted)", fontSize: 12 }}>
+                    Loading chart...
+                  </div>
+                ) : (
+                  <PortfolioChart key={activePortfolioId + chartPeriod} height={160} data={perfData} period={chartPeriod} currencySymbol={currencySymbol} />
+                )}
               </div>
             </div>
 

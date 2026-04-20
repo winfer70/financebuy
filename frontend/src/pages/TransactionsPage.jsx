@@ -9,8 +9,6 @@ import api, { useApi } from "../api/client";
 import { Ic } from "../components/common/Icons";
 import { SkeletonRow, ApiError } from "../components/common";
 import FilterBar from "../components/common/FilterBar";
-import { TRANSACTIONS } from "../styles/globals";
-
 export function TransactionsPage({ onNewTx, token, accountId, goBack }) {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -31,6 +29,42 @@ export function TransactionsPage({ onNewTx, token, accountId, goBack }) {
     return r;
   },[filter, search, allTxns]);
 
+  /**
+   * Exports the full loaded transaction list as a CSV file download.
+   * Builds a comma-separated string from allTxns, creates a Blob, and
+   * triggers a browser download named transactions_<date>.csv.
+   * Returns early without side-effects when there are no transactions.
+   */
+  function handleExportCsv() {
+    if (!allTxns.length) return;
+
+    const headers = "Date,Type,Symbol,Description,Amount,Currency,Status";
+    const rows = allTxns.map(tx => {
+      // Resolve each field using the same fallback logic as the table render
+      const date        = tx.created_at ? tx.created_at.slice(0, 10) : (tx.date || "");
+      const type        = tx.transaction_type || tx.type || "";
+      const symbol      = ""; // no symbol field on transaction objects
+      const description = tx.reference_number || tx.id || String(tx.transaction_id || "");
+      const amount      = tx.amount != null ? tx.amount : "";
+      const currency    = tx.currency || "USD";
+      const status      = tx.status || "";
+
+      // Wrap fields in quotes to handle any commas or whitespace in values
+      return [date, type, symbol, description, amount, currency, status]
+        .map(v => `"${String(v).replace(/"/g, '""')}"`)
+        .join(",");
+    });
+
+    const csvContent = [headers, ...rows].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = `transactions_${new Date().toISOString().split("T")[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   const totals = {
     total:    allTxns.reduce((s,t)=>s+(+t.amount||0),0),
     deposits: allTxns.filter(t=>(t.transaction_type||t.type)==="deposit").reduce((s,t)=>s+(+t.amount||0),0),
@@ -45,7 +79,7 @@ export function TransactionsPage({ onNewTx, token, accountId, goBack }) {
           <div className="page-sub">{allTxns.length} RECORDS · {accountId ? accountId.toString().slice(0,18) : "ACC-4821"}</div>
         </div>
         <div className="page-actions">
-          <button className="btn btn-outline"><Ic.filter/> EXPORT CSV</button>
+          <button className="btn btn-outline" onClick={handleExportCsv}><Ic.download/> EXPORT CSV</button>
           <button className="btn btn-amber" onClick={onNewTx}><Ic.plus/> NEW TRANSACTION</button>
         </div>
       </div>

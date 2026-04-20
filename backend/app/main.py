@@ -31,7 +31,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from .auth import validate_jwt_config
 from .limiter import limiter
-from .routes import accounts, admin, auth_routes, chart_templates, feedback, guide, holdings, market, news, orders, portfolio, portfolio_manager, reports, transactions, trading, watchlists
+from .routes import accounts, admin, alerts, auth_routes, chart_templates, feedback, guide, holdings, market, news, orders, portfolio, portfolio_manager, reports, transactions, trading, watchlists
 from .routes.news import register_retention_task
 from .routes.feedback import register_outcome_checker
 from .routes.auth_routes import register_deletion_purge
@@ -294,6 +294,7 @@ app.include_router(guide.router, prefix=_V1)
 app.include_router(reports.router, prefix=_V1)
 app.include_router(watchlists.router, prefix=_V1)
 app.include_router(trading.router, prefix=_V1)
+app.include_router(alerts.router, prefix=_V1)
 
 # Register the 30-day news retention cleanup background task (Phase 9).
 register_retention_task(app)

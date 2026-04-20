@@ -43,7 +43,7 @@ _DATABASE_URL = os.getenv(
 )
 _REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 
-_engine = create_async_engine(_DATABASE_URL, echo=False, pool_size=5)
+_engine = create_async_engine(_DATABASE_URL, echo=False, pool_size=5, max_overflow=2, pool_pre_ping=True)
 _SessionLocal = sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
 
 

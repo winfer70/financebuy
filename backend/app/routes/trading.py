@@ -19,11 +19,12 @@ import io
 import json
 import logging
 import os
+import time
 import uuid
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, update, delete, and_, or_, func, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,11 +48,14 @@ from ..schemas import (
     StrategyVersionOut, CompositionRequest,
     RatingCreate, RatingOut, StrategyStatsOut, MarketplaceStrategyOut,
     BatchBacktestRequest,
-    PaperTradeCreate, PaperTradeOut, PaperTradePositionOut,
+    PaperTradeCreate, PaperTradeUpdate, PaperTradeOut, PaperTradePositionOut,
     PaperTradeEquitySnapshotOut,
+    PortfolioScoreRequest, PortfolioScoreResponse, PositionScore,
+    ExitAnalysisRequest, ExitAnalysisResponse, ExitLevel,
 )
 from ..limiter import limiter
 from .auth_routes import get_current_user
+from ..trading.engine.indicators import sma, ema, rsi, atr, bollinger_bands, highest, lowest
 
 router = APIRouter(prefix="/trading", tags=["trading"])
 
@@ -148,7 +152,7 @@ async def list_strategies(
 
 
 @router.post("/strategies", response_model=StrategyOut, status_code=201)
-# TEMP: rate limits disabled for testing
+@limiter.limit("10/minute")
 async def create_strategy(
     body: StrategyCreate,
     request: Request,
@@ -218,7 +222,7 @@ async def get_strategy(
 
 
 @router.patch("/strategies/{strategy_id}", response_model=StrategyOut)
-# TEMP: rate limits disabled for testing
+@limiter.limit("10/minute")
 async def update_strategy(
     strategy_id: uuid.UUID,
     body: StrategyUpdate,
@@ -277,7 +281,7 @@ async def update_strategy(
 
 
 @router.delete("/strategies/{strategy_id}", status_code=204)
-# TEMP: rate limits disabled for testing
+@limiter.limit("10/minute")
 async def delete_strategy(
     strategy_id: uuid.UUID,
     request: Request,
@@ -314,7 +318,7 @@ async def delete_strategy(
 
 
 @router.post("/strategies/{strategy_id}/clone", response_model=StrategyOut, status_code=201)
-# TEMP: rate limits disabled for testing
+@limiter.limit("10/minute")
 async def clone_strategy(
     strategy_id: uuid.UUID,
     request: Request,
@@ -375,7 +379,7 @@ async def clone_strategy(
 
 
 @router.post("/pinescript/validate", response_model=PineScriptValidateResponse)
-# TEMP: rate limits disabled for testing
+@limiter.limit("5/minute")
 async def validate_pinescript(
     body: PineScriptValidateRequest,
     request: Request,
@@ -401,7 +405,7 @@ async def validate_pinescript(
 
 
 @router.post("/pinescript/transpile", response_model=PineScriptTranspileResponse)
-# TEMP: rate limits disabled for testing
+@limiter.limit("5/minute")
 async def transpile_pinescript(
     body: PineScriptTranspileRequest,
     request: Request,
@@ -565,7 +569,7 @@ async def get_strategy_version(
 
 
 @router.post("/strategies/{strategy_id}/revert/{version_number}", response_model=StrategyOut)
-# TEMP: rate limits disabled for testing
+@limiter.limit("10/minute")
 async def revert_strategy_version(
     strategy_id: uuid.UUID,
     version_number: int,
@@ -635,7 +639,7 @@ async def revert_strategy_version(
 
 
 @router.post("/compose", response_model=StrategyOut, status_code=201)
-# TEMP: rate limits disabled for testing
+@limiter.limit("5/minute")
 async def create_composed_strategy(
     body: CompositionRequest,
     request: Request,
@@ -722,7 +726,7 @@ async def create_composed_strategy(
 # ── Backtest routes ───────────────────────────────────────────────────────
 
 @router.post("/backtest", response_model=BacktestResultOut, status_code=201)
-# TEMP: rate limits disabled for testing
+@limiter.limit("5/minute")
 async def queue_backtest(
     body: BacktestRequest,
     request: Request,
@@ -748,15 +752,15 @@ async def queue_backtest(
         429: Too many concurrent backtests.
         404: Strategy slug not found.
     """
-    # TEMP: concurrent limit disabled for testing (was 3 per user)
-    # stmt = select(BacktestResult).where(
-    #     BacktestResult.user_id == current_user.user_id,
-    #     BacktestResult.status.in_(["pending", "running"]),
-    # )
-    # result = await db.execute(stmt)
-    # active = result.scalars().all()
-    # if len(active) >= 3:
-    #     raise HTTPException(429, "Maximum 3 concurrent backtests. Wait for one to finish.")
+    # Enforce a per-user concurrent backtest limit to prevent queue flooding.
+    stmt = select(BacktestResult).where(
+        BacktestResult.user_id == current_user.user_id,
+        BacktestResult.status.in_(["pending", "running"]),
+    )
+    result = await db.execute(stmt)
+    active = result.scalars().all()
+    if len(active) >= 3:
+        raise HTTPException(429, "Maximum 3 concurrent backtests. Wait for one to finish.")
 
     # Resolve strategy_id from slug if not provided directly
     strategy_id = body.strategy_id
@@ -1068,7 +1072,7 @@ async def list_webhooks(
 
 
 @router.post("/webhooks", response_model=WebhookOut, status_code=201)
-# TEMP: rate limits disabled for testing
+@limiter.limit("10/minute")
 async def create_webhook(
     body: WebhookCreate,
     request: Request,
@@ -1181,7 +1185,7 @@ _TRADING_ML_URL = os.getenv("TRADING_ML_URL", "http://trading-ml:8001")
 
 
 @router.post("/regime", response_model=RegimeResponse)
-# TEMP: rate limits disabled for testing
+@limiter.limit("10/minute")
 async def detect_regime(
     body: RegimeRequest,
     request: Request,
@@ -1581,7 +1585,7 @@ async def internal_post_strategy_rules(
 
 
 @router.get("/marketplace", response_model=List[MarketplaceStrategyOut])
-# TEMP: rate limits disabled for testing
+@limiter.limit("30/minute")
 async def browse_marketplace(
     request: Request,
     category: Optional[str] = None,
@@ -1672,7 +1676,7 @@ async def browse_marketplace(
 
 
 @router.get("/marketplace/featured", response_model=List[MarketplaceStrategyOut])
-# TEMP: rate limits disabled for testing
+@limiter.limit("30/minute")
 async def featured_strategies(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -1731,7 +1735,7 @@ async def featured_strategies(
 
 
 @router.post("/strategies/{strategy_id}/rate", response_model=RatingOut)
-# TEMP: rate limits disabled for testing
+@limiter.limit("10/minute")
 async def rate_strategy(
     strategy_id: str,
     body: RatingCreate,
@@ -1808,7 +1812,7 @@ async def _get_user_name(db: AsyncSession, user_id: uuid.UUID) -> str:
 
 
 @router.get("/strategies/{strategy_id}/ratings", response_model=List[RatingOut])
-# TEMP: rate limits disabled for testing
+@limiter.limit("30/minute")
 async def list_ratings(
     strategy_id: str,
     request: Request,
@@ -1850,7 +1854,7 @@ async def list_ratings(
 
 
 @router.get("/strategies/{strategy_id}/stats", response_model=StrategyStatsOut)
-# TEMP: rate limits disabled for testing
+@limiter.limit("30/minute")
 async def get_strategy_stats(
     strategy_id: str,
     request: Request,
@@ -1897,7 +1901,7 @@ async def get_strategy_stats(
 
 
 @router.post("/strategies/{strategy_id}/publish")
-# TEMP: rate limits disabled for testing
+@limiter.limit("10/minute")
 async def toggle_publish(
     strategy_id: str,
     request: Request,
@@ -1932,7 +1936,7 @@ async def toggle_publish(
 
 
 @router.get("/backtest/{result_id}/export")
-# TEMP: rate limits disabled for testing
+@limiter.limit("10/minute")
 async def export_backtest(
     result_id: str,
     request: Request,
@@ -2004,7 +2008,7 @@ async def export_backtest(
 
 
 @router.post("/backtest/batch")
-# TEMP: rate limits disabled for testing
+@limiter.limit("3/minute")
 async def queue_batch_backtest(
     body: BatchBacktestRequest,
     request: Request,
@@ -2114,6 +2118,369 @@ async def queue_batch_backtest(
         "backtest_ids": backtest_ids,
         "symbol_count": len(body.symbols),
     }
+
+
+# ─── PORTFOLIO SCORING ──────────────────────────────────────────────────────
+
+
+# Strategy slugs evaluated by the portfolio scorer (best-of-3 selection).
+_PORTFOLIO_SCORE_STRATEGIES = ["sma_crossover", "rsi_mean_reversion", "macd_crossover"]
+
+
+async def _fetch_bars_for_symbol(symbol: str):
+    """Fetch last ~200 daily bars for *symbol* via yfinance.
+
+    Uses ``NormalizedDataService`` wrapping ``YFinanceProvider`` so the
+    data is cache-friendly and normalised.
+
+    Args:
+        symbol: Ticker symbol (upper-cased by caller).
+
+    Returns:
+        List of ``OHLCVBar`` sorted chronologically.
+    """
+    from ..trading.providers.normalizer import NormalizedDataService
+    from ..trading.providers.yfinance_provider import YFinanceProvider
+
+    svc = NormalizedDataService(YFinanceProvider())
+    end = datetime.utcnow()
+    start = end - timedelta(days=300)  # request extra to guarantee ~200 bars
+    return await svc.get_bars(symbol, "1d", start, end)
+
+
+def _compute_trend(closes, sma_50, sma_200, idx):
+    """Classify the trend at bar *idx* based on SMA positions.
+
+    Rules:
+        - "bullish"  — price above both 50-SMA and 200-SMA.
+        - "bearish"  — price below both 50-SMA and 200-SMA.
+        - "neutral"  — otherwise (price between the two averages).
+
+    Args:
+        closes:  List of close prices.
+        sma_50:  50-period SMA series from ``indicators.sma``.
+        sma_200: 200-period SMA series from ``indicators.sma``.
+        idx:     Bar index to evaluate.
+
+    Returns:
+        Trend string: ``"bullish"``, ``"bearish"``, or ``"neutral"``.
+    """
+    price = closes[idx]
+    s50 = sma_50[idx]
+    s200 = sma_200[idx]
+    if s50 == 0 or s200 == 0:
+        return "neutral"
+    if price > s50 and price > s200:
+        return "bullish"
+    if price < s50 and price < s200:
+        return "bearish"
+    return "neutral"
+
+
+def _pick_best_signal(bars):
+    """Run three core strategies on *bars* and return the most recent signal.
+
+    Strategies evaluated: SMA crossover, RSI mean reversion, MACD crossover.
+    For each, signals are generated with default parameters.  The strategy
+    whose last signal is most recent wins.
+
+    Args:
+        bars: Chronologically sorted ``OHLCVBar`` list (>= 200 bars).
+
+    Returns:
+        Tuple of (signal_label, strategy_slug) where signal_label is one of
+        ``"BUY"``, ``"SELL"``, or ``"HOLD"``, and strategy_slug identifies
+        the winning strategy.
+    """
+    from ..trading.engine.strategies import get_strategy
+
+    best_ts = None
+    best_label = "HOLD"
+    best_slug = _PORTFOLIO_SCORE_STRATEGIES[0]
+
+    for slug in _PORTFOLIO_SCORE_STRATEGIES:
+        try:
+            strat = get_strategy(slug)
+            signals = strat["generate_signals"](bars, strat["default_params"])
+            if not signals:
+                continue
+            # Most recent signal from this strategy
+            latest = max(signals, key=lambda s: s.timestamp)
+            if best_ts is None or latest.timestamp > best_ts:
+                best_ts = latest.timestamp
+                best_slug = slug
+                # Map signal_type + direction to a user-facing label
+                if latest.signal_type == "entry" and latest.direction == "long":
+                    best_label = "BUY"
+                elif latest.signal_type in ("exit", "stop_loss"):
+                    best_label = "SELL"
+                else:
+                    best_label = "HOLD"
+        except Exception:
+            continue
+
+    return best_label, best_slug
+
+
+def _compute_score(rsi_val, trend, volatility_pct, signal_label):
+    """Compute a composite 1-100 position score.
+
+    Scoring components (summed then clamped):
+        - Base score 50.
+        - RSI: +15 if in healthy 30-70, -10 if oversold (<30) or overbought (>70).
+        - Trend alignment: +20 for bullish, -15 for bearish, 0 for neutral.
+        - Volatility: +10 if < 3%, 0 if 3-6%, -10 if > 6%.
+        - Signal boost: +15 for BUY, -15 for SELL, 0 for HOLD.
+
+    Args:
+        rsi_val:        Latest RSI value (0-100).
+        trend:          ``"bullish"`` / ``"bearish"`` / ``"neutral"``.
+        volatility_pct: ATR as a percentage of price.
+        signal_label:   ``"BUY"`` / ``"SELL"`` / ``"HOLD"``.
+
+    Returns:
+        Integer score clamped to [1, 100].
+    """
+    score = 50
+
+    # RSI component
+    if 30 <= rsi_val <= 70:
+        score += 15
+    else:
+        score -= 10
+
+    # Trend component
+    if trend == "bullish":
+        score += 20
+    elif trend == "bearish":
+        score -= 15
+
+    # Volatility component
+    if volatility_pct < 3.0:
+        score += 10
+    elif volatility_pct > 6.0:
+        score -= 10
+
+    # Signal component
+    if signal_label == "BUY":
+        score += 15
+    elif signal_label == "SELL":
+        score -= 15
+
+    return max(1, min(100, score))
+
+
+def _generate_suggestion(trend, rsi_val, signal_label, volatility_pct):
+    """Build a human-readable suggestion from indicator readings.
+
+    Prioritises the most actionable observation: overbought/oversold RSI,
+    strong trend alignment, or high volatility caution.
+
+    Args:
+        trend:          ``"bullish"`` / ``"bearish"`` / ``"neutral"``.
+        rsi_val:        Latest RSI value (0-100).
+        signal_label:   ``"BUY"`` / ``"SELL"`` / ``"HOLD"``.
+        volatility_pct: ATR as a percentage of price.
+
+    Returns:
+        Suggestion string.
+    """
+    rsi_rounded = round(rsi_val, 1)
+
+    # RSI extremes take priority
+    if rsi_val >= 70:
+        return f"RSI overbought ({rsi_rounded}). Consider taking profits."
+    if rsi_val <= 30:
+        return (
+            f"RSI oversold ({rsi_rounded}). "
+            "May present a buying opportunity if trend supports."
+        )
+
+    # Trend-based suggestions
+    if trend == "bullish" and signal_label == "BUY":
+        return (
+            f"Strong uptrend with moderate RSI ({rsi_rounded}). "
+            "Consider holding or adding to position."
+        )
+    if trend == "bullish":
+        return (
+            f"Uptrend intact with RSI at {rsi_rounded}. "
+            "Consider holding."
+        )
+    if trend == "bearish" and signal_label == "SELL":
+        return (
+            f"Downtrend with RSI at {rsi_rounded}. "
+            "Consider reducing exposure."
+        )
+    if trend == "bearish":
+        return (
+            f"Downtrend detected with RSI at {rsi_rounded}. "
+            "Monitor for reversal signals."
+        )
+
+    # Neutral / high volatility
+    if volatility_pct > 6.0:
+        return (
+            f"High volatility ({round(volatility_pct, 1)}% ATR). "
+            "Consider tightening stop-losses."
+        )
+
+    return (
+        f"Sideways movement with RSI at {rsi_rounded}. "
+        "Wait for a clearer trend before acting."
+    )
+
+
+async def _analyze_single_symbol(symbol: str) -> PositionScore:
+    """Run full technical analysis on a single symbol.
+
+    Fetches daily bars, computes trend / RSI / ATR / best strategy signal,
+    and returns a ``PositionScore`` ready for serialisation.
+
+    Args:
+        symbol: Upper-cased ticker symbol.
+
+    Returns:
+        ``PositionScore`` with all fields populated.
+
+    Raises:
+        Exception: Propagated so the caller can catch and return a
+        zero-score fallback for this symbol.
+    """
+    from ..trading.engine.indicators import sma as ind_sma, rsi as ind_rsi, atr as ind_atr
+
+    bars = await _fetch_bars_for_symbol(symbol)
+    if not bars or len(bars) < 200:
+        raise ValueError(f"Insufficient data for {symbol}: got {len(bars) if bars else 0} bars")
+
+    # Extract price series
+    closes = [b.close for b in bars]
+    highs = [b.high for b in bars]
+    lows = [b.low for b in bars]
+
+    current_price = closes[-1]
+    last_idx = len(closes) - 1
+
+    # Trend: 50-SMA vs 200-SMA relative to price
+    sma_50 = ind_sma(closes, 50)
+    sma_200 = ind_sma(closes, 200)
+    trend = _compute_trend(closes, sma_50, sma_200, last_idx)
+
+    # RSI (14-period)
+    rsi_series = ind_rsi(closes, 14)
+    rsi_val = rsi_series[last_idx] if rsi_series[last_idx] != 0 else 50.0
+
+    # ATR (14-period) as % of current price
+    atr_series = ind_atr(highs, lows, closes, 14)
+    atr_val = atr_series[last_idx]
+    volatility_pct = (atr_val / current_price * 100) if current_price > 0 else 0.0
+
+    # Best signal from top 3 strategies
+    signal_label, signal_strategy = _pick_best_signal(bars)
+
+    # Composite score
+    score = _compute_score(rsi_val, trend, volatility_pct, signal_label)
+
+    # Human-readable suggestion
+    suggestion = _generate_suggestion(trend, rsi_val, signal_label, volatility_pct)
+
+    return PositionScore(
+        symbol=symbol,
+        current_price=round(current_price, 4),
+        trend=trend,
+        rsi=round(rsi_val, 2),
+        volatility=round(volatility_pct, 2),
+        signal=signal_label,
+        signal_strategy=signal_strategy,
+        suggestion=suggestion,
+        score=score,
+    )
+
+
+@router.post("/portfolio-score", response_model=PortfolioScoreResponse)
+@limiter.limit("5/minute")
+async def score_portfolio(
+    body: PortfolioScoreRequest,
+    request: Request,
+    current_user=Depends(get_current_user),
+):
+    """Score a portfolio of up to 30 symbols with technical analysis.
+
+    For each ticker, fetches daily OHLCV data and computes trend (50/200 SMA),
+    RSI(14), ATR-based volatility, and the best signal from three core
+    strategies (SMA crossover, RSI mean reversion, MACD crossover).  Returns
+    a per-position score (1-100) with a human-readable suggestion, plus an
+    aggregate portfolio score.
+
+    Args:
+        body: ``PortfolioScoreRequest`` containing the list of symbols.
+
+    Returns:
+        ``PortfolioScoreResponse`` with per-position analysis and overall score.
+
+    Raises:
+        HTTPException 400: If more than 30 symbols are provided.
+    """
+    if len(body.symbols) > 30:
+        raise HTTPException(400, "Maximum 30 symbols per request.")
+    if not body.symbols:
+        raise HTTPException(400, "At least one symbol is required.")
+
+    # Deduplicate and upper-case symbols
+    seen = set()
+    unique_symbols = []
+    for s in body.symbols:
+        upper = s.strip().upper()
+        if upper and upper not in seen:
+            seen.add(upper)
+            unique_symbols.append(upper)
+
+    # Analyze all symbols in parallel
+    async def _safe_analyze(sym: str) -> PositionScore:
+        """Wrapper that returns a zero-score fallback on any failure.
+
+        Args:
+            sym: Upper-cased ticker symbol.
+
+        Returns:
+            ``PositionScore`` — real analysis on success, or a stub with
+            score=0 and an error suggestion on failure.
+        """
+        try:
+            return await _analyze_single_symbol(sym)
+        except Exception as exc:
+            logger.warning("Portfolio score: failed to analyze %s: %s", sym, exc)
+            return PositionScore(
+                symbol=sym,
+                current_price=0.0,
+                trend="neutral",
+                rsi=0.0,
+                volatility=0.0,
+                signal="HOLD",
+                signal_strategy="",
+                suggestion="Unable to fetch data.",
+                score=0,
+            )
+
+    positions = await asyncio.gather(*[_safe_analyze(sym) for sym in unique_symbols])
+    positions = list(positions)
+
+    # Overall score: average of all position scores (including zero-score failures)
+    scored = [p.score for p in positions if p.score > 0]
+    overall_score = round(sum(scored) / len(scored)) if scored else 0
+
+    # Top suggestion: from the lowest-scored position (most urgent action)
+    if positions:
+        worst = min(positions, key=lambda p: p.score)
+        top_suggestion = f"{worst.symbol}: {worst.suggestion}"
+    else:
+        top_suggestion = "No positions to analyze."
+
+    return PortfolioScoreResponse(
+        positions=positions,
+        overall_score=max(0, min(100, overall_score)),
+        top_suggestion=top_suggestion,
+    )
 
 
 # ─── PAPER TRADING ──────────────────────────────────────────────────────────
@@ -2361,6 +2728,84 @@ async def stop_paper_trade(
     return await _enrich_paper_trade(pt, db)
 
 
+@router.delete("/paper/{paper_trade_id}", status_code=204)
+async def delete_paper_trade(
+    paper_trade_id: uuid.UUID,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a stopped paper trade and its cascade-linked data.
+
+    Only trades with status "stopped" may be deleted.  FK ondelete=CASCADE
+    on paper_trade_positions and paper_trade_equity_snapshots handles
+    child-row cleanup automatically.
+
+    Args:
+        paper_trade_id: UUID of the paper trade to delete.
+
+    Returns:
+        204 No Content on success.
+    """
+    pt = (await db.execute(
+        select(PaperTrade).where(
+            PaperTrade.paper_trade_id == paper_trade_id,
+            PaperTrade.user_id == current_user.user_id,
+        )
+    )).scalar_one_or_none()
+    if not pt:
+        raise HTTPException(404, "Paper trade not found")
+    if pt.status != "stopped":
+        raise HTTPException(400, "Only stopped paper trades can be deleted")
+
+    await db.delete(pt)
+    await db.commit()
+    return Response(status_code=204)
+
+
+@router.patch("/paper/{paper_trade_id}", response_model=PaperTradeOut)
+async def update_paper_trade(
+    paper_trade_id: uuid.UUID,
+    body: PaperTradeUpdate,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Edit an active or paused paper trade's capital and parameters.
+
+    When initial_capital is changed, current_equity is reset to the new
+    value so the P&L calculation starts fresh from the updated baseline.
+
+    Args:
+        paper_trade_id: UUID of the paper trade to update.
+        body: PaperTradeUpdate with optional initial_capital and parameters.
+
+    Returns:
+        The updated paper trade enriched with strategy metadata.
+    """
+    pt = (await db.execute(
+        select(PaperTrade).where(
+            PaperTrade.paper_trade_id == paper_trade_id,
+            PaperTrade.user_id == current_user.user_id,
+        )
+    )).scalar_one_or_none()
+    if not pt:
+        raise HTTPException(404, "Paper trade not found")
+    if pt.status not in ("active", "paused"):
+        raise HTTPException(400, f"Cannot edit paper trade with status '{pt.status}'")
+
+    # Apply initial_capital change — also reset current_equity to match
+    if body.initial_capital is not None:
+        pt.initial_capital = body.initial_capital
+        pt.current_equity = body.initial_capital
+
+    # Apply parameters change
+    if body.parameters is not None:
+        pt.parameters_json = body.parameters
+
+    await db.commit()
+    await db.refresh(pt)
+    return await _enrich_paper_trade(pt, db)
+
+
 @router.get("/paper/{paper_trade_id}/equity", response_model=List[PaperTradeEquitySnapshotOut])
 async def get_paper_equity(
     paper_trade_id: uuid.UUID,
@@ -2533,3 +2978,303 @@ async def stream_paper_trade(
             "X-Accel-Buffering": "no",  # Disable nginx buffering for SSE
         },
     )
+
+
+# ── Exit Analysis ────────────────────────────────────────────────────────────
+
+# In-memory cache for exit analysis results (10-minute TTL).
+_exit_analysis_cache: Dict[str, Tuple[float, dict]] = {}
+_EXIT_ANALYSIS_TTL = 600  # seconds (10 minutes)
+
+
+def _get_exit_cached(key: str) -> Optional[dict]:
+    """Return cached exit analysis result if still valid, else None.
+
+    Args:
+        key: Cache key string (symbol + period).
+
+    Returns:
+        Cached response dict, or None if expired / absent.
+    """
+    entry = _exit_analysis_cache.get(key)
+    if entry and (time.time() - entry[0]) < _EXIT_ANALYSIS_TTL:
+        return entry[1]
+    return None
+
+
+def _set_exit_cached(key: str, value: dict) -> None:
+    """Store an exit analysis result in the in-memory cache.
+
+    Args:
+        key:   Cache key string.
+        value: Serialisable response dict to cache.
+    """
+    _exit_analysis_cache[key] = (time.time(), value)
+
+
+def _compute_exit_analysis(symbol: str, period_days: int) -> dict:
+    """Run the full exit-point analysis for *symbol* (blocking / CPU-bound).
+
+    Fetches OHLCV data via yfinance and computes ATR stops, Bollinger
+    levels, moving-average support/resistance, 52-week extremes, and
+    Fibonacci retracements.  This is a synchronous function intended to
+    be called via ``asyncio.to_thread``.
+
+    Args:
+        symbol:      Upper-cased ticker symbol (e.g. "AAPL").
+        period_days: Historical lookback window in calendar days.
+
+    Returns:
+        Dict matching the ExitAnalysisResponse schema.
+
+    Raises:
+        ValueError:  If yfinance returns no data or insufficient bars.
+    """
+    import yfinance as yf
+
+    # ── 1. Fetch OHLCV data ────────────────────────────────────────────
+    ticker = yf.Ticker(symbol)
+    hist = ticker.history(period=f"{period_days}d")
+    if hist.empty or len(hist) < 60:
+        raise ValueError(
+            f"Insufficient price data for {symbol} "
+            f"({len(hist) if not hist.empty else 0} bars, need 60+)."
+        )
+
+    # Extract plain lists for the indicator functions
+    closes: List[float] = hist["Close"].tolist()
+    highs_list: List[float] = hist["High"].tolist()
+    lows_list: List[float] = hist["Low"].tolist()
+
+    current_price = closes[-1]
+
+    # ── 2. Calculate indicators ────────────────────────────────────────
+    atr_series = atr(highs_list, lows_list, closes, 14)
+    rsi_series = rsi(closes, 14)
+    sma50_series = sma(closes, 50)
+    sma200_series = sma(closes, 200)
+    bb_mid, bb_upper, bb_lower, _bw = bollinger_bands(closes, 20, 2.0)
+    ema21_series = ema(closes, 21)
+    high52_series = highest(highs_list, 52)
+    low52_series = lowest(lows_list, 52)
+
+    # Current (last valid) values
+    atr_val = atr_series[-1] if atr_series[-1] > 0 else atr_series[-2]
+    rsi_val = rsi_series[-1] if rsi_series[-1] > 0 else rsi_series[-2]
+    sma50_val = sma50_series[-1]
+    sma200_val = sma200_series[-1]
+    bb_upper_val = bb_upper[-1]
+    bb_lower_val = bb_lower[-1]
+    ema21_val = ema21_series[-1]
+    high52_val = high52_series[-1]
+    low52_val = low52_series[-1]
+
+    atr_pct = (atr_val / current_price * 100) if current_price > 0 else 0.0
+
+    # ── 3. Determine trend ─────────────────────────────────────────────
+    if sma50_val > sma200_val and current_price > sma50_val:
+        trend = "bullish"
+    elif sma50_val < sma200_val and current_price < sma50_val:
+        trend = "bearish"
+    else:
+        trend = "neutral"
+
+    # ── 4. Build exit levels ───────────────────────────────────────────
+    levels: List[dict] = []
+
+    # ATR-based stop losses
+    levels.append({
+        "level_type": "stop_loss",
+        "price": round(current_price - 1.5 * atr_val, 2),
+        "label": "ATR Stop (1.5x)",
+        "rationale": "Tight stop — 1.5x ATR below current price, suitable for low-volatility entries.",
+    })
+    levels.append({
+        "level_type": "stop_loss",
+        "price": round(current_price - 2.0 * atr_val, 2),
+        "label": "ATR Stop (2x)",
+        "rationale": "Standard stop — 2x ATR below current price, balances protection and noise tolerance.",
+    })
+    levels.append({
+        "level_type": "stop_loss",
+        "price": round(current_price - 3.0 * atr_val, 2),
+        "label": "ATR Stop (3x)",
+        "rationale": "Wide stop — 3x ATR below current price, allows for larger swings.",
+    })
+
+    # ATR-based take profit targets (risk = 2x ATR as standard risk unit)
+    risk_unit = 2.0 * atr_val
+    levels.append({
+        "level_type": "take_profit",
+        "price": round(current_price + risk_unit * 2, 2),
+        "label": "Take Profit (1:2 R)",
+        "rationale": "2x reward-to-risk target using 2-ATR risk unit.",
+    })
+    levels.append({
+        "level_type": "take_profit",
+        "price": round(current_price + risk_unit * 3, 2),
+        "label": "Take Profit (1:3 R)",
+        "rationale": "3x reward-to-risk target using 2-ATR risk unit.",
+    })
+
+    # Bollinger Bands
+    levels.append({
+        "level_type": "support",
+        "price": round(bb_lower_val, 2),
+        "label": "Bollinger Lower",
+        "rationale": "Lower Bollinger Band (20, 2) — statistical support zone.",
+    })
+    levels.append({
+        "level_type": "resistance",
+        "price": round(bb_upper_val, 2),
+        "label": "Bollinger Upper",
+        "rationale": "Upper Bollinger Band (20, 2) — statistical resistance zone.",
+    })
+
+    # SMA 50 — support or resistance depending on price position
+    if current_price > sma50_val:
+        levels.append({
+            "level_type": "support",
+            "price": round(sma50_val, 2),
+            "label": "SMA 50",
+            "rationale": "50-day SMA acting as dynamic support (price is above).",
+        })
+    else:
+        levels.append({
+            "level_type": "resistance",
+            "price": round(sma50_val, 2),
+            "label": "SMA 50",
+            "rationale": "50-day SMA acting as dynamic resistance (price is below).",
+        })
+
+    # SMA 200 — major support/resistance
+    if current_price > sma200_val:
+        levels.append({
+            "level_type": "support",
+            "price": round(sma200_val, 2),
+            "label": "SMA 200",
+            "rationale": "200-day SMA — major long-term support level.",
+        })
+    else:
+        levels.append({
+            "level_type": "resistance",
+            "price": round(sma200_val, 2),
+            "label": "SMA 200",
+            "rationale": "200-day SMA — major long-term resistance level.",
+        })
+
+    # EMA 21 — short-term trailing stop reference
+    if current_price > ema21_val:
+        levels.append({
+            "level_type": "support",
+            "price": round(ema21_val, 2),
+            "label": "EMA 21",
+            "rationale": "21-day EMA — short-term trailing stop reference (price above).",
+        })
+    else:
+        levels.append({
+            "level_type": "resistance",
+            "price": round(ema21_val, 2),
+            "label": "EMA 21",
+            "rationale": "21-day EMA — short-term resistance (price below).",
+        })
+
+    # 52-week high / low
+    levels.append({
+        "level_type": "resistance",
+        "price": round(high52_val, 2),
+        "label": "52w High",
+        "rationale": "52-week rolling high — major psychological resistance.",
+    })
+    levels.append({
+        "level_type": "support",
+        "price": round(low52_val, 2),
+        "label": "52w Low",
+        "rationale": "52-week rolling low — major psychological support.",
+    })
+
+    # Fibonacci retracements from 52-week range
+    fib_range = high52_val - low52_val
+    if fib_range > 0:
+        for pct, label in [
+            (0.236, "23.6%"), (0.382, "38.2%"), (0.500, "50.0%"),
+            (0.618, "61.8%"), (0.786, "78.6%"),
+        ]:
+            fib_price = round(high52_val - fib_range * pct, 2)
+            levels.append({
+                "level_type": "fibonacci",
+                "price": fib_price,
+                "label": f"Fib {label}",
+                "rationale": f"Fibonacci {label} retracement of the 52-week range ({round(low52_val, 2)} – {round(high52_val, 2)}).",
+            })
+
+    # ── 5. Derive support / resistance zones ───────────────────────────
+    # Support zone: highest support-type level that is still below price
+    support_levels = [
+        l["price"] for l in levels
+        if l["level_type"] in ("support", "stop_loss", "fibonacci")
+        and l["price"] < current_price
+    ]
+    support_zone = max(support_levels) if support_levels else None
+
+    # Resistance zone: lowest resistance-type level that is above price
+    resistance_levels = [
+        l["price"] for l in levels
+        if l["level_type"] in ("resistance", "take_profit", "fibonacci")
+        and l["price"] > current_price
+    ]
+    resistance_zone = min(resistance_levels) if resistance_levels else None
+
+    return {
+        "symbol": symbol,
+        "current_price": round(current_price, 2),
+        "levels": levels,
+        "atr_value": round(atr_val, 4),
+        "atr_pct": round(atr_pct, 2),
+        "trend": trend,
+        "rsi": round(rsi_val, 2),
+        "support_zone": round(support_zone, 2) if support_zone is not None else None,
+        "resistance_zone": round(resistance_zone, 2) if resistance_zone is not None else None,
+    }
+
+
+@router.post("/exit-analysis", response_model=ExitAnalysisResponse)
+async def exit_analysis(
+    body: ExitAnalysisRequest,
+    request: Request,
+    current_user=Depends(get_current_user),
+):
+    """Compute comprehensive exit-point analysis for a symbol.
+
+    Calculates ATR-based stops, Bollinger levels, moving-average
+    support/resistance, 52-week extremes, and Fibonacci retracements.
+    Results are cached for 10 minutes per symbol + period combination.
+
+    Args:
+        body:         Symbol and lookback period.
+        request:      FastAPI request (for rate-limiter context).
+        current_user: Authenticated user (injected via Depends).
+
+    Returns:
+        ExitAnalysisResponse with all computed levels, trend, and zones.
+    """
+    symbol = body.symbol.upper().strip()
+    period_days = body.period_days
+
+    # Check cache first
+    cache_key = f"exit_analysis:{symbol}:{period_days}"
+    cached = _get_exit_cached(cache_key)
+    if cached:
+        return cached
+
+    # Run the blocking computation in a thread to avoid starving the event loop
+    try:
+        result = await asyncio.to_thread(_compute_exit_analysis, symbol, period_days)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error("Exit analysis failed for %s: %s", symbol, exc)
+        raise HTTPException(status_code=502, detail=f"Failed to fetch market data for {symbol}.")
+
+    _set_exit_cached(cache_key, result)
+    return result

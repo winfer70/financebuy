@@ -93,9 +93,12 @@ def _hash_token(raw_token: str) -> str:
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
-    db: AsyncSession = Depends(get_db),
 ) -> User:
     """FastAPI dependency that decodes the JWT and returns the active User.
+
+    Opens a scoped session that closes immediately after the DB lookup so the
+    connection is returned to the pool before any slow follow-on I/O (e.g.
+    yfinance calls in market endpoints) begins.
 
     Raises HTTP 401 if the token is missing, invalid, or the user is inactive.
     Import this via dependencies.py to keep route modules decoupled from the
@@ -116,8 +119,11 @@ async def get_current_user(
             detail="invalid token subject",
         )
 
-    result = await db.execute(select(User).where(User.user_id == user_id))
-    user = result.scalar_one_or_none()
+    # Scoped session — connection is returned to the pool as soon as this
+    # block exits, before the endpoint handler performs any yfinance I/O.
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(User).where(User.user_id == user_id))
+        user = result.scalar_one_or_none()
     if not user or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

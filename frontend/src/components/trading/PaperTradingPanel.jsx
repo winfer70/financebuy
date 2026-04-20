@@ -2,9 +2,9 @@
  * PaperTradingPanel.jsx — Paper trading session manager.
  *
  * Embedded as a tab within TradingPage. Lets the user start, monitor,
- * pause/resume, and stop paper (simulated) trading sessions. Displays
- * an active-trades list, a "start new trade" form, and a detail view
- * with equity chart and position history for the selected session.
+ * pause/resume, stop, edit, and delete paper (simulated) trading sessions.
+ * Displays an active-trades list, a "start new trade" form, and a detail
+ * view with equity chart and position history for the selected session.
  *
  * Auto-refreshes active trades every 30 seconds via polling.
  *
@@ -73,6 +73,40 @@ function pnlColor(val) {
   if (val > 0) return GREEN;
   if (val < 0) return RED;
   return "var(--muted)";
+}
+
+/* ── Mini SVG Icons ────────────────────────────────────────────────────────── */
+
+/**
+ * TrashIcon — Small inline SVG trash/delete icon.
+ *
+ * @param {number} [size=14] — Icon width/height in px.
+ * @returns {JSX.Element}
+ */
+function TrashIcon({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <line x1="10" y1="11" x2="10" y2="17" />
+      <line x1="14" y1="11" x2="14" y2="17" />
+    </svg>
+  );
+}
+
+/**
+ * PencilIcon — Small inline SVG pencil/edit icon.
+ *
+ * @param {number} [size=14] — Icon width/height in px.
+ * @returns {JSX.Element}
+ */
+function PencilIcon({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+    </svg>
+  );
 }
 
 /* ── Mini SVG Equity Chart ─────────────────────────────────────────────────── */
@@ -245,28 +279,198 @@ function NewTradeForm({ strategies, onSubmit, loading }) {
   );
 }
 
+/* ── Inline Edit Form ──────────────────────────────────────────────────────── */
+
+/**
+ * EditTradeForm — Inline form for editing a paper trade's capital and parameters.
+ *
+ * Renders input fields for initial_capital and a JSON textarea for parameters.
+ * Only shown when the trade is active or paused.
+ *
+ * @param {object}   trade     — Current paper trade object.
+ * @param {Function} onSave    — Callback({ initial_capital?, parameters? }) to persist changes.
+ * @param {Function} onCancel  — Callback to exit edit mode without saving.
+ * @param {boolean}  saving    — Whether the save request is in flight.
+ * @returns {JSX.Element}
+ */
+function EditTradeForm({ trade, onSave, onCancel, saving }) {
+  const [capital, setCapital] = useState(String(trade.initial_capital ?? ""));
+  const [paramsText, setParamsText] = useState(
+    trade.parameters_json ? JSON.stringify(trade.parameters_json, null, 2) : ""
+  );
+  const [paramsError, setParamsError] = useState(null);
+
+  /**
+   * handleSave — Validate inputs and invoke the parent save callback.
+   * Builds a body containing only changed fields.
+   */
+  const handleSave = () => {
+    const body = {};
+    const newCapital = parseFloat(capital);
+
+    /* Validate and include capital if changed. */
+    if (!isNaN(newCapital) && newCapital > 0 && newCapital !== Number(trade.initial_capital)) {
+      body.initial_capital = newCapital;
+    }
+
+    /* Validate and include parameters if the textarea has content. */
+    if (paramsText.trim()) {
+      try {
+        body.parameters = JSON.parse(paramsText);
+        setParamsError(null);
+      } catch {
+        setParamsError("Invalid JSON");
+        return;
+      }
+    } else if (trade.parameters_json) {
+      /* User cleared the textarea — explicitly set parameters to null. */
+      body.parameters = null;
+    }
+
+    /* Only call save if something actually changed. */
+    if (Object.keys(body).length === 0) {
+      onCancel();
+      return;
+    }
+    onSave(body);
+  };
+
+  return (
+    <div style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 4, padding: 12, marginBottom: 14 }}>
+      <div style={{ ...sectionHeading, marginBottom: 10 }}>EDIT PAPER TRADE</div>
+
+      {/* Capital input */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 10 }}>
+        <label style={labelStyle}>INITIAL CAPITAL ($)</label>
+        <input
+          className="form-control"
+          type="number"
+          min="1"
+          max="1000000"
+          step="100"
+          style={{ fontSize: 10, width: 160 }}
+          value={capital}
+          onChange={(e) => setCapital(e.target.value)}
+        />
+        <span style={{ fontSize: 9, color: "var(--muted)" }}>
+          Changing capital will reset current equity to the new amount.
+        </span>
+      </div>
+
+      {/* Parameters JSON textarea */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 10 }}>
+        <label style={labelStyle}>PARAMETERS (JSON)</label>
+        <textarea
+          className="form-control"
+          style={{ fontSize: 10, width: "100%", minHeight: 60, fontFamily: "var(--font-mono)", resize: "vertical" }}
+          value={paramsText}
+          onChange={(e) => { setParamsText(e.target.value); setParamsError(null); }}
+          placeholder='{"window": 14, "threshold": 0.02}'
+        />
+        {paramsError && (
+          <span style={{ fontSize: 9, color: RED }}>{paramsError}</span>
+        )}
+      </div>
+
+      {/* Action buttons */}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          className="btn"
+          style={{ fontSize: 10, padding: "4px 14px", background: "var(--amber)", color: "#000", fontWeight: 700 }}
+          disabled={saving}
+          onClick={handleSave}
+        >
+          {saving ? "SAVING..." : "SAVE"}
+        </button>
+        <button
+          className="btn btn-outline"
+          style={{ fontSize: 10, padding: "4px 12px" }}
+          disabled={saving}
+          onClick={onCancel}
+        >
+          CANCEL
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Delete Confirmation Dialog ────────────────────────────────────────────── */
+
+/**
+ * DeleteConfirmation — Inline confirmation prompt before deleting a trade.
+ *
+ * @param {string}   symbol    — Trade symbol for display context.
+ * @param {Function} onConfirm — Callback to execute the deletion.
+ * @param {Function} onCancel  — Callback to dismiss the confirmation.
+ * @param {boolean}  deleting  — Whether the delete request is in flight.
+ * @returns {JSX.Element}
+ */
+function DeleteConfirmation({ symbol, onConfirm, onCancel, deleting }) {
+  return (
+    <div style={{
+      background: "rgba(240,68,56,0.08)",
+      border: "1px solid rgba(240,68,56,0.3)",
+      borderRadius: 4,
+      padding: "8px 12px",
+      marginTop: 4,
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      flexWrap: "wrap",
+    }}>
+      <span style={{ fontSize: 10, color: "var(--fg)" }}>
+        Delete paper trade for <strong>{symbol}</strong>? This cannot be undone.
+      </span>
+      <button
+        className="btn"
+        style={{ fontSize: 9, padding: "3px 10px", background: RED, color: "#fff", fontWeight: 700 }}
+        disabled={deleting}
+        onClick={onConfirm}
+      >
+        {deleting ? "DELETING..." : "YES, DELETE"}
+      </button>
+      <button
+        className="btn btn-outline"
+        style={{ fontSize: 9, padding: "3px 10px" }}
+        disabled={deleting}
+        onClick={onCancel}
+      >
+        CANCEL
+      </button>
+    </div>
+  );
+}
+
 /* ── Trade Detail View ─────────────────────────────────────────────────────── */
 
 /**
  * TradeDetail — Expanded detail view for a selected paper trade.
  *
  * Shows header info, equity statistics, an equity chart, position history
- * table, and action buttons (PAUSE/RESUME, STOP).
+ * table, and action buttons (PAUSE/RESUME, STOP, EDIT).
  *
- * @param {object}   trade       — Full paper trade object from API.
- * @param {Array}    equity      — Equity snapshot time series.
- * @param {Array}    positions   — Position history records.
- * @param {Function} onPause     — Callback to pause the trade.
- * @param {Function} onResume    — Callback to resume the trade.
- * @param {Function} onStop      — Callback to stop the trade.
- * @param {Function} onBack      — Callback to deselect (return to list).
+ * @param {object}   trade         — Full paper trade object from API.
+ * @param {Array}    equity        — Equity snapshot time series.
+ * @param {Array}    positions     — Position history records.
+ * @param {Function} onPause       — Callback to pause the trade.
+ * @param {Function} onResume      — Callback to resume the trade.
+ * @param {Function} onStop        — Callback to stop the trade.
+ * @param {Function} onBack        — Callback to deselect (return to list).
+ * @param {Function} onEdit        — Callback(body) to save edit changes.
  * @param {boolean}  actionLoading — Whether an action request is in flight.
+ * @param {boolean}  editMode      — Whether the inline edit form is visible.
+ * @param {Function} onToggleEdit  — Callback to toggle edit mode on/off.
+ * @param {boolean}  editLoading   — Whether the edit save request is in flight.
  * @returns {JSX.Element}
  */
-function TradeDetail({ trade, equity, positions, onPause, onResume, onStop, onBack, actionLoading }) {
+function TradeDetail({ trade, equity, positions, onPause, onResume, onStop, onBack, onEdit, actionLoading, editMode, onToggleEdit, editLoading }) {
   /* Derive P&L values from trade object. */
   const pnlDollar = (trade.current_equity ?? trade.initial_capital) - trade.initial_capital;
   const pnlPct = trade.initial_capital ? (pnlDollar / trade.initial_capital) * 100 : 0;
+
+  /** Whether the trade is in an editable state (active or paused). */
+  const isEditable = trade.status === "active" || trade.status === "paused";
 
   return (
     <div>
@@ -291,7 +495,29 @@ function TradeDetail({ trade, equity, positions, onPause, onResume, onStop, onBa
         <span style={{ fontSize: 10, color: "var(--muted)" }}>
           Started {fmtDate(trade.started_at || trade.created_at)}
         </span>
+
+        {/* Edit button — only for active/paused trades */}
+        {isEditable && !editMode && (
+          <button
+            className="btn btn-outline"
+            style={{ fontSize: 9, padding: "2px 8px", display: "flex", alignItems: "center", gap: 4 }}
+            onClick={onToggleEdit}
+            title="Edit trade settings"
+          >
+            <PencilIcon size={11} /> EDIT
+          </button>
+        )}
       </div>
+
+      {/* ── Inline Edit Form (shown when editMode is true) ───────────────── */}
+      {editMode && (
+        <EditTradeForm
+          trade={trade}
+          onSave={onEdit}
+          onCancel={onToggleEdit}
+          saving={editLoading}
+        />
+      )}
 
       {/* ── Equity Stats Grid ────────────────────────────────────────────── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 8, marginBottom: 14 }}>
@@ -430,8 +656,9 @@ function StatCard({ label, value, color, prefix }) {
  * PaperTradingPanel — Top-level paper trading manager.
  *
  * Renders an active-trades list, a form to start new trades, and an
- * expandable detail view for any selected trade. Polls the backend
- * every 30 seconds to refresh active trade data.
+ * expandable detail view for any selected trade. Supports deleting
+ * stopped trades and editing active/paused trade settings. Polls the
+ * backend every 30 seconds to refresh active trade data.
  *
  * @param {string}              token      — JWT access token.
  * @param {Array<{slug,name}>}  strategies — Available strategies from registry.
@@ -456,6 +683,14 @@ export function PaperTradingPanel({ token, strategies }) {
 
   /* ── Action state (pause / resume / stop) ───────────────────────────── */
   const [actionLoading, setActionLoading] = useState(false);
+
+  /* ── Delete state ───────────────────────────────────────────────────── */
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  /* ── Edit state ─────────────────────────────────────────────────────── */
+  const [editMode, setEditMode] = useState(false);
+  const [editLoading, setEditLoading] = useState(false);
 
   /* ── Fetch all paper trades ─────────────────────────────────────────── */
 
@@ -584,6 +819,65 @@ export function PaperTradingPanel({ token, strategies }) {
   const onResume = useCallback(() => handleAction("resume"), [handleAction]);
   const onStop   = useCallback(() => handleAction("stop"),   [handleAction]);
 
+  /* ── Delete handler ─────────────────────────────────────────────────── */
+
+  /**
+   * handleDelete — Delete a stopped paper trade after user confirmation.
+   * Sends DELETE request, refreshes the trade list, and clears confirmation state.
+   *
+   * @param {string} paperTradeId — UUID of the paper trade to delete.
+   */
+  const handleDelete = useCallback(
+    async (paperTradeId) => {
+      setDeleteLoading(true);
+      try {
+        await apiFetch(`/trading/paper/${paperTradeId}`, { method: "DELETE", token });
+        setDeleteConfirmId(null);
+        /* Refresh the list to reflect the removal. */
+        await fetchTrades();
+      } catch {
+        /* Silently ignore — confirmation stays visible so user can retry. */
+      } finally {
+        setDeleteLoading(false);
+      }
+    },
+    [token, fetchTrades],
+  );
+
+  /* ── Edit handler ───────────────────────────────────────────────────── */
+
+  /**
+   * handleEdit — Persist paper trade edits (capital and/or parameters).
+   * Sends PATCH request, refreshes detail and list, exits edit mode.
+   *
+   * @param {object} body — { initial_capital?, parameters? }.
+   */
+  const handleEdit = useCallback(
+    async (body) => {
+      if (!selectedId) return;
+      setEditLoading(true);
+      try {
+        await apiFetch(`/trading/paper/${selectedId}`, { method: "PATCH", body, token });
+        setEditMode(false);
+        /* Refresh both the detail view and the trades list. */
+        await Promise.all([fetchDetail(selectedId), fetchTrades()]);
+      } catch {
+        /* Silently ignore — the form stays open so the user can retry. */
+      } finally {
+        setEditLoading(false);
+      }
+    },
+    [selectedId, token, fetchDetail, fetchTrades],
+  );
+
+  /**
+   * toggleEditMode — Toggle inline edit form visibility.
+   * Resets edit mode state when closing.
+   */
+  const toggleEditMode = useCallback(() => {
+    setEditMode((prev) => !prev);
+  }, []);
+
   /* ── Derived: sort trades — active first, then paused, then stopped ─── */
   const sortedTrades = useMemo(() => {
     const order = { active: 0, paused: 1, stopped: 2, error: 3 };
@@ -609,8 +903,12 @@ export function PaperTradingPanel({ token, strategies }) {
           onPause={onPause}
           onResume={onResume}
           onStop={onStop}
-          onBack={() => { setSelectedId(null); setDetail(null); }}
+          onBack={() => { setSelectedId(null); setDetail(null); setEditMode(false); }}
+          onEdit={handleEdit}
           actionLoading={actionLoading}
+          editMode={editMode}
+          onToggleEdit={toggleEditMode}
+          editLoading={editLoading}
         />
       ) : selectedId && detailLoading ? (
         <div style={{ color: "var(--muted)", fontSize: 11, padding: "12px 0" }}>
@@ -646,6 +944,7 @@ export function PaperTradingPanel({ token, strategies }) {
                     <th style={thStyle}>SYMBOL</th>
                     <th style={thStyle}>STRATEGY</th>
                     <th style={{ ...thStyle, textAlign: "right" }}>P&L %</th>
+                    <th style={{ ...thStyle, textAlign: "center", width: 50 }}>ACTIONS</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -655,9 +954,9 @@ export function PaperTradingPanel({ token, strategies }) {
                       : 0;
                     return (
                       <tr
-                        key={t.id}
+                        key={t.paper_trade_id}
                         style={{ cursor: "pointer" }}
-                        onClick={() => setSelectedId(t.id)}
+                        onClick={() => setSelectedId(t.paper_trade_id)}
                       >
                         <td style={tdStyle}><StatusBadge status={t.status} /></td>
                         <td style={{ ...tdStyle, fontFamily: "var(--font-mono)", color: "var(--amber)", fontWeight: 600 }}>
@@ -667,12 +966,46 @@ export function PaperTradingPanel({ token, strategies }) {
                         <td style={{ ...tdStyle, textAlign: "right", fontFamily: "var(--font-mono)", fontWeight: 600, color: pnlColor(pnl) }}>
                           {fmtPct(pnl)}
                         </td>
+                        <td style={{ ...tdStyle, textAlign: "center" }}>
+                          {/* Delete button — only visible for stopped trades */}
+                          {t.status === "stopped" && (
+                            <button
+                              className="btn btn-outline"
+                              style={{
+                                fontSize: 9,
+                                padding: "2px 6px",
+                                color: RED,
+                                borderColor: "rgba(240,68,56,0.3)",
+                                display: "inline-flex",
+                                alignItems: "center",
+                              }}
+                              title="Delete paper trade"
+                              onClick={(e) => {
+                                /* Prevent row click from firing (which would open detail view). */
+                                e.stopPropagation();
+                                setDeleteConfirmId(t.paper_trade_id);
+                              }}
+                            >
+                              <TrashIcon size={12} />
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
             </div>
+          )}
+
+          {/* Inline delete confirmation — shown below the table */}
+          {deleteConfirmId && (
+            <DeleteConfirmation
+              symbol={trades.find((t) => t.paper_trade_id === deleteConfirmId)?.symbol || ""}
+              onConfirm={() => handleDelete(deleteConfirmId)}
+              onCancel={() => setDeleteConfirmId(null)}
+              deleting={deleteLoading}
+            />
           )}
         </>
       )}

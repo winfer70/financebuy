@@ -4,7 +4,7 @@
  * Responsibilities:
  *  - Inject global CSS
  *  - Provide AuthContext to the tree via <AuthProvider>
- *  - Manage page routing state and navigation history
+ *  - Manage page routing state
  *  - Manage toast notifications
  *  - Render the authenticated shell (sidebar, topbar, page outlet)
  *    or the appropriate auth page
@@ -62,6 +62,11 @@ import { SettingsPage }           from "./pages/SettingsPage";
 import { FeedbackPage }             from "./pages/FeedbackPage";
 import { TradingPage }              from "./pages/TradingPage";
 import { MarketplacePage }          from "./pages/MarketplacePage";
+import AlertsPage                    from "./pages/AlertsPage";
+import LearningPage                  from "./pages/LearningPage";
+import ExitPointsPage                from "./pages/ExitPointsPage";
+import ResearchPage                  from "./pages/ResearchPage";
+import AdminPage                     from "./pages/AdminPage";
 
 /* ── API ─────────────────────────────────────────────────────────────────── */
 import api from "./api/client";
@@ -87,6 +92,21 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
   });
   const [newsSymbol,   setNewsSymbol]   = useState(null);
   const marketStatus = useMarketStatus();
+
+  /* ── Admin visibility — checked against backend on every token change ── */
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    if (!authToken) {
+      /* No token — definitely not an admin */
+      setIsAdmin(false);
+      return;
+    }
+    /* Verify admin status; silently treat any error/403 as non-admin */
+    api.checkAdmin(authToken)
+      .then(() => setIsAdmin(true))
+      .catch(() => setIsAdmin(false));
+  }, [authToken]);
 
   /* ── Sidebar collapsed state (persisted to preferences) ──────────── */
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -149,6 +169,11 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
     setPage("news");
   };
 
+  /* ── Navigate to Trading AI with a pre-filled symbol ───────────── */
+  const navigateToTradeAI = (symbol) => {
+    setPage("trading", { symbol: symbol || null });
+  };
+
   /* ── Sidebar navigation items ───────────────────────────────────────── */
   const NAV = [
     { id: "dashboard",        label: t("nav.dashboard"),    Icon: Ic.dashboard    },
@@ -159,8 +184,13 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
     { id: "watchlist",         label: t("nav.watchlist"),    Icon: Ic.watchlist    },
     { id: "portfolio-manager",label: t("nav.portfolio"),    Icon: Ic.portfolio    },
     { id: "trading",          label: "TRADING AI",           Icon: Ic.trading      },
+    { id: "research",          label: "RESEARCH",             Icon: Ic.charts       },
     { id: "marketplace",       label: "MARKETPLACE",          Icon: Ic.marketplace  },
+    { id: "alerts",            label: "ALERTS",               Icon: Ic.bell         },
+    { id: "learning",          label: "LEARNING",             Icon: Ic.charts       },
+    { id: "exit-points",       label: "EXIT POINTS",          Icon: Ic.orders       },
     { id: "feedback",          label: t("nav.feedback"),     Icon: Ic.feedback     },
+    ...(isAdmin ? [{ id: "admin", label: "ADMIN", Icon: Ic.admin }] : []),
   ];
 
   return (
@@ -242,6 +272,27 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
         </div>
       </aside>
 
+      {/* Mobile bottom navigation — hidden on desktop via CSS, shown on mobile */}
+      <nav className="mobile-bottom-nav">
+        {[
+          { id: "dashboard",         label: "HOME",      Icon: Ic.dashboard },
+          { id: "charts",            label: "CHARTS",    Icon: Ic.charts },
+          { id: "portfolio-manager", label: "PORT", Icon: Ic.portfolio },
+          { id: "trading",           label: "TRADE",     Icon: Ic.trading },
+          { id: "alerts",            label: "ALERTS",    Icon: Ic.bell },
+          { id: "news",              label: "NEWS",      Icon: Ic.news },
+        ].map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            className={`mob-nav-btn${page === id ? " active" : ""}`}
+            onClick={() => setPage(id)}
+          >
+            <Icon />
+            <span>{label}</span>
+          </button>
+        ))}
+      </nav>
+
       {/* ── Main area ───────────────────────────────────────────────────── */}
       <div className="main-area">
         {/* Top bar */}
@@ -263,6 +314,11 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
                   guide: t("nav.guide"),
                   import: t("nav.import"),
                   marketplace: "MARKETPLACE",
+                  alerts: "ALERTS",
+                  learning: "LEARNING",
+                  "exit-points": "EXIT POINTS",
+                  research: "RESEARCH",
+                  admin: "ADMIN",
                 };
                 if (page.startsWith("legal")) return t("nav.legal");
                 return breadcrumbMap[page] || page.toUpperCase();
@@ -333,6 +389,7 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
             token={authToken}
             onViewChart={navigateToChart}
             onViewNews={navigateToNews}
+            onTradeAI={navigateToTradeAI}
           />
         )}
         {page === "import"       && (
@@ -348,6 +405,7 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
             token={authToken}
             onViewChart={navigateToChart}
             onViewNews={navigateToNews}
+            onTradeAI={navigateToTradeAI}
             pageParams={pageParams}
           />
         )}
@@ -355,6 +413,7 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
           <TradingPage
             token={authToken}
             onViewChart={navigateToChart}
+            initialSymbol={pageParams?.symbol}
           />
         )}
         {page === "marketplace" && (
@@ -362,6 +421,18 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
             token={authToken}
             setPage={setPage}
           />
+        )}
+        {page === "alerts" && (
+          <AlertsPage token={authToken} />
+        )}
+        {page === "learning" && (
+          <LearningPage token={authToken} setPage={setPage} />
+        )}
+        {page === "exit-points" && (
+          <ExitPointsPage token={authToken} />
+        )}
+        {page === "research" && (
+          <ResearchPage token={authToken} onViewChart={navigateToChart} />
         )}
         {page.startsWith("legal") && (
           <LegalPage
@@ -381,6 +452,9 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
         )}
         {page === "feedback" && (
           <FeedbackPage token={authToken} goBack={goBack} />
+        )}
+        {page === "admin" && (
+          <AdminPage token={authToken} />
         )}
 
         <Footer onNavigate={setPage} showGuide />
@@ -431,7 +505,7 @@ export default function App() {
     /* Derive initial page from URL pathname when no special query params */
     const KNOWN_PAGES = new Set([
       "dashboard", "transactions", "orders", "charts", "news", "watchlist",
-      "portfolio-manager", "trading", "marketplace", "feedback", "import", "settings", "guide",
+      "portfolio-manager", "trading", "marketplace", "alerts", "learning", "exit-points", "research", "feedback", "import", "settings", "guide", "admin",
       "legal", "legal-privacy", "legal-terms", "legal-disclaimer",
       "login", "register", "forgot-password", "reset-password",
       "verify-email", "token-action", "deactivated",
@@ -441,7 +515,6 @@ export default function App() {
 
     return sessionStorage.getItem("tickertap_token") ? "dashboard" : "login";
   });
-  const [pageHistory, setPageHistory] = useState([]);
   const [pageParams,  setPageParams]  = useState(null);
 
   /**
@@ -453,10 +526,7 @@ export default function App() {
   const AUTH_GATED_PAGES = new Set(["token-action", "verify-email", "deactivated"]);
   const setPage = useCallback((next, params = null) => {
     setPageParams(params);
-    setPageRaw((prev) => {
-      setPageHistory((h) => [...h.slice(-9), prev]);
-      return next;
-    });
+    setPageRaw(next);
     /* Sync the browser URL bar so back/forward buttons work */
     if (AUTH_GATED_PAGES.has(next)) {
       window.history.replaceState({ page: next }, "", `/${next}`);

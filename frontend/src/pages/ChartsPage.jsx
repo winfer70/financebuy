@@ -10,6 +10,15 @@ import { Ic } from "../components/common/Icons";
 import { useMarketStatus } from "../components/common";
 import { useI18n } from "../context/I18nContext";
 import { useCurrency } from "../context/CurrencyContext";
+import AssetDetailPanel from "../components/common/AssetDetailPanel";
+import AlertModal from "../components/common/AlertModal";
+import {
+  DRAWING_TOOLS_BASE, DEFAULT_DRAW_STYLE, genDrawingId,
+  pixelToAnchor as pixelToAnchorFn, hitTestDrawing as hitTestDrawingFn,
+  renderDrawing, renderPreview, DrawingContextToolbar,
+  renderAnchorHandles, moveDrawingAnchors, moveOneAnchor,
+  resolveAnchorX, resolveAnchorY,
+} from "../components/charts/DrawingTools.jsx";
 
 export function generateOHLCV(basePrice, years = 5) {
   const days = years * 365;
@@ -164,326 +173,10 @@ const INTERVAL_DAYS = {
 };
 const INTRADAY_INTERVALS = new Set(["1m","2m","3m","5m","10m","15m","30m","45m","1h","2h","3h","4h"]);
 
-/* ─── DRAWING TOOLS CONFIG (base structure — labels translated inside component) */
-const DRAWING_TOOLS_BASE = {
-  trendLine:      { anchors: 2, icon: "trendLine",   labelKey: "charts.trendLine" },
-  horizontalLine: { anchors: 1, icon: "hLine",       labelKey: "charts.horizontalLine" },
-  ray:            { anchors: 2, icon: "ray",          labelKey: "charts.ray" },
-  rectangle:      { anchors: 2, icon: "rectangle",    labelKey: "charts.rectangle" },
-  fibonacci:      { anchors: 2, icon: "fibonacci",    labelKey: "charts.fibonacci" },
-  pitchfork:      { anchors: 3, icon: "pitchfork",    labelKey: "charts.pitchfork" },
-  text:           { anchors: 1, icon: "textTool",     labelKey: "charts.text" },
-  arrow:          { anchors: 2, icon: "arrowTool",    labelKey: "charts.arrow" },
-  ruler:          { anchors: 2, icon: "ruler",         labelKey: "charts.ruler" },
-};
+/* Drawing tools config, coordinate helpers, renderers, and hit-testing are
+   imported from ../components/charts/DrawingTools.jsx (shared with OHLCVChart). */
 
-const DEFAULT_DRAW_STYLE = { color: "#f59e0b", lineWidth: 1.5, lineStyle: "solid", fontSize: 12, text: "" };
 
-let _drawingIdCounter = 0;
-function genDrawingId() { return `d_${Date.now()}_${++_drawingIdCounter}`; }
-
-/* ─── COORDINATE TRANSLATION ──────────────────────────────────────────────── */
-/** Binary search: find fractional index of timestamp in data array */
-function timeToIndex(timestamp, data) {
-  if (!data.length) return 0;
-  const t = new Date(timestamp).getTime();
-  let lo = 0, hi = data.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (new Date(data[mid].date).getTime() < t) lo = mid + 1;
-    else hi = mid;
-  }
-  // Fractional interpolation between lo-1 and lo
-  if (lo > 0 && lo < data.length) {
-    const tLo = new Date(data[lo - 1].date).getTime();
-    const tHi = new Date(data[lo].date).getTime();
-    if (tHi !== tLo) {
-      const frac = (t - tLo) / (tHi - tLo);
-      return lo - 1 + Math.max(0, Math.min(1, frac));
-    }
-  }
-  return lo;
-}
-
-/** Resolve a drawing anchor {time, price} to pixel x within visible data */
-function resolveAnchorX(anchor, visibleData, visibleStart, allData, xOf) {
-  const globalIdx = timeToIndex(anchor.time, allData);
-  const localIdx = globalIdx - visibleStart;
-  return xOf(localIdx);
-}
-
-/** Resolve a drawing anchor price to pixel y */
-function resolveAnchorY(price, PAD, H, pLo, pHi) {
-  return PAD.top + H - ((price - pLo) / (pHi - pLo)) * H;
-}
-
-/** Distance from point to line segment */
-function pointToSegmentDist(px, py, x1, y1, x2, y2) {
-  const dx = x2 - x1, dy = y2 - y1;
-  const lenSq = dx * dx + dy * dy;
-  if (lenSq === 0) return Math.hypot(px - x1, py - y1);
-  let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
-  t = Math.max(0, Math.min(1, t));
-  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
-}
-
-/* ─── DRAWING RENDERERS ───────────────────────────────────────────────────── */
-function renderDrawing(drawing, visibleData, visibleStart, allData, xOf, yOf, PAD, H, W, pLo, pHi, dims, isSelected, currSym) {
-  const { type, anchors, style } = drawing;
-  const col = style.color || "#f59e0b";
-  const lw = style.lineWidth || 1.5;
-  const dash = style.lineStyle === "dashed" ? "6,4" : style.lineStyle === "dotted" ? "2,3" : "none";
-  const selStroke = isSelected ? "#fff" : null;
-
-  const ax = (i) => resolveAnchorX(anchors[i], visibleData, visibleStart, allData, xOf);
-  const ay = (i) => resolveAnchorY(anchors[i].price, PAD, H, pLo, pHi);
-
-  switch (type) {
-    case "trendLine": {
-      if (anchors.length < 2) return null;
-      return (
-        <g key={drawing.id}>
-          {isSelected && <line x1={ax(0)} y1={ay(0)} x2={ax(1)} y2={ay(1)} stroke="#fff" strokeWidth={lw + 2} opacity="0.3" />}
-          <line x1={ax(0)} y1={ay(0)} x2={ax(1)} y2={ay(1)}
-            stroke={col} strokeWidth={lw} strokeDasharray={dash} />
-          <circle cx={ax(0)} cy={ay(0)} r={3} fill={col} opacity="0.7" />
-          <circle cx={ax(1)} cy={ay(1)} r={3} fill={col} opacity="0.7" />
-        </g>
-      );
-    }
-    case "horizontalLine": {
-      if (anchors.length < 1) return null;
-      const y = ay(0);
-      const price = anchors[0].price;
-      return (
-        <g key={drawing.id}>
-          {isSelected && <line x1={PAD.left} y1={y} x2={dims.w - PAD.right} y2={y} stroke="#fff" strokeWidth={lw + 2} opacity="0.3" />}
-          <line x1={PAD.left} y1={y} x2={dims.w - PAD.right} y2={y}
-            stroke={col} strokeWidth={lw} strokeDasharray={dash} />
-          <rect x={PAD.left} y={y - 8} width={60} height={16} rx={1} fill={col} opacity="0.85" />
-          <text x={PAD.left + 4} y={y + 4} fontFamily="IBM Plex Mono" fontSize="9" fontWeight="600" fill="#060f08">
-            {currSym}{price.toFixed(2)}
-          </text>
-        </g>
-      );
-    }
-    case "ray": {
-      if (anchors.length < 2) return null;
-      const x1 = ax(0), y1 = ay(0), x2 = ax(1), y2 = ay(1);
-      // Extend ray from anchor[0] through anchor[1] to chart edge
-      const dx = x2 - x1, dy = y2 - y1;
-      const len = Math.hypot(dx, dy) || 1;
-      const scale = Math.max(W, H) * 2 / len;
-      const ex = x1 + dx * scale, ey = y1 + dy * scale;
-      return (
-        <g key={drawing.id}>
-          {isSelected && <line x1={x1} y1={y1} x2={ex} y2={ey} stroke="#fff" strokeWidth={lw + 2} opacity="0.3" />}
-          <line x1={x1} y1={y1} x2={ex} y2={ey}
-            stroke={col} strokeWidth={lw} strokeDasharray={dash} />
-          <circle cx={x1} cy={y1} r={3} fill={col} opacity="0.7" />
-        </g>
-      );
-    }
-    case "rectangle": {
-      if (anchors.length < 2) return null;
-      const x1 = ax(0), y1 = ay(0), x2 = ax(1), y2 = ay(1);
-      const rx = Math.min(x1, x2), ry = Math.min(y1, y2);
-      const rw = Math.abs(x2 - x1), rh = Math.abs(y2 - y1);
-      return (
-        <g key={drawing.id}>
-          <rect x={rx} y={ry} width={rw} height={rh} fill={col} fillOpacity="0.08" stroke={col} strokeWidth={lw} strokeDasharray={dash} />
-          {isSelected && <rect x={rx} y={ry} width={rw} height={rh} fill="none" stroke="#fff" strokeWidth={lw + 1} opacity="0.3" />}
-        </g>
-      );
-    }
-    case "arrow": {
-      if (anchors.length < 2) return null;
-      const x1 = ax(0), y1 = ay(0), x2 = ax(1), y2 = ay(1);
-      const angle = Math.atan2(y2 - y1, x2 - x1);
-      const hs = 10; // arrowhead size
-      const p1x = x2 - hs * Math.cos(angle - 0.4), p1y = y2 - hs * Math.sin(angle - 0.4);
-      const p2x = x2 - hs * Math.cos(angle + 0.4), p2y = y2 - hs * Math.sin(angle + 0.4);
-      return (
-        <g key={drawing.id}>
-          {isSelected && <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#fff" strokeWidth={lw + 2} opacity="0.3" />}
-          <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={col} strokeWidth={lw} strokeDasharray={dash} />
-          <polygon points={`${x2},${y2} ${p1x},${p1y} ${p2x},${p2y}`} fill={col} />
-        </g>
-      );
-    }
-    case "ruler": {
-      if (anchors.length < 2) return null;
-      const x1 = ax(0), y1 = ay(0), x2 = ax(1), y2 = ay(1);
-      const price1 = anchors[0].price, price2 = anchors[1].price;
-      const diff = price2 - price1;
-      const pct = price1 !== 0 ? (diff / price1) * 100 : 0;
-      const midX = (x1 + x2) / 2, midY = (y1 + y2) / 2;
-      const labelText = `${diff >= 0 ? "+" : ""}${diff.toFixed(2)} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
-      const labelColor = diff >= 0 ? "#00d97e" : "#f04438";
-      return (
-        <g key={drawing.id}>
-          {isSelected && <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#fff" strokeWidth={lw + 2} opacity="0.3" />}
-          <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={col} strokeWidth={lw} strokeDasharray="6,3" />
-          <circle cx={x1} cy={y1} r={3} fill={col} opacity="0.7" />
-          <circle cx={x2} cy={y2} r={3} fill={col} opacity="0.7" />
-          <line x1={x1} y1={y1} x2={x1} y2={y2} stroke={col} strokeWidth={0.5} strokeDasharray="3,3" opacity="0.4" />
-          <line x1={x1} y1={y2} x2={x2} y2={y2} stroke={col} strokeWidth={0.5} strokeDasharray="3,3" opacity="0.4" />
-          <rect x={midX - 60} y={midY - 10} width={120} height={16} rx={2} fill="var(--bg2, #1a1a2e)" fillOpacity="0.9" stroke={labelColor} strokeWidth="0.5" />
-          <text x={midX} y={midY + 3} textAnchor="middle" fontFamily="IBM Plex Mono" fontSize="9" fontWeight="600" fill={labelColor}>
-            {labelText}
-          </text>
-        </g>
-      );
-    }
-    case "fibonacci": {
-      if (anchors.length < 2) return null;
-      const p1 = anchors[0].price, p2 = anchors[1].price;
-      const high = Math.max(p1, p2), low = Math.min(p1, p2);
-      const levels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
-      const x1 = ax(0), x2 = ax(1);
-      const left = Math.min(x1, x2), right = Math.max(x1, x2);
-      return (
-        <g key={drawing.id}>
-          {levels.map((lv, i) => {
-            const price = high - (high - low) * lv;
-            const y = resolveAnchorY(price, PAD, H, pLo, pHi);
-            const pctLabel = `${(lv * 100).toFixed(1)}%`;
-            return (
-              <g key={i}>
-                <line x1={left} y1={y} x2={right} y2={y}
-                  stroke={col} strokeWidth={lv === 0 || lv === 1 ? lw : lw * 0.7}
-                  strokeDasharray={lv === 0.5 ? "4,3" : "none"} opacity={0.7} />
-                <text x={right + 4} y={y + 3} fontFamily="IBM Plex Mono" fontSize="8" fill={col} opacity="0.8">
-                  {pctLabel} {currSym}{price.toFixed(2)}
-                </text>
-              </g>
-            );
-          })}
-          {/* Shaded 38.2-61.8 zone */}
-          {(() => {
-            const y382 = resolveAnchorY(high - (high - low) * 0.382, PAD, H, pLo, pHi);
-            const y618 = resolveAnchorY(high - (high - low) * 0.618, PAD, H, pLo, pHi);
-            return <rect x={left} y={Math.min(y382, y618)} width={right - left} height={Math.abs(y618 - y382)} fill={col} fillOpacity="0.06" />;
-          })()}
-          {isSelected && <rect x={left} y={resolveAnchorY(high, PAD, H, pLo, pHi)} width={right - left} height={Math.abs(resolveAnchorY(low, PAD, H, pLo, pHi) - resolveAnchorY(high, PAD, H, pLo, pHi))} fill="none" stroke="#fff" strokeWidth="1" opacity="0.3" />}
-        </g>
-      );
-    }
-    case "pitchfork": {
-      if (anchors.length < 3) return null;
-      const x0 = ax(0), y0 = ay(0); // pivot
-      const x1 = ax(1), y1 = ay(1); // point 1
-      const x2 = ax(2), y2 = ay(2); // point 2
-      const mx = (x1 + x2) / 2, my = (y1 + y2) / 2; // midpoint
-      // Extend all three lines
-      const extendLine = (sx, sy, ex, ey) => {
-        const dx = ex - sx, dy = ey - sy;
-        const len = Math.hypot(dx, dy) || 1;
-        const s = Math.max(W, H) * 2 / len;
-        return { ex: sx + dx * s, ey: sy + dy * s };
-      };
-      const med = extendLine(x0, y0, mx, my);
-      const prong1 = extendLine(x1, y1, x1 + (mx - x0), y1 + (my - y0));
-      const prong2 = extendLine(x2, y2, x2 + (mx - x0), y2 + (my - y0));
-      return (
-        <g key={drawing.id} clipPath="url(#chartClip)">
-          {isSelected && <line x1={x0} y1={y0} x2={med.ex} y2={med.ey} stroke="#fff" strokeWidth={lw + 2} opacity="0.3" />}
-          <line x1={x0} y1={y0} x2={med.ex} y2={med.ey} stroke={col} strokeWidth={lw} />
-          <line x1={x1} y1={y1} x2={prong1.ex} y2={prong1.ey} stroke={col} strokeWidth={lw * 0.7} strokeDasharray="4,3" />
-          <line x1={x2} y1={y2} x2={prong2.ex} y2={prong2.ey} stroke={col} strokeWidth={lw * 0.7} strokeDasharray="4,3" />
-          <circle cx={x0} cy={y0} r={3} fill={col} />
-          <circle cx={x1} cy={y1} r={3} fill={col} opacity="0.7" />
-          <circle cx={x2} cy={y2} r={3} fill={col} opacity="0.7" />
-        </g>
-      );
-    }
-    case "text": {
-      if (anchors.length < 1) return null;
-      const x = ax(0), y = ay(0);
-      const txt = style.text || "Text";
-      const fs = style.fontSize || 12;
-      return (
-        <g key={drawing.id}>
-          {isSelected && <rect x={x - 2} y={y - fs - 2} width={txt.length * fs * 0.65 + 4} height={fs + 6} fill="#fff" fillOpacity="0.1" stroke="#fff" strokeWidth="1" rx="1" />}
-          <text x={x} y={y} fontFamily="IBM Plex Mono" fontSize={fs} fill={col} fontWeight="500">{txt}</text>
-        </g>
-      );
-    }
-    default:
-      return null;
-  }
-}
-
-/** Render a rubber-band preview while placing anchors */
-function renderPreview(toolType, anchors, previewPoint, visibleData, visibleStart, allData, xOf, yOf, PAD, H, W, pLo, pHi, dims, style) {
-  if (!previewPoint) return null;
-  const col = style.color || "#f59e0b";
-  const lw = style.lineWidth || 1.5;
-  const ax = (a) => resolveAnchorX(a, visibleData, visibleStart, allData, xOf);
-  const ay = (a) => resolveAnchorY(a.price, PAD, H, pLo, pHi);
-  const px = resolveAnchorX(previewPoint, visibleData, visibleStart, allData, xOf);
-  const py = resolveAnchorY(previewPoint.price, PAD, H, pLo, pHi);
-
-  switch (toolType) {
-    case "trendLine":
-    case "arrow":
-    case "ruler":
-      if (anchors.length === 1) {
-        return <line x1={ax(anchors[0])} y1={ay(anchors[0])} x2={px} y2={py} stroke={col} strokeWidth={lw} strokeDasharray="4,4" opacity="0.7" />;
-      }
-      return null;
-    case "horizontalLine":
-      return <line x1={PAD.left} y1={py} x2={dims.w - PAD.right} y2={py} stroke={col} strokeWidth={lw} strokeDasharray="4,4" opacity="0.7" />;
-    case "ray":
-      if (anchors.length === 1) {
-        const x1 = ax(anchors[0]), y1 = ay(anchors[0]);
-        const dx = px - x1, dy = py - y1;
-        const len = Math.hypot(dx, dy) || 1;
-        const scale = Math.max(W, H) * 2 / len;
-        return <line x1={x1} y1={y1} x2={x1 + dx * scale} y2={y1 + dy * scale} stroke={col} strokeWidth={lw} strokeDasharray="4,4" opacity="0.7" />;
-      }
-      return null;
-    case "rectangle":
-      if (anchors.length === 1) {
-        const x1 = ax(anchors[0]), y1 = ay(anchors[0]);
-        return <rect x={Math.min(x1, px)} y={Math.min(y1, py)} width={Math.abs(px - x1)} height={Math.abs(py - y1)} fill={col} fillOpacity="0.06" stroke={col} strokeWidth={lw} strokeDasharray="4,4" opacity="0.7" />;
-      }
-      return null;
-    case "fibonacci":
-      if (anchors.length === 1) {
-        const p1 = anchors[0].price, p2 = previewPoint.price;
-        const high = Math.max(p1, p2), low = Math.min(p1, p2);
-        const levels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
-        const x1 = ax(anchors[0]);
-        const left = Math.min(x1, px), right = Math.max(x1, px);
-        return (
-          <g opacity="0.5">
-            {levels.map((lv, i) => {
-              const price = high - (high - low) * lv;
-              const y = resolveAnchorY(price, PAD, H, pLo, pHi);
-              return <line key={i} x1={left} y1={y} x2={right} y2={y} stroke={col} strokeWidth={lw * 0.7} strokeDasharray="4,3" />;
-            })}
-          </g>
-        );
-      }
-      return null;
-    case "pitchfork":
-      if (anchors.length >= 1) {
-        const pts = [...anchors.map(a => ({ x: ax(a), y: ay(a) })), { x: px, y: py }];
-        return (
-          <g opacity="0.5">
-            {pts.map((p, i) => i > 0 && <line key={i} x1={pts[i-1].x} y1={pts[i-1].y} x2={p.x} y2={p.y} stroke={col} strokeWidth={lw} strokeDasharray="4,4" />)}
-            {pts.map((p, i) => <circle key={`c${i}`} cx={p.x} cy={p.y} r={3} fill={col} opacity="0.7" />)}
-          </g>
-        );
-      }
-      return null;
-    case "text":
-      return <text x={px} y={py} fontFamily="IBM Plex Mono" fontSize={style.fontSize || 12} fill={col} opacity="0.5">{style.text || "Text"}</text>;
-    default:
-      return null;
-  }
-}
 
 /* ─── CHART COMPONENT ───────────────────────────────────────────────────────── */
 function StockChart({ symbol, stockInfo, onClose, token }) {
@@ -778,6 +471,11 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
   const [textInput, setTextInput] = useState("");
   const drawSaveTimerRef = useRef(null);
 
+  /* ── Draw interaction state (move/resize drawings) ──────────────────── */
+  const [drawInteraction, setDrawInteraction] = useState("idle"); // "idle" | "moving" | "resizing"
+  const drawDragStartRef = useRef(null);   // { x, y, anchors: [...] } — captured at drag start
+  const drawDragAnchorRef = useRef(null);  // anchor index being resized, null during move
+
   // ── Template state ──────────────────────────────────────────────────────
   const [templates, setTemplates] = useState([]);
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -867,81 +565,14 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [activeTool, selectedDrawingId]);
 
-  // Convert pixel position to {time, price} anchor
+  // Convert pixel position to {time, price} anchor (delegates to shared module)
   const pixelToAnchor = useCallback((mx, my) => {
-    const idx = Math.round((mx - PAD.left - candleGap / 2) / candleGap);
-    const clamped = Math.max(0, Math.min(n - 1, idx));
-    const d = visibleData[clamped];
-    if (!d) return null;
-    const price = pLo + ((PAD.top + H - my) / H) * (pHi - pLo);
-    return { time: d.date, price };
+    return pixelToAnchorFn(mx, my, visibleData, n, PAD, candleGap, H, pLo, pHi);
   }, [visibleData, n, PAD, candleGap, H, pLo, pHi]);
 
-  // Hit-test: find drawing near pixel (mx, my)
+  // Hit-test: find drawing near pixel (mx, my) (delegates to shared module)
   const hitTestDrawing = useCallback((mx, my) => {
-    const threshold = 10;
-    for (let di = drawings.length - 1; di >= 0; di--) {
-      const dr = drawings[di];
-      const { type, anchors } = dr;
-      if (!anchors || !anchors.length) continue;
-      const ax = (a) => resolveAnchorX(a, visibleData, visibleStart, allData, xOf);
-      const ay = (a) => resolveAnchorY(a.price, PAD, H, pLo, pHi);
-      switch (type) {
-        case "trendLine":
-        case "arrow":
-        case "ruler":
-          if (anchors.length >= 2) {
-            const dist = pointToSegmentDist(mx, my, ax(anchors[0]), ay(anchors[0]), ax(anchors[1]), ay(anchors[1]));
-            if (dist < threshold) return dr.id;
-          }
-          break;
-        case "horizontalLine":
-          if (anchors.length >= 1) {
-            const y = ay(anchors[0]);
-            if (Math.abs(my - y) < threshold) return dr.id;
-          }
-          break;
-        case "ray":
-          if (anchors.length >= 2) {
-            const x1 = ax(anchors[0]), y1 = ay(anchors[0]);
-            const x2 = ax(anchors[1]), y2 = ay(anchors[1]);
-            const dx = x2 - x1, dy = y2 - y1;
-            const len = Math.hypot(dx, dy) || 1;
-            const scale = Math.max(W, H) * 2 / len;
-            const dist = pointToSegmentDist(mx, my, x1, y1, x1 + dx * scale, y1 + dy * scale);
-            if (dist < threshold) return dr.id;
-          }
-          break;
-        case "rectangle":
-        case "fibonacci":
-          if (anchors.length >= 2) {
-            const x1 = ax(anchors[0]), y1 = ay(anchors[0]);
-            const x2 = ax(anchors[1]), y2 = ay(anchors[1]);
-            const rx = Math.min(x1, x2), ry = Math.min(y1, y2);
-            const rw = Math.abs(x2 - x1), rh = Math.abs(y2 - y1);
-            if (mx >= rx - threshold && mx <= rx + rw + threshold && my >= ry - threshold && my <= ry + rh + threshold) return dr.id;
-          }
-          break;
-        case "text":
-          if (anchors.length >= 1) {
-            const x = ax(anchors[0]), y = ay(anchors[0]);
-            const fs = dr.style.fontSize || 12;
-            const tw = (dr.style.text || "Text").length * fs * 0.65;
-            if (mx >= x - 4 && mx <= x + tw + 4 && my >= y - fs - 4 && my <= y + 4) return dr.id;
-          }
-          break;
-        case "pitchfork":
-          if (anchors.length >= 3) {
-            for (let ai = 0; ai < 2; ai++) {
-              const dist = pointToSegmentDist(mx, my, ax(anchors[ai]), ay(anchors[ai]), ax(anchors[ai + 1]), ay(anchors[ai + 1]));
-              if (dist < threshold) return dr.id;
-            }
-          }
-          break;
-        default: break;
-      }
-    }
-    return null;
+    return hitTestDrawingFn(drawings, mx, my, visibleData, visibleStart, allData, xOf, PAD, H, W, pLo, pHi);
   }, [drawings, visibleData, visibleStart, allData, xOf, PAD, H, W, pLo, pHi]);
 
   // ── Mouse handlers ────────────────────────────────────────────────────────
@@ -951,6 +582,32 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
     const rect = svg.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
+
+    /* ── Moving a drawing: apply pixel delta to all anchors ── */
+    if (drawInteraction === "moving" && drawDragStartRef.current && selectedDrawingId) {
+      const selDrawing = drawings.find(d => d.id === selectedDrawingId);
+      if (selDrawing) {
+        const dx = mx - drawDragStartRef.current.x;
+        const dy = my - drawDragStartRef.current.y;
+        /* Use the original anchors from drag start to avoid accumulation drift */
+        const original = { ...selDrawing, anchors: drawDragStartRef.current.anchors };
+        const chartParams = { visibleData, visibleStart, allData, xOf, PAD, H, pLo, pHi, n, candleGap };
+        const updated = moveDrawingAnchors(original, dx, dy, chartParams);
+        setDrawings(prev => prev.map(d => d.id === selectedDrawingId ? updated : d));
+      }
+      return;
+    }
+
+    /* ── Resizing a drawing: move one anchor to mouse position ── */
+    if (drawInteraction === "resizing" && drawDragAnchorRef.current != null && selectedDrawingId) {
+      const selDrawing = drawings.find(d => d.id === selectedDrawingId);
+      if (selDrawing) {
+        const chartParams = { visibleData, visibleStart, allData, xOf, PAD, H, pLo, pHi, n, candleGap };
+        const updated = moveOneAnchor(selDrawing, drawDragAnchorRef.current, mx, my, chartParams);
+        setDrawings(prev => prev.map(d => d.id === selectedDrawingId ? updated : d));
+      }
+      return;
+    }
 
     // Drawing mode: update preview point
     if (activeTool && pendingAnchors.length >= 0) {
@@ -997,7 +654,19 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
       sCx: smaCustom[clamped]?.value,
       screen: { x: mx, y: my, tRight, tBottom },
     });
-  }, [visibleData, sma50, sma150, smaCustom, n, totalSlots, W, H, pLo, pHi, candleGap, allData.length, activeTool, pendingAnchors, pixelToAnchor]);
+
+    /* ── Cursor hint: show "move" when hovering body of selected drawing ── */
+    if (selectedDrawingId && !activeTool && drawInteraction === "idle") {
+      const hitId = hitTestDrawing(mx, my);
+      if (hitId === selectedDrawingId && containerRef.current) {
+        containerRef.current.style.cursor = "move";
+      } else if (containerRef.current) {
+        containerRef.current.style.cursor = "crosshair";
+      }
+    }
+  }, [visibleData, sma50, sma150, smaCustom, n, totalSlots, W, H, pLo, pHi, candleGap, allData.length,
+      activeTool, pendingAnchors, pixelToAnchor, drawInteraction, selectedDrawingId, drawings,
+      visibleStart, allData, xOf, PAD, hitTestDrawing]);
 
   const handleMouseDown = useCallback((e) => {
     if (e.button !== 0) return;
@@ -1039,8 +708,43 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
       return;
     }
 
-    // Selection mode: try hit-testing existing drawings
+    /* ── Anchor-handle hit-test: start resizing if click lands on a handle ── */
+    if (selectedDrawingId && !activeTool) {
+      const selDrawing = drawings.find(d => d.id === selectedDrawingId);
+      if (selDrawing && selDrawing.anchors) {
+        for (let i = 0; i < selDrawing.anchors.length; i++) {
+          const anchorPx = resolveAnchorX(selDrawing.anchors[i], visibleData, visibleStart, allData, xOf);
+          const anchorPy = resolveAnchorY(selDrawing.anchors[i].price, PAD, H, pLo, pHi);
+          if (Math.hypot(mx - anchorPx, my - anchorPy) <= 8) {
+            /* Enter resize mode for this anchor */
+            setDrawInteraction("resizing");
+            drawDragAnchorRef.current = i;
+            drawDragStartRef.current = { x: mx, y: my, anchors: selDrawing.anchors.map(a => ({ ...a })) };
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
+        }
+      }
+    }
+
+    // Hit-test drawings for selection or body-drag
     const hitId = hitTestDrawing(mx, my);
+
+    /* ── Body hit on already-selected drawing: start moving ── */
+    if (hitId && hitId === selectedDrawingId && !activeTool) {
+      const selDrawing = drawings.find(d => d.id === selectedDrawingId);
+      if (selDrawing) {
+        setDrawInteraction("moving");
+        drawDragAnchorRef.current = null;
+        drawDragStartRef.current = { x: mx, y: my, anchors: selDrawing.anchors.map(a => ({ ...a })) };
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+    }
+
+    /* ── Hit a different drawing: select it ── */
     if (hitId) {
       setSelectedDrawingId(hitId);
       e.preventDefault();
@@ -1052,15 +756,35 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
     const cur = zoom || { start: visibleStart, count: visibleData.length };
     dragRef.current = { startX: mx, baseStart: cur.start, baseCount: cur.count };
     e.preventDefault();
-  }, [zoom, visibleStart, visibleData.length, activeTool, pendingAnchors, drawingStyle, textInput, pixelToAnchor, hitTestDrawing]);
+  }, [zoom, visibleStart, visibleData.length, activeTool, pendingAnchors, drawingStyle, textInput,
+      pixelToAnchor, hitTestDrawing, selectedDrawingId, drawings, visibleData, allData, xOf, PAD, H, pLo, pHi, W, n, candleGap]);
 
-  const handleMouseUp   = () => { dragRef.current = null; };
-  const handleMouseLeave = () => {
+  const handleMouseUp = useCallback(() => {
+    /* Commit move/resize: drawings state already updated live, just exit interaction */
+    if (drawInteraction !== "idle") {
+      setDrawInteraction("idle");
+      drawDragStartRef.current = null;
+      drawDragAnchorRef.current = null;
+      /* localStorage save happens automatically via the debounced useEffect on drawings */
+      return;
+    }
+    dragRef.current = null;
+  }, [drawInteraction]);
+
+  const handleMouseLeave = useCallback(() => {
+    /* Reset any active drawing drag */
+    if (drawInteraction !== "idle") {
+      setDrawInteraction("idle");
+      drawDragStartRef.current = null;
+      drawDragAnchorRef.current = null;
+    }
     dragRef.current = null;
     setCrosshair(null);
     setTooltip(null);
     if (activeTool) setPreviewPoint(null);
-  };
+    /* Reset cursor override */
+    if (containerRef.current) containerRef.current.style.cursor = "crosshair";
+  }, [drawInteraction, activeTool]);
 
   // Mouse-wheel zoom
   const handleWheel = useCallback((e) => {
@@ -1324,7 +1048,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
         onMouseLeave={handleMouseLeave}
       >
         {/* ── CHART SVG (price + volume) ── */}
-        <div ref={containerRef} style={{ width: "100%", height: "100%", position: "relative", background: "#090b0f", cursor: "crosshair" }}>
+        <div ref={containerRef} style={{ width: "100%", height: "100%", position: "relative", background: "#090b0f", cursor: drawInteraction === "moving" ? "move" : "crosshair" }}>
           {/* Legend overlay */}
           <div className="chart-legend">
             {overlays.sma50     && <div className="legend-item"><div className="legend-line" style={{ background: "#3d7ef5" }}/>SMA50</div>}
@@ -1717,6 +1441,13 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
               {drawings.filter(d => d.visible).map(d =>
                 renderDrawing(d, visibleData, visibleStart, allData, xOf, yOf, PAD, H, W, pLo, pHi, dims, d.id === selectedDrawingId, currencySymbol)
               )}
+              {/* Anchor handles for the selected drawing (rendered above drawing lines) */}
+              {selectedDrawingId && !activeTool && (() => {
+                const selDrawing = drawings.find(d => d.id === selectedDrawingId);
+                if (!selDrawing) return null;
+                const chartParams = { visibleData, visibleStart, allData, xOf, PAD, H, pLo, pHi };
+                return renderAnchorHandles(selDrawing, chartParams);
+              })()}
               {activeTool && renderPreview(activeTool, pendingAnchors, previewPoint, visibleData, visibleStart, allData, xOf, yOf, PAD, H, W, pLo, pHi, dims, drawingStyle)}
             </g>
 
@@ -1783,6 +1514,17 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
               );
             })()}
           </svg>
+
+          {/* ── Drawing context toolbar (floating delete/deselect) ── */}
+          {selectedDrawingId && !activeTool && (
+            <DrawingContextToolbar
+              onDelete={() => {
+                setDrawings(prev => prev.filter(d => d.id !== selectedDrawingId));
+                setSelectedDrawingId(null);
+              }}
+              onDeselect={() => setSelectedDrawingId(null)}
+            />
+          )}
         </div>
 
         {/* ── TOOLTIP ── */}
@@ -2119,19 +1861,178 @@ function PortfolioSidePanel({ token, onSelectSymbol, activeSymbol }) {
   );
 }
 
+/* ─── WATCHLIST SIDE PANEL ──────────────────────────────────────────────────── */
+/**
+ * WatchlistSidePanel — collapsible right-side panel that displays the user's
+ * watchlists with live quotes.  Follows the same visual pattern as
+ * PortfolioSidePanel so only one panel is visible at a time.
+ *
+ * @param {string}   token           - JWT access token
+ * @param {Function} onSelectSymbol  - callback(symbol) to navigate the chart
+ * @param {string}   activeSymbol    - currently-displayed chart symbol
+ */
+function WatchlistSidePanel({ token, onSelectSymbol, activeSymbol }) {
+  const { t } = useI18n();
+  const { currencySymbol } = useCurrency();
+  const mktStatus = useMarketStatus();
+
+  const [watchlists, setWatchlists] = useState([]);
+  const [activeWatchlistId, setActiveWatchlistId] = useState(null);
+  const [items, setItems] = useState([]);
+  const [quotes, setQuotes] = useState({});
+  const [loading, setLoading] = useState(false);
+
+  /* Fetch all user watchlists on mount.
+   * Sets the first watchlist as active by default. */
+  useEffect(() => {
+    if (!token) return;
+    api.getWatchlists(token)
+      .then(list => {
+        setWatchlists(list);
+        if (list.length) setActiveWatchlistId(list[0].watchlist_id);
+      })
+      .catch(() => {});
+  }, [token]);
+
+  /* Fetch items whenever the active watchlist changes.
+   * api.getWatchlist returns the watchlist object with an `items` array. */
+  useEffect(() => {
+    if (!token || !activeWatchlistId) { setItems([]); return; }
+    setLoading(true);
+    api.getWatchlist(activeWatchlistId, token)
+      .then(wl => setItems(wl.items || []))
+      .catch(() => setItems([]))
+      .finally(() => setLoading(false));
+  }, [activeWatchlistId, token]);
+
+  /* Fetch bulk quotes for all watchlist symbols.
+   * Uses api.bulkQuotes for a single network round-trip. */
+  useEffect(() => {
+    if (!token || !items.length) { setQuotes({}); return; }
+    const symbols = [...new Set(items.map(i => i.symbol))];
+    api.bulkQuotes(symbols, token)
+      .then(list => {
+        const map = {};
+        list.forEach(q => { map[q.symbol] = q; });
+        setQuotes(map);
+      })
+      .catch(() => {});
+  }, [items, token]);
+
+  /* Auto-refresh quotes on a timer.
+   * Faster during market hours (10 s), slower when closed (5 min). */
+  const pollMs = mktStatus.isOpen ? 10000 : 300000;
+  useEffect(() => {
+    if (!token || !items.length) return;
+    const symbols = [...new Set(items.map(i => i.symbol))];
+    const id = setInterval(() => {
+      api.bulkQuotes(symbols, token)
+        .then(list => {
+          const map = {};
+          list.forEach(q => { map[q.symbol] = q; });
+          setQuotes(map);
+        })
+        .catch(() => {});
+    }, pollMs);
+    return () => clearInterval(id);
+  }, [items, token, pollMs]);
+
+  const activeWatchlist = watchlists.find(w => w.watchlist_id === activeWatchlistId);
+
+  return (
+    <div className="portfolio-panel">
+      {/* Header — reuses pp-header / pp-title / pp-select classes */}
+      <div className="pp-header">
+        <div className="pp-title">WATCHLIST</div>
+        {watchlists.length > 1 ? (
+          <select className="pp-select"
+            value={activeWatchlistId || ""}
+            onChange={e => setActiveWatchlistId(e.target.value)}>
+            {watchlists.map(w => (
+              <option key={w.watchlist_id} value={w.watchlist_id}>{w.name}</option>
+            ))}
+          </select>
+        ) : activeWatchlist ? (
+          <div className="pp-portfolio-name">{activeWatchlist.name}</div>
+        ) : null}
+      </div>
+
+      {/* Compact summary row — symbol count */}
+      <div className="pp-summary">
+        <div className="pp-summary-row">
+          <span className="pp-summary-label">SYMBOLS</span>
+          <span className="pp-summary-val">{items.length}</span>
+        </div>
+      </div>
+
+      {/* Scrollable items list */}
+      <div className="pp-positions">
+        {loading && <div className="pp-loading loading-pulse">{t("charts.loading")}</div>}
+        {!loading && items.length === 0 && (
+          <div className="pp-empty">No watchlist items</div>
+        )}
+        {items.map(item => {
+          const q = quotes[item.symbol];
+          const price = q?.price;
+          const changePct = q?.change_pct;
+          const isActive = activeSymbol === item.symbol;
+
+          return (
+            <div key={item.item_id || item.symbol}
+              className={`pp-position${isActive ? " active" : ""}`}
+              onClick={() => onSelectSymbol(item.symbol)}>
+              <div className="pp-pos-top">
+                {/* Symbol in amber per Bloomberg terminal aesthetic */}
+                <span className="pp-pos-ticker" style={{ color: "var(--amber)" }}>{item.symbol}</span>
+                <span className="pp-pos-price">
+                  {price != null ? `${currencySymbol}${price.toFixed(2)}` : <span className="loading-pulse">...</span>}
+                </span>
+              </div>
+              <div className="pp-pos-bottom">
+                <span className="pp-pos-qty">{item.asset_type || "Stock"}</span>
+                {changePct != null && (
+                  <span className={`pp-pos-gain ${changePct >= 0 ? "pos" : "neg"}`}>
+                    {changePct >= 0 ? "+" : ""}{changePct.toFixed(2)}%
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /* ─── MAIN CHARTS PAGE ──────────────────────────────────────────────────────── */
 export function ChartsPage({ initialSymbol, goBack, token }) {
   const { t } = useI18n();
   const { formatValue, currencySymbol } = useCurrency();
   const [watchlist, setWatchlist] = useState(["AAPL", "NVDA", "TSLA"]);
   const [activeSymbol, setActiveSymbol] = useState(initialSymbol || "AAPL");
-  const [panelOpen, setPanelOpen] = useState(() => localStorage.getItem("tt_chart_panel") !== "0");
+  const [showAssetDetail, setShowAssetDetail] = useState(false);   // toggle AssetDetailPanel modal
+  const [showAlertModal, setShowAlertModal] = useState(false);     // toggle AlertModal for price alerts
+  /* Panel mode: null (hidden), "portfolio", or "watchlist".
+   * Migrates legacy boolean "0"/"1" values from tt_chart_panel. */
+  const [panelMode, setPanelMode] = useState(() => {
+    const stored = localStorage.getItem("tt_chart_panel");
+    if (stored === "portfolio" || stored === "watchlist") return stored;
+    if (stored === "1") return "portfolio";          // migrate old boolean format
+    return null;                                     // "0" or absent → hidden
+  });
   const mktStatus = useMarketStatus();
 
-  const togglePanel = () => {
-    setPanelOpen(v => {
-      localStorage.setItem("tt_chart_panel", v ? "0" : "1");
-      return !v;
+  /**
+   * togglePanel — switch to the given panel mode, or close it if already active.
+   * Only one panel (portfolio OR watchlist) is shown at a time.
+   *
+   * @param {string} mode - "portfolio" | "watchlist"
+   */
+  const togglePanel = (mode) => {
+    setPanelMode(prev => {
+      const next = prev === mode ? null : mode;
+      localStorage.setItem("tt_chart_panel", next || "0");
+      return next;
     });
   };
 
@@ -2198,11 +2099,50 @@ export function ChartsPage({ initialSymbol, goBack, token }) {
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <button className={`btn btn-ghost`} onClick={togglePanel}
+          {/* Panel toggle: Portfolio */}
+          <button className="btn btn-ghost" onClick={() => togglePanel("portfolio")}
             style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, letterSpacing: "0.5px", padding: "4px 10px",
-              color: panelOpen ? "#0f7d40" : "#4a5568", border: `1px solid ${panelOpen ? "rgba(15,125,64,0.3)" : "#1e2535"}` }}>
-            {panelOpen ? `◁ ${t("charts.portfolio")}` : `${t("charts.portfolio")} ▷`}
+              color: panelMode === "portfolio" ? "var(--amber)" : "var(--muted)",
+              border: `1px solid ${panelMode === "portfolio" ? "rgba(255,178,56,0.3)" : "#1e2535"}` }}>
+            {panelMode === "portfolio" ? `◁ ${t("charts.portfolio")}` : t("charts.portfolio")}
           </button>
+          {/* Panel toggle: Watchlist */}
+          <button className="btn btn-ghost" onClick={() => togglePanel("watchlist")}
+            style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, letterSpacing: "0.5px", padding: "4px 10px",
+              color: panelMode === "watchlist" ? "var(--amber)" : "var(--muted)",
+              border: `1px solid ${panelMode === "watchlist" ? "rgba(255,178,56,0.3)" : "#1e2535"}` }}>
+            {panelMode === "watchlist" ? "◁ WATCHLIST" : "WATCHLIST"}
+          </button>
+          {/* Asset detail info button for active symbol */}
+          {activeSymbol && (
+            <button
+              className="btn btn-ghost"
+              title="Asset details"
+              onClick={() => setShowAssetDetail(true)}
+              style={{
+                fontFamily: "'IBM Plex Mono',monospace", fontSize: 14,
+                padding: "4px 10px", color: "var(--muted)",
+                border: "1px solid #1e2535", cursor: "pointer",
+              }}
+            >
+              {"\u24D8"}
+            </button>
+          )}
+          {/* Price alert button — opens AlertModal with current symbol/price */}
+          {activeSymbol && (
+            <button
+              className="btn btn-ghost"
+              title="Set price alert"
+              onClick={() => setShowAlertModal(true)}
+              style={{
+                fontFamily: "'IBM Plex Mono',monospace", fontSize: 14,
+                padding: "4px 10px", color: "var(--muted)",
+                border: "1px solid #1e2535", cursor: "pointer",
+              }}
+            >
+              <Ic.bell />
+            </button>
+          )}
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4a5568", textAlign: "right" }}>
             <div style={{ color: mktStatus.isOpen ? "#00d97e" : "var(--red)", display: "flex", alignItems: "center", gap: 5, justifyContent: "flex-end" }}>
               <span style={{ width: 5, height: 5, borderRadius: "50%", background: mktStatus.isOpen ? "#00d97e" : "var(--red)", display: "inline-block", animation: "blink 2s infinite" }} />
@@ -2242,15 +2182,36 @@ export function ChartsPage({ initialSymbol, goBack, token }) {
           )}
         </div>
 
-        {/* Portfolio side panel */}
-        {panelOpen && (
+        {/* Portfolio side panel — visible when panelMode === "portfolio" */}
+        {panelMode === "portfolio" && (
           <PortfolioSidePanel
             token={token}
             onSelectSymbol={handlePanelSelect}
             activeSymbol={activeSymbol}
           />
         )}
+
+        {/* Watchlist side panel — visible when panelMode === "watchlist" */}
+        {panelMode === "watchlist" && (
+          <WatchlistSidePanel
+            token={token}
+            onSelectSymbol={handlePanelSelect}
+            activeSymbol={activeSymbol}
+          />
+        )}
       </div>
+      {showAssetDetail && activeSymbol && (
+        <AssetDetailPanel symbol={activeSymbol} token={token} onClose={() => setShowAssetDetail(false)} />
+      )}
+      {showAlertModal && activeSymbol && (
+        <AlertModal
+          symbol={activeSymbol}
+          currentPrice={quoteData?.price ?? null}
+          token={token}
+          onClose={() => setShowAlertModal(false)}
+          onCreated={() => {}}
+        />
+      )}
     </div>
   );
 }
@@ -2692,6 +2653,17 @@ const CHART_CSS = `
 .tpl-modal-btn.save:hover { background: #10a050; }
 .tpl-modal-btn.save:disabled {
   opacity: 0.4; cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .chart-search-input { width: 100% !important; }
+  .chart-controls { flex-wrap: wrap; gap: 4px; }
+  .chart-stats { font-size: 10px; }
+  .portfolio-panel {
+    position: fixed; top: 42px; right: 0; bottom: 56px;
+    width: 85vw; z-index: 90;
+    box-shadow: -4px 0 20px rgba(0,0,0,0.5);
+  }
 }
 `;
 

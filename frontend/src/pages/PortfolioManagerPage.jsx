@@ -23,6 +23,8 @@ import { useCurrency } from "../context/CurrencyContext";
 import { useI18n } from "../context/I18nContext";
 import { fmtUSD, fmtQty, fmtPct, fmtDate } from "../utils/formatters";
 import { MODAL_BACKDROP as BDK } from "../styles/shared";
+import AssetDetailPanel from "../components/common/AssetDetailPanel";
+import AlertModal from "../components/common/AlertModal";
 
 /* -- Asset section config ------------------------------------------------- */
 const SECTIONS = [
@@ -456,7 +458,7 @@ function AddPhysicalModal({ portfolioId, onClose, onAdded, token }) {
    MODAL: CSV Import
    Expected CSV: Ticker,Name,Quantity,PurchaseDate,PurchasePrice,Group
 ========================================================================= */
-function CSVImportModal({ portfolioId, onClose, onImported, token, assetType }) {
+function CSVImportModal({ portfolioId, onClose, onImported, token, assetType, formatValue }) {
   const [rows,    setRows]    = useState([]);
   const [err,     setErr]     = useState("");
   const [loading, setLoading] = useState(false);
@@ -734,7 +736,7 @@ function SortTh({ label, col, sortCol, sortDir, onSort, right }) {
 /* =========================================================================
    MAIN PAGE
 ========================================================================= */
-export function PortfolioManagerPage({ token, onViewChart, onViewNews, pageParams }) {
+export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI, pageParams }) {
   /* -- State -------------------------------------------------------------- */
   const { formatValue } = useCurrency();
   const { t } = useI18n();
@@ -774,6 +776,9 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, pageParam
   const [showImport,    setShowImport]    = useState(false);
   const [modifyPos,     setModifyPos]     = useState(null);
   const [sellPos,       setSellPos]       = useState(null);
+  const [detailSymbol,  setDetailSymbol]  = useState(null);   // symbol for AssetDetailPanel modal
+  const [alertSymbol,   setAlertSymbol]   = useState(null);   // symbol for AlertModal
+  const [alertPrice,    setAlertPrice]    = useState(null);   // current price for AlertModal
 
   /* -- Data loading ------------------------------------------------------- */
   const loadPortfolios = useCallback(async () => {
@@ -800,14 +805,20 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, pageParam
   const loadQuotes = useCallback(async (positionList, { replace = false } = {}) => {
     if (!token || !positionList.length) { setQuotes({}); return; }
     const tickers = [...new Set(positionList.map(p => p.ticker))];
+    // Batch into groups of 50 to stay within the server's per-request symbol cap.
+    const BATCH = 50;
+    const batches = [];
+    for (let i = 0; i < tickers.length; i += BATCH) batches.push(tickers.slice(i, i + BATCH));
     try {
-      const quoteList = await api.bulkQuotes(tickers, token);
+      const batchResults = await Promise.all(batches.map(b => api.bulkQuotes(b, token)));
       const incoming = {};
-      quoteList.forEach(q => { incoming[q.symbol] = q; });
+      batchResults.flat().forEach(q => { incoming[q.symbol] = q; });
       // Merge into existing state so intermittent per-symbol failures
       // during polling don't wipe previously-loaded data.
       setQuotes(prev => replace ? incoming : { ...prev, ...incoming });
-    } catch { /* non-fatal */ }
+    } catch (e) {
+      console.error("[PortfolioManager] bulkQuotes failed:", e?.message ?? e);
+    }
   }, [token]);
 
   const loadPriceChanges = useCallback(async (positionList, period, { replace = false } = {}) => {
@@ -948,9 +959,11 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, pageParam
         totalValue += price * qty;
         totalCost  += bep * qty;
       }
-      // Aggregate period gain/loss using per-ticker change percentages
+      // Aggregate period gain/loss using per-ticker change percentages.
+      // ref_price = price / (1 + chgPct/100) is the previous reference price;
+      // dollar G/L = (price - ref_price) * qty = qty * price * chgPct / (100 + chgPct).
       const chgPct = priceChanges[p.ticker];
-      if (chgPct != null && price != null) periodGL += price * qty * (chgPct / 100);
+      if (chgPct != null && price != null) periodGL += qty * price * chgPct / (100 + chgPct);
     });
     const gainLoss = totalValue - totalCost;
     const gainPct  = totalCost > 0 ? (gainLoss / totalCost) * 100 : 0;
@@ -1430,7 +1443,7 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, pageParam
                         <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
                           {changePct != null
                             ? <span className={changePct >= 0 ? "green" : "red"}>
-                                {formatValue(price * qty * (changePct / 100), { showSign: true })}
+                                {formatValue(qty * price * changePct / (100 + changePct), { showSign: true })}
                                 <span style={{ marginLeft: 4, fontSize: 10, opacity: .75 }}>({fmtPct(changePct)})</span>
                               </span>
                             : <span style={{ color: "var(--c-muted)", fontSize: 11 }}>...</span>}
@@ -1457,6 +1470,20 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, pageParam
 
                         <td>
                           <div style={{ display: "flex", gap: 6 }}>
+                            {/* Asset detail info button */}
+                            <button
+                              className="btn btn-ghost"
+                              title="Asset details"
+                              onClick={() => setDetailSymbol(pos.ticker)}
+                              style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer", fontSize: 15, padding: "3px 7px" }}
+                            >{"\u24D8"}</button>
+                            {/* Price alert button */}
+                            <button
+                              className="btn btn-ghost"
+                              title="Set price alert"
+                              onClick={() => { setAlertSymbol(pos.ticker); setAlertPrice(quotes[pos.ticker]?.price ?? null); }}
+                              style={{ padding: "3px 7px", color: "#f59e0b" }}
+                            ><Ic.bell /></button>
                             {onViewChart && (
                               <button
                                 className="btn btn-ghost"
@@ -1472,6 +1499,14 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, pageParam
                                 onClick={() => onViewNews(pos.ticker)}
                                 style={{ padding: "3px 7px" }}
                               ><Ic.newsSmall /></button>
+                            )}
+                            {onTradeAI && (
+                              <button
+                                className="btn btn-ghost"
+                                title="Trade AI"
+                                onClick={() => onTradeAI(pos.ticker)}
+                                style={{ padding: "3px 7px", color: "var(--amber)" }}
+                              ><Ic.trading /></button>
                             )}
                             <button
                               className="btn btn-ghost"
@@ -1550,6 +1585,7 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, pageParam
           onImported={handleImported}
           token={token}
           assetType={activeSection}
+          formatValue={formatValue}
         />
       )}
       {modifyPos && (
@@ -1566,6 +1602,18 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, pageParam
           onClose={() => setSellPos(null)}
           onSold={handleSold}
           token={token}
+        />
+      )}
+      {detailSymbol && (
+        <AssetDetailPanel symbol={detailSymbol} token={token} onClose={() => setDetailSymbol(null)} />
+      )}
+      {alertSymbol && (
+        <AlertModal
+          symbol={alertSymbol}
+          currentPrice={alertPrice}
+          token={token}
+          onClose={() => { setAlertSymbol(null); setAlertPrice(null); }}
+          onCreated={() => {}}
         />
       )}
     </div>

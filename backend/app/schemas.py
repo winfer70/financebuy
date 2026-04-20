@@ -452,6 +452,58 @@ class UserReportAdminUpdate(BaseModel):
     admin_notes: Optional[str] = Field(None, max_length=5000)
 
 
+# ── Admin dashboard schemas ───────────────────────────────────────────────────
+
+class UserAdminOut(BaseModel):
+    """Extended user info for admin dashboard.
+
+    Includes fields not exposed in the standard UserOut — security-relevant
+    metadata (failed logins, lock status, deactivation timestamp) needed by
+    administrators to triage account issues.
+    """
+
+    user_id: UUID
+    email: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    phone: Optional[str] = None
+    kyc_status: str
+    is_active: bool
+    email_verified: bool
+    failed_login_attempts: int = 0
+    locked_until: Optional[datetime] = None
+    deactivated_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        orm_mode = True
+
+
+class ReportAdminOut(BaseModel):
+    """Full report info for admin dashboard.
+
+    Unlike UserReportOut (end-user facing), this schema exposes admin_notes,
+    reporter identity, and resolved_at so administrators can manage the
+    full lifecycle of user-submitted reports.
+    """
+
+    report_id: UUID
+    user_id: Optional[UUID] = None
+    reporter_email: str
+    report_type: str
+    category: Optional[str] = None
+    subject: str
+    body: str
+    status: str
+    admin_notes: Optional[str] = None
+    created_at: datetime
+    resolved_at: Optional[datetime] = None
+
+    class Config:
+        orm_mode = True
+
+
 # ── Audit log schema ──────────────────────────────────────────────────────────
 
 class AuditLogOut(BaseModel):
@@ -467,6 +519,11 @@ class AuditLogOut(BaseModel):
     ip_address: Optional[str] = Field(None, description="Requester IP address.")
     user_agent: Optional[str] = Field(None, description="Requester User-Agent header.")
     created_at: datetime = Field(..., description="ISO-8601 timestamp of the action.")
+
+    # PostgreSQL INET type returns a non-str object; coerce to plain string.
+    @validator("ip_address", pre=True)
+    def _coerce_ip(cls, v):
+        return str(v) if v is not None else None
 
     class Config:
         orm_mode = True
@@ -1210,6 +1267,59 @@ class WebhookUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
+# ── Price Alerts ─────────────────────────────────────────────────────
+
+
+class PriceAlertCreate(BaseModel):
+    """Payload to create a new price alert."""
+
+    symbol: str = Field(..., min_length=1, max_length=20, description="Ticker symbol")
+    condition: str = Field(..., description="Trigger condition: above, below, or crosses")
+    target_price: float = Field(..., gt=0, description="Target price to trigger the alert")
+    note: Optional[str] = Field(None, max_length=500, description="Optional user note")
+
+    @validator("condition")
+    def validate_condition(cls, v):
+        allowed = {"above", "below", "crosses"}
+        if v not in allowed:
+            raise ValueError(f"condition must be one of {allowed}")
+        return v
+
+
+class PriceAlertOut(BaseModel):
+    """Serialised price alert."""
+
+    alert_id: UUID
+    symbol: str
+    condition: str
+    target_price: float
+    note: Optional[str] = None
+    is_active: bool
+    triggered_at: Optional[datetime] = None
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+
+class PriceAlertUpdate(BaseModel):
+    """Payload to update an existing price alert."""
+
+    target_price: Optional[float] = Field(None, gt=0)
+    condition: Optional[str] = None
+    note: Optional[str] = Field(None, max_length=500)
+    is_active: Optional[bool] = None
+    triggered_at: Optional[datetime] = None
+
+    @validator("condition")
+    def validate_condition(cls, v):
+        if v is not None:
+            allowed = {"above", "below", "crosses"}
+            if v not in allowed:
+                raise ValueError(f"condition must be one of {allowed}")
+        return v
+
+
 # ── Market Regime schemas ─────────────────────────────────────────────────
 
 class RegimeRequest(BaseModel):
@@ -1309,6 +1419,12 @@ class PaperTradeCreate(BaseModel):
     parameters: Optional[Dict] = Field(None, description="Strategy parameter overrides.")
 
 
+class PaperTradeUpdate(BaseModel):
+    """Fields allowed for paper trade edits (capital and strategy parameters)."""
+    initial_capital: Optional[Decimal] = Field(None, gt=0, le=1000000, description="New initial capital (resets current_equity when changed).")
+    parameters: Optional[Dict[str, Any]] = None
+
+
 class PaperTradeOut(BaseModel):
     """Serialised paper trade."""
     paper_trade_id: UUID
@@ -1354,3 +1470,272 @@ class PaperTradeEquitySnapshotOut(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+# ── Portfolio scoring schemas ────────────────────────────────────────────
+
+
+class PortfolioScoreRequest(BaseModel):
+    """Request to score a set of positions.
+
+    The caller supplies up to 30 ticker symbols and receives per-position
+    analysis (trend, RSI, volatility, signal) plus an overall portfolio score.
+    """
+
+    symbols: List[str] = Field(
+        ...,
+        min_items=1,
+        max_items=30,
+        description="Ticker symbols to analyze (max 30).",
+    )
+
+
+class PositionScore(BaseModel):
+    """Analysis result for a single position.
+
+    Combines technical indicators (trend, RSI, volatility) with the best
+    signal from the top three built-in strategies to produce a composite
+    1-100 score and a human-readable suggestion.
+    """
+
+    symbol: str = Field(..., description="Ticker symbol.")
+    current_price: float = Field(..., description="Latest closing price.")
+    trend: str = Field(
+        ..., description='Trend classification: "bullish", "bearish", or "neutral".'
+    )
+    rsi: float = Field(..., description="Latest 14-period RSI value (0-100).")
+    volatility: float = Field(
+        ..., description="ATR(14) expressed as a percentage of the current price."
+    )
+    signal: str = Field(
+        ..., description='Best strategy signal: "BUY", "SELL", or "HOLD".'
+    )
+    signal_strategy: str = Field(
+        ..., description="Slug of the strategy that generated the signal."
+    )
+    suggestion: str = Field(
+        ..., description="Human-readable actionable suggestion."
+    )
+    score: int = Field(..., ge=0, le=100, description="Composite score 1-100.")
+
+
+class PortfolioScoreResponse(BaseModel):
+    """Aggregated portfolio scoring response.
+
+    Contains per-position analysis and an overall portfolio-level score
+    derived from the average of individual position scores.
+    """
+
+    positions: List[PositionScore] = Field(
+        default_factory=list, description="Per-symbol analysis results."
+    )
+    overall_score: int = Field(
+        ..., ge=0, le=100, description="Average score across all positions."
+    )
+    top_suggestion: str = Field(
+        ..., description="Most important recommendation (from the lowest-scored position)."
+    )
+
+
+# ── Market fundamentals schema ─────────────────────────────────────────────
+
+
+class FundamentalsResponse(BaseModel):
+    """Fundamental data for a single security.
+
+    Aggregates company info, valuation multiples, financial health metrics,
+    dividend data, analyst targets, earnings, and trading statistics sourced
+    from the yfinance ``Ticker.info`` dict.  All numeric fields are Optional
+    because coverage varies by security type and exchange.
+    """
+
+    # Company info
+    symbol: str
+    name: Optional[str] = None
+    sector: Optional[str] = None
+    industry: Optional[str] = None
+    description: Optional[str] = None
+    website: Optional[str] = None
+    country: Optional[str] = None
+    employees: Optional[int] = None
+    exchange: Optional[str] = None
+    currency: Optional[str] = None
+
+    # Current price (for analyst target range visualisation)
+    current_price: Optional[float] = None
+
+    # Valuation
+    market_cap: Optional[float] = None
+    pe_ratio: Optional[float] = None
+    forward_pe: Optional[float] = None
+    peg_ratio: Optional[float] = None
+    pb_ratio: Optional[float] = None
+    ps_ratio: Optional[float] = None
+    ev_to_ebitda: Optional[float] = None
+
+    # Financial health
+    revenue: Optional[float] = None
+    net_income: Optional[float] = None
+    profit_margin: Optional[float] = None
+    operating_margin: Optional[float] = None
+    roe: Optional[float] = None
+    roa: Optional[float] = None
+    debt_to_equity: Optional[float] = None
+    current_ratio: Optional[float] = None
+    free_cash_flow: Optional[float] = None
+
+    # Dividends
+    dividend_yield: Optional[float] = None
+    dividend_rate: Optional[float] = None
+    payout_ratio: Optional[float] = None
+    ex_dividend_date: Optional[str] = None
+
+    # Analyst targets
+    target_low: Optional[float] = None
+    target_mean: Optional[float] = None
+    target_high: Optional[float] = None
+    target_median: Optional[float] = None
+    recommendation: Optional[str] = None
+    num_analysts: Optional[int] = None
+
+    # Earnings
+    eps_trailing: Optional[float] = None
+    eps_forward: Optional[float] = None
+    earnings_date: Optional[str] = None
+
+    # Trading info
+    beta: Optional[float] = None
+    fifty_two_week_high: Optional[float] = None
+    fifty_two_week_low: Optional[float] = None
+    fifty_day_avg: Optional[float] = None
+    two_hundred_day_avg: Optional[float] = None
+    avg_volume: Optional[float] = None
+    shares_outstanding: Optional[float] = None
+    float_shares: Optional[float] = None
+    short_ratio: Optional[float] = None
+    short_pct: Optional[float] = None
+
+
+# ── Exit Analysis schemas ────────────────────────────────────────────────────
+
+class ExitAnalysisRequest(BaseModel):
+    """Request for exit point analysis on a single symbol."""
+
+    symbol: str = Field(
+        ...,
+        min_length=1,
+        max_length=20,
+        description="Ticker symbol to analyse (e.g. 'AAPL').",
+        example="AAPL",
+    )
+    period_days: int = Field(
+        365,
+        ge=30,
+        le=730,
+        description="Historical data window in calendar days (30–730).",
+        example=365,
+    )
+
+
+class ExitLevel(BaseModel):
+    """Single price level with type and rationale."""
+
+    level_type: str = Field(
+        ...,
+        description='Category: "stop_loss", "take_profit", "support", "resistance", or "fibonacci".',
+        example="stop_loss",
+    )
+    price: float = Field(..., description="Price value of this level.", example=168.50)
+    label: str = Field(
+        ...,
+        description='Human-readable label, e.g. "ATR Stop (-2x ATR)".',
+        example="ATR Stop (-2x ATR)",
+    )
+    rationale: str = Field(
+        ...,
+        description="Short explanation of why this level matters.",
+        example="2x ATR below current price — standard volatility-based stop.",
+    )
+
+
+class ExitAnalysisResponse(BaseModel):
+    """Comprehensive exit analysis for a symbol."""
+
+    symbol: str = Field(..., description="Ticker symbol.", example="AAPL")
+    current_price: float = Field(..., description="Most recent close price.", example=175.50)
+    levels: List[ExitLevel] = Field(default_factory=list, description="All computed exit levels.")
+    atr_value: float = Field(..., description="Current ATR(14) value.", example=3.42)
+    atr_pct: float = Field(..., description="ATR as a percentage of the current price.", example=1.95)
+    trend: str = Field(
+        ...,
+        description='Market trend: "bullish", "bearish", or "neutral".',
+        example="bullish",
+    )
+    rsi: float = Field(..., description="Current RSI(14) reading (0–100).", example=58.2)
+    support_zone: Optional[float] = Field(
+        None,
+        description="Highest support level below the current price.",
+        example=168.00,
+    )
+    resistance_zone: Optional[float] = Field(
+        None,
+        description="Lowest resistance level above the current price.",
+        example=182.00,
+    )
+
+
+# ── Sector & Screener ────────────────────────────────────────────────────
+
+class SectorItem(BaseModel):
+    """Single sector ETF performance snapshot.
+
+    Attributes:
+        symbol:     ETF ticker symbol (e.g. "XLK").
+        name:       Human-readable sector name (e.g. "Technology").
+        price:      Current ETF price.
+        change_pct: Daily price change as a percentage.
+        ytd_pct:    Year-to-date performance percentage.
+        month_pct:  One-month performance percentage.
+    """
+    symbol: str
+    name: str
+    price: float
+    change_pct: float
+    ytd_pct: Optional[float] = None
+    month_pct: Optional[float] = None
+
+
+class SectorResponse(BaseModel):
+    """Sector performance overview — list of sector ETF snapshots."""
+    sectors: List[SectorItem] = Field(default_factory=list)
+
+
+class ScreenerItem(BaseModel):
+    """Single stock in screener results.
+
+    Attributes:
+        symbol:     Ticker symbol (e.g. "NVDA").
+        name:       Company display name.
+        price:      Current price.
+        change:     Absolute daily price change.
+        change_pct: Daily change as a percentage.
+        volume:     Trading volume.
+        market_cap: Market capitalisation (may be None for some tickers).
+        sector:     GICS sector name (may be None).
+    """
+    symbol: str
+    name: str
+    price: float
+    change: float
+    change_pct: float
+    volume: int
+    market_cap: Optional[float] = None
+    sector: Optional[str] = None
+    sma50: Optional[float] = Field(None, description="50-day simple moving average.")
+
+
+class ScreenerResponse(BaseModel):
+    """Stock screener results with filter metadata."""
+    results: List[ScreenerItem] = Field(default_factory=list)
+    total_matched: int = 0
+    filters_applied: Dict[str, Any] = Field(default_factory=dict)

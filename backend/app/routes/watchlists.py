@@ -9,6 +9,8 @@ verifying watchlist.user_id == current_user.user_id on every operation.
 Route prefix: /api/v1/watchlists  (registered in main.py)
 """
 
+import asyncio
+import logging
 from typing import List
 from uuid import UUID
 
@@ -28,12 +30,36 @@ from ..schemas import (
     WatchlistOut,
     WatchlistUpdate,
 )
+
+logger = logging.getLogger("tickerTap")
 from .auth_routes import get_current_user
 
 router = APIRouter(prefix="/watchlists", tags=["watchlists"])
 
 
 # -- Helpers ------------------------------------------------------------------
+
+
+async def _fetch_current_price(symbol: str) -> float | None:
+    """Fetch the current market price for *symbol* using yfinance.
+
+    Runs the synchronous yfinance call in a thread to avoid blocking
+    the async event loop.  Returns None on any failure so that adding
+    a watchlist item never fails due to a quote lookup issue.
+    """
+    try:
+        import yfinance as yf
+
+        def _get():
+            t = yf.Ticker(symbol)
+            info = t.info or {}
+            return info.get("currentPrice") or info.get("regularMarketPrice")
+
+        price = await asyncio.to_thread(_get)
+        return float(price) if price is not None else None
+    except Exception:
+        logger.warning("Could not fetch price for %s on watchlist add", symbol)
+        return None
 
 
 async def _get_watchlist_or_404(
@@ -346,12 +372,18 @@ async def add_item(
             detail=f"Symbol '{upper_symbol}' is already in this watchlist.",
         )
 
+    # Auto-capture current market price if the client didn't provide one.
+    # This powers the "Since Added" % column on the frontend.
+    add_price = payload.price_when_added
+    if add_price is None:
+        add_price = await _fetch_current_price(upper_symbol)
+
     item = WatchlistItem(
         watchlist_id=watchlist_id,
         symbol=upper_symbol,
         asset_type=payload.asset_type,
         notes=payload.notes,
-        price_when_added=payload.price_when_added,
+        price_when_added=add_price,
     )
     db.add(item)
     await db.commit()
