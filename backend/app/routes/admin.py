@@ -18,11 +18,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..models import Account, AuditLog, User
-from ..schemas import AccountOut, AuditLogOut, UserOut
+from ..schemas import AccountOut, AuditLogOut, UserAdminOut, UserOut
 from .auth_routes import get_current_admin
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+# ── Admin check endpoint ─────────────────────────────────────────────────────
+
+@router.get("/check")
+async def admin_check(current_user=Depends(get_current_admin)):
+    """Return 200 if the caller is an admin, else 403 from the dependency.
+
+    The frontend calls this on AdminPage mount to decide whether to render
+    the admin dashboard or an "Access Denied" message.
+
+    Args:
+        current_user: Authenticated admin user (injected via get_current_admin).
+
+    Returns:
+        dict with is_admin=True.
+    """
+    return {"is_admin": True}
 
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
@@ -139,7 +157,7 @@ async def _toggle_account_status(
 
 # ── User management endpoints ─────────────────────────────────────────────────
 
-@router.get("/users", response_model=list[UserOut])
+@router.get("/users", response_model=list[UserAdminOut])
 async def list_users(
     db: AsyncSession = Depends(get_db),
     admin=Depends(get_current_admin),

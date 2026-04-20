@@ -18,6 +18,7 @@ Route prefix: /api/v1/feedback  (registered in main.py)
 """
 
 import asyncio
+import hmac
 import logging
 import os
 from datetime import datetime, timedelta, timezone
@@ -66,8 +67,13 @@ def _verify_internal_auth(request: Request) -> None:
     Raises:
         HTTPException: 403 if the key is missing/wrong or IP is not allowed.
     """
+    # Guard: reject immediately if no key is configured to avoid comparing
+    # an empty string, which would allow any request through.
+    if not _INTERNAL_NEWS_KEY:
+        raise HTTPException(status_code=403, detail="Forbidden")
     provided_key = request.headers.get("X-Internal-Key", "")
-    if not _INTERNAL_NEWS_KEY or provided_key != _INTERNAL_NEWS_KEY:
+    # Use constant-time comparison to prevent timing-based key enumeration.
+    if not hmac.compare_digest(provided_key, _INTERNAL_NEWS_KEY):
         logger.warning(
             "Feedback endpoint: invalid key from %s", request.client.host
         )

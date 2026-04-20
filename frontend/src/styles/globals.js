@@ -674,6 +674,87 @@ select.form-control option { background: var(--bg3); }
   text-decoration: none;
 }
 .auth-legal-links a:hover { color: var(--amber); }
+
+/* ── Responsive ─────────────────────────────────────────────────────── */
+
+/* Hide mobile nav by default */
+.mobile-bottom-nav { display: none; }
+
+@media (max-width: 1024px) {
+  .sidebar { width: 52px; }
+  .sidebar .logo-name,
+  .sidebar .nav-label,
+  .sidebar .avatar-btn span:last-child { display: none; }
+  .sidebar .nav-btn { justify-content: center; padding: 0; }
+  .sidebar .sidebar-nav { padding: 10px 4px; }
+  .sidebar .sidebar-bottom { padding: 8px 4px 12px; }
+  .sidebar .sidebar-logo { padding: 0 10px; justify-content: center; gap: 0; }
+  .sidebar .avatar-btn { justify-content: center; }
+  .sidebar .sidebar-toggle { margin-left: 0 !important; }
+  .grid-stats { grid-template-columns: repeat(3, 1fr); }
+  .grid-main { grid-template-columns: 1fr; }
+  .grid-3col { grid-template-columns: 1fr 1fr; }
+  .page-inner { padding: 12px 16px; gap: 12px; }
+  .page-header { padding: 10px 16px; }
+  .topbar { padding: 0 12px; }
+  .ticker-strip { display: none; }
+  .login-wrap { flex-direction: column; }
+  .login-left { padding: 24px 32px; min-height: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  .login-right { flex: 1; min-height: auto; }
+}
+
+@media (max-width: 640px) {
+  .sidebar { display: none; }
+  .mobile-bottom-nav {
+    display: flex !important;
+    position: fixed; bottom: 0; left: 0; right: 0;
+    height: 56px; background: var(--bg2);
+    border-top: 1px solid var(--border);
+    z-index: 100; align-items: center;
+    justify-content: space-around; padding: 0 4px;
+  }
+  .mobile-bottom-nav .mob-nav-btn {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    background: none; border: none; cursor: pointer;
+    color: var(--muted); font-family: var(--font-mono); font-size: 8px;
+    letter-spacing: 0.3px; text-transform: uppercase;
+    padding: 4px 6px; min-width: 44px; transition: color 0.12s;
+  }
+  .mobile-bottom-nav .mob-nav-btn.active { color: var(--amber); }
+  .mobile-bottom-nav .mob-nav-btn svg { width: 20px; height: 20px; }
+  .main-area { padding-bottom: 56px; }
+  .grid-stats { grid-template-columns: repeat(2, 1fr); }
+  .grid-2col, .grid-3col, .grid-main { grid-template-columns: 1fr; }
+  .stat-block { padding: 10px 12px 8px; }
+  .stat-val { font-size: 18px; }
+  .stat-lbl { font-size: 9px; }
+  .page-inner { padding: 10px 12px; gap: 10px; }
+  .page-header { padding: 10px 12px; flex-wrap: wrap; gap: 8px; }
+  .page-title { font-size: 22px; }
+  .page-actions { width: 100%; justify-content: flex-end; }
+  .topbar { padding: 0 10px; height: 42px; }
+  .topbar-breadcrumb { font-size: 10px; }
+  .ticker-strip, .clock { display: none; }
+  .form-row { grid-template-columns: 1fr; }
+  .search-input { width: 100%; }
+  .btn { padding: 6px 10px; font-size: 10px; }
+  .filter-bar { flex-wrap: wrap; }
+  .filter-btn { flex: 1; min-width: 60px; text-align: center; padding: 6px 8px; }
+  .data-table th { padding: 6px 8px; font-size: 9px; }
+  .data-table td { padding: 7px 8px; font-size: 11px; }
+  .modal-box { width: 100%; max-width: 100vw; border-radius: 0; }
+  .modal-overlay { align-items: flex-end; }
+  .login-left { display: none; }
+  .login-right { flex: 1; padding: 24px 20px; }
+  .login-head { font-size: 26px; }
+  .toast-stack { bottom: 64px; right: 10px; left: 10px; }
+  .toast { min-width: auto; width: 100%; }
+  .app-footer { display: none; }
+  .panel-header { padding: 8px 12px; }
+  .panel-body { padding: 12px; }
+  .legal-tabs { overflow-x: auto; padding: 0 12px; }
+  .legal-tab { padding: 10px 14px; font-size: 10px; white-space: nowrap; }
+}
 `;
 
 export const HOLDINGS = [

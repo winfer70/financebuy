@@ -87,8 +87,13 @@ services:
       REDIS_URL:       redis://redis:6379/0
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173,https://ticker-tap.com}
       SMTP_HOST:       ${SMTP_HOST:-smtp.example.com}
-      OLLAMA_URL:      ${OLLAMA_URL:-http://localhost:11434}
+      OLLAMA_URL:      ${OLLAMA_URL:-http://host.docker.internal:11434}
       TRADING_ML_URL:  http://trading-ml:8001
+      ADMIN_EMAILS:    ${ADMIN_EMAILS:-}
+    # Map host.docker.internal to the host machine IP (automatic on
+    # Mac/Windows but requires this explicit mapping on Linux).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # Bind to all interfaces so Server B workers can reach the API over LAN.
     ports:
       - "0.0.0.0:8000:8000"
@@ -174,6 +179,41 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - ./backend/app:/app/app:ro
+      - ./backend/alembic:/app/alembic:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+  alert-worker:
+    build:
+      context:    .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    command: ["arq", "app.trading.alert_worker.WorkerSettings"]
+    healthcheck:
+      test: ["CMD-SHELL", "test -d /proc/1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-tickerTap}
+      REDIS_URL:    redis://redis:6379/0
+    networks:
+      - tickertap_net
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
     volumes:
       - ./backend/app:/app/app:ro
       - ./backend/alembic:/app/alembic:ro

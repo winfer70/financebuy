@@ -24,6 +24,8 @@ import { useI18n } from "../context/I18nContext";
 import { useMarketStatus } from "../components/common";
 import { fmtPct } from "../utils/formatters";
 import { MODAL_BACKDROP as BDK } from "../styles/shared";
+import AssetDetailPanel from "../components/common/AssetDetailPanel";
+import AlertModal from "../components/common/AlertModal";
 
 /* ── Asset section IDs (labels resolved via t() inside each component) ── */
 
@@ -108,30 +110,44 @@ function CreateWatchlistModal({ onClose, onCreated, token }) {
 /**
  * AddItemModal — renders a modal for adding a symbol to the watchlist.
  *
- * @param {object}   props
- * @param {string}   props.watchlistId  - ID of the active watchlist
- * @param {string}   props.assetType    - asset type from the active section ("stock", "crypto", etc.)
- * @param {Function} props.onClose      - callback to close the modal
- * @param {Function} props.onAdded      - callback with the created item object
- * @param {string}   props.token        - JWT access token
+ * When `assetType` is null (user is on the ALL tab), the modal shows a
+ * dropdown at the top so the user can select an asset type before entering
+ * a symbol. When `assetType` is provided (a specific section tab), the
+ * dropdown is hidden and the provided type is used directly.
+ *
+ * @param {object}      props
+ * @param {string}      props.watchlistId  - ID of the active watchlist
+ * @param {string|null} props.assetType    - asset type from the active section
+ *                                           ("stock", "crypto", "etf", "physical"),
+ *                                           or null when opened from the ALL tab
+ * @param {Function}    props.onClose      - callback to close the modal
+ * @param {Function}    props.onAdded      - callback with the created item object
+ * @param {string}      props.token        - JWT access token
  */
 function AddItemModal({ watchlistId, assetType, onClose, onAdded, token }) {
   const { t } = useI18n();
-  const [symbol,  setSymbol]  = useState("");
-  const [notes,   setNotes]   = useState("");
-  const [loading, setLoading] = useState(false);
-  const [err,     setErr]     = useState("");
+  const [symbol,            setSymbol]            = useState("");
+  /* selectedAssetType is only used when assetType prop is null (ALL tab) */
+  const [selectedAssetType, setSelectedAssetType] = useState("");
+  const [notes,             setNotes]             = useState("");
+  const [loading,           setLoading]           = useState(false);
+  const [err,               setErr]               = useState("");
+
+  /* Effective asset type: use the prop if provided, otherwise use local selection */
+  const effectiveType = assetType || selectedAssetType;
 
   /**
-   * submit — validates symbol and calls the addWatchlistItem API.
+   * submit — validates symbol (and asset type when on ALL tab) and calls
+   * the addWatchlistItem API.
    */
   const submit = async () => {
+    if (!assetType && !selectedAssetType) { setErr(t("watchlist.assetTypeRequired") || "Select an asset type."); return; }
     if (!symbol.trim()) { setErr(t("watchlist.symbolRequired")); return; }
     setLoading(true); setErr("");
     try {
       const payload = {
         symbol: symbol.trim().toUpperCase(),
-        asset_type: assetType,
+        asset_type: effectiveType,
         notes: notes.trim() || null,
       };
       // api.addWatchlistItem — POST /watchlists/:id/items, returns the new item
@@ -141,7 +157,7 @@ function AddItemModal({ watchlistId, assetType, onClose, onAdded, token }) {
     finally { setLoading(false); }
   };
 
-  // Derive placeholder based on asset type for better UX
+  // Derive placeholder based on effective asset type for better UX
   const placeholders = {
     stock:    "e.g. AAPL",
     crypto:   "e.g. BTC-USD",
@@ -157,11 +173,29 @@ function AddItemModal({ watchlistId, assetType, onClose, onAdded, token }) {
           <button className="modal-close" onClick={onClose}><Ic.close /></button>
         </div>
         <div className="modal-body">
+          {/* Asset type selector — only shown when opened from the ALL tab (assetType is null) */}
+          {!assetType && (
+            <div className="form-field">
+              <label className="form-label">{t("watchlist.assetType") || "Asset Type"} *</label>
+              <select
+                className="form-control"
+                value={selectedAssetType}
+                onChange={e => setSelectedAssetType(e.target.value)}
+                style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
+              >
+                <option value="">{t("watchlist.selectAssetType") || "Select asset type..."}</option>
+                <option value="stock">{t("watchlist.stocks") || "Stocks"}</option>
+                <option value="crypto">{t("watchlist.crypto") || "Crypto"}</option>
+                <option value="etf">{t("watchlist.etfs") || "ETFs"}</option>
+                <option value="physical">{t("watchlist.physical") || "Physical"}</option>
+              </select>
+            </div>
+          )}
           <div className="form-field">
             <label className="form-label">{t("watchlist.symbol")} *</label>
             <input
               className="form-control"
-              placeholder={placeholders[assetType] || "e.g. AAPL"}
+              placeholder={placeholders[effectiveType] || "e.g. AAPL"}
               value={symbol}
               onChange={e => setSymbol(e.target.value.toUpperCase())}
               maxLength={20}
@@ -536,8 +570,9 @@ function SortTh({ label, col, sortCol, sortDir, onSort, right }) {
  * @param {string}   props.token       - JWT access token
  * @param {Function} props.onViewChart - callback to navigate to chart view
  * @param {Function} props.onViewNews  - callback to navigate to news view
+ * @param {Function} props.onTradeAI   - callback to navigate to Trading AI with symbol pre-filled
  */
-export function WatchlistPage({ token, onViewChart, onViewNews }) {
+export function WatchlistPage({ token, onViewChart, onViewNews, onTradeAI }) {
   /* ── State ─────────────────────────────────────────────────────────────── */
   const { formatValue } = useCurrency();
   const { t } = useI18n();
@@ -569,6 +604,9 @@ export function WatchlistPage({ token, onViewChart, onViewNews }) {
   const [editItem,     setEditItem]     = useState(null);   // item for EditNotesModal
   const [buyItem,      setBuyItem]      = useState(null);   // item for BuyFromWatchlistModal
   const [renameWl,     setRenameWl]     = useState(null);   // watchlist for RenameWatchlistModal
+  const [detailSymbol, setDetailSymbol] = useState(null);   // symbol for AssetDetailPanel modal
+  const [alertSymbol,  setAlertSymbol]  = useState(null);   // symbol for AlertModal
+  const [alertPrice,   setAlertPrice]   = useState(null);   // current price for AlertModal
 
   /* ── Data loading ──────────────────────────────────────────────────────── */
 
@@ -937,14 +975,12 @@ export function WatchlistPage({ token, onViewChart, onViewNews }) {
             ))}
           </div>
 
-          {/* Section action bar — add item button (only on specific sections) */}
-          {activeSection !== "all" && (
-            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
-              <button className="btn btn-amber" onClick={() => setShowAddItem(true)}>
-                <Ic.plus /> {t("watchlist.addItem")}
-              </button>
-            </div>
-          )}
+          {/* Section action bar — add item button (always visible) */}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+            <button className="btn btn-amber" onClick={() => setShowAddItem(true)}>
+              <Ic.plus /> {t("watchlist.addItem")}
+            </button>
+          </div>
 
           {/* Watchlist items table */}
           <div className="panel page-inner stagger">
@@ -1004,9 +1040,12 @@ export function WatchlistPage({ token, onViewChart, onViewNews }) {
                     const dayLow  = q?.low;
                     const dayHigh = q?.high;
 
-                    // Since added: % change from price_when_added
+                    // Since added: dollar change and % change from price_when_added
                     const sinceAdded = price != null && item.price_when_added
                       ? ((price - item.price_when_added) / item.price_when_added) * 100
+                      : null;
+                    const sinceAddedDollar = price != null && item.price_when_added
+                      ? price - item.price_when_added
                       : null;
 
                     return (
@@ -1049,10 +1088,12 @@ export function WatchlistPage({ token, onViewChart, onViewNews }) {
                             : <span style={{ color: "var(--c-muted)" }}>{"\u2014"}</span>}
                         </td>
 
-                        {/* SINCE ADDED — % change from price_when_added */}
+                        {/* SINCE ADDED — dollar change with % in brackets */}
                         <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
                           {sinceAdded != null
-                            ? <span className={sinceAdded >= 0 ? "green" : "red"}>{fmtPct(sinceAdded)}</span>
+                            ? <span className={sinceAdded >= 0 ? "green" : "red"}>
+                                {formatValue(sinceAddedDollar, { showSign: true })} ({fmtPct(sinceAdded)})
+                              </span>
                             : <span style={{ color: "var(--c-muted)" }}>{"\u2014"}</span>}
                         </td>
 
@@ -1065,9 +1106,27 @@ export function WatchlistPage({ token, onViewChart, onViewNews }) {
                           {item.notes || "\u2014"}
                         </td>
 
-                        {/* ACTIONS — buy, chart, edit, remove */}
+                        {/* ACTIONS — info, buy, chart, edit, remove */}
                         <td>
                           <div style={{ display: "flex", gap: 6 }}>
+                            {/* Asset detail info button */}
+                            <button
+                              className="btn btn-ghost"
+                              title="Asset details"
+                              onClick={() => setDetailSymbol(item.symbol)}
+                              style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer", fontSize: 15, padding: "3px 7px" }}
+                            >
+                              {"\u24D8"}
+                            </button>
+                            {/* Price alert button */}
+                            <button
+                              className="btn btn-ghost"
+                              title="Set price alert"
+                              onClick={() => { setAlertSymbol(item.symbol); setAlertPrice(quotes[item.symbol]?.price ?? null); }}
+                              style={{ padding: "3px 7px", color: "#f59e0b" }}
+                            >
+                              <Ic.bell />
+                            </button>
                             {/* Buy button */}
                             <button
                               className="btn btn-ghost"
@@ -1075,7 +1134,7 @@ export function WatchlistPage({ token, onViewChart, onViewNews }) {
                               onClick={() => setBuyItem(item)}
                               style={{ padding: "3px 7px", color: "var(--green)" }}
                             >
-                              <Ic.sell />
+                              <Ic.buy />
                             </button>
                             {/* Chart button */}
                             {onViewChart && (
@@ -1086,6 +1145,17 @@ export function WatchlistPage({ token, onViewChart, onViewNews }) {
                                 style={{ padding: "3px 7px" }}
                               >
                                 <Ic.charts />
+                              </button>
+                            )}
+                            {/* Trade AI button */}
+                            {onTradeAI && (
+                              <button
+                                className="btn btn-ghost"
+                                title="Trade AI"
+                                onClick={() => onTradeAI(item.symbol)}
+                                style={{ padding: "3px 7px", color: "var(--amber)" }}
+                              >
+                                <Ic.trading />
                               </button>
                             )}
                             {/* Edit notes button */}
@@ -1131,7 +1201,7 @@ export function WatchlistPage({ token, onViewChart, onViewNews }) {
       {showAddItem && activeWatchlistId && (
         <AddItemModal
           watchlistId={activeWatchlistId}
-          assetType={activeSection === "all" ? "stock" : activeSection}
+          assetType={activeSection === "all" ? null : activeSection}
           onClose={() => setShowAddItem(false)}
           onAdded={handleItemAdded}
           token={token}
@@ -1165,6 +1235,18 @@ export function WatchlistPage({ token, onViewChart, onViewNews }) {
           onClose={() => setRenameWl(null)}
           onRenamed={handleWatchlistRenamed}
           token={token}
+        />
+      )}
+      {detailSymbol && (
+        <AssetDetailPanel symbol={detailSymbol} token={token} onClose={() => setDetailSymbol(null)} />
+      )}
+      {alertSymbol && (
+        <AlertModal
+          symbol={alertSymbol}
+          currentPrice={alertPrice}
+          token={token}
+          onClose={() => { setAlertSymbol(null); setAlertPrice(null); }}
+          onCreated={() => {}}
         />
       )}
     </div>

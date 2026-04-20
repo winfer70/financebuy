@@ -1,19 +1,49 @@
 /**
  * DrawingTools.js — Drawing tools configuration, coordinate helpers,
- * hit-testing, and SVG renderers for the OHLCVChart component.
+ * hit-testing, and SVG renderers shared across all chart components.
  *
- * Extracted from ChartsPage.jsx StockChart to enable drawing tools on any
- * chart that uses OHLCVChart. All functions are pure (no React hooks) except
- * renderDrawing and renderPreview which return JSX.
+ * 14 drawing tools: trendLine, horizontalLine, ray, rectangle, fibonacci,
+ * pitchfork, text, arrow, ruler, parallelChannel, extHorizontalLine,
+ * priceRange, callout, verticalLine.
  *
- * Used by: OHLCVChart.jsx (when enableDrawingTools=true)
+ * All functions are pure (no React hooks) except renderDrawing and
+ * renderPreview which return JSX.
+ *
+ * Used by:
+ *   - OHLCVChart.jsx  (TradingPage, via enableDrawingTools prop)
+ *   - ChartsPage.jsx  (StockChart, via direct imports)
  */
 
 import React from "react";
 
 /* ── Tool Configuration ──────────────────────────────────────────────────── */
 
-/** 9 drawing tool types with anchor count, icon key, and UI label. */
+/**
+ * Base tool config with i18n-ready labelKey.  Use with a translation
+ * function `t(labelKey)` to produce localised DRAWING_TOOLS at runtime.
+ */
+export const DRAWING_TOOLS_BASE = {
+  trendLine:      { anchors: 2, icon: "trendLine",      labelKey: "charts.trendLine" },
+  horizontalLine: { anchors: 1, icon: "hLine",          labelKey: "charts.horizontalLine" },
+  ray:            { anchors: 2, icon: "ray",             labelKey: "charts.ray" },
+  rectangle:      { anchors: 2, icon: "rectangle",       labelKey: "charts.rectangle" },
+  fibonacci:      { anchors: 2, icon: "fibonacci",       labelKey: "charts.fibonacci" },
+  pitchfork:      { anchors: 3, icon: "pitchfork",       labelKey: "charts.pitchfork" },
+  text:           { anchors: 1, icon: "textTool",        labelKey: "charts.text" },
+  arrow:          { anchors: 2, icon: "arrowTool",       labelKey: "charts.arrow" },
+  ruler:          { anchors: 2, icon: "ruler",            labelKey: "charts.ruler" },
+  parallelChannel:    { anchors: 2, icon: "parallelCh",  labelKey: "charts.parallelChannel" },
+  extHorizontalLine:  { anchors: 1, icon: "extHLine",    labelKey: "charts.extHorizontalLine" },
+  priceRange:         { anchors: 2, icon: "priceRange",  labelKey: "charts.priceRange" },
+  callout:            { anchors: 1, icon: "callout",     labelKey: "charts.callout" },
+  verticalLine:       { anchors: 1, icon: "vLine",       labelKey: "charts.verticalLine" },
+};
+
+/**
+ * 14 drawing tool types with anchor count, icon key, and UI label.
+ * Uses hardcoded English labels — for i18n use DRAWING_TOOLS_BASE with a
+ * translation function instead.
+ */
 export const DRAWING_TOOLS = {
   trendLine:      { anchors: 2, icon: "trendLine",   label: "TREND LINE" },
   horizontalLine: { anchors: 1, icon: "hLine",       label: "H-LINE" },
@@ -24,6 +54,11 @@ export const DRAWING_TOOLS = {
   text:           { anchors: 1, icon: "textTool",     label: "TEXT" },
   arrow:          { anchors: 2, icon: "arrowTool",    label: "ARROW" },
   ruler:          { anchors: 2, icon: "ruler",         label: "RULER" },
+  parallelChannel:    { anchors: 2, icon: "parallelCh",  label: "CHANNEL" },
+  extHorizontalLine:  { anchors: 1, icon: "extHLine",    label: "EXT H-LINE" },
+  priceRange:         { anchors: 2, icon: "priceRange",  label: "PRICE RANGE" },
+  callout:            { anchors: 1, icon: "callout",     label: "CALLOUT" },
+  verticalLine:       { anchors: 1, icon: "vLine",       label: "V-LINE" },
 };
 
 /** Default style for new drawing objects. */
@@ -217,10 +252,292 @@ export function hitTestDrawing(drawings, mx, my, visibleData, visibleStart, allD
           }
         }
         break;
+
+      /* ── Parallel Channel — hit if near either parallel line or inside fill ── */
+      case "parallelChannel":
+        if (anchors.length >= 2) {
+          const x1 = ax(anchors[0]), y1 = ay(anchors[0]);
+          const x2 = ax(anchors[1]), y2 = ay(anchors[1]);
+          const offset = Math.abs(y2 - y1);              // vertical offset for the parallel line
+          const sign = y2 > y1 ? -1 : 1;                 // opposite direction to the slope endpoint
+          /* Main line hit */
+          const distMain = pointToSegmentDist(mx, my, x1, y1, x2, y2);
+          if (distMain < threshold) return dr.id;
+          /* Parallel line hit (offset perpendicular) */
+          const dx = x2 - x1, dy = y2 - y1;
+          const len = Math.hypot(dx, dy) || 1;
+          const nx = -dy / len * offset * sign;
+          const ny = dx / len * offset * sign;
+          const distPar = pointToSegmentDist(mx, my, x1 + nx, y1 + ny, x2 + nx, y2 + ny);
+          if (distPar < threshold) return dr.id;
+          /* Inside the channel area (between the two lines) */
+          const distBetween = distMain + distPar;
+          const channelWidth = Math.abs(offset);
+          if (distMain < channelWidth + threshold && distPar < channelWidth + threshold &&
+              distBetween < channelWidth + threshold * 2) return dr.id;
+        }
+        break;
+
+      /* ── Extended Horizontal Line — hit if near the right-extending line ── */
+      case "extHorizontalLine":
+        if (anchors.length >= 1) {
+          const y = ay(anchors[0]);
+          const xStart = ax(anchors[0]);
+          /* Only test from anchor X rightward */
+          if (Math.abs(my - y) < threshold && mx >= xStart - threshold) return dr.id;
+        }
+        break;
+
+      /* ── Price Range — hit if inside the filled rectangle area ── */
+      case "priceRange":
+        if (anchors.length >= 2) {
+          const x1 = ax(anchors[0]), y1 = ay(anchors[0]);
+          const x2 = ax(anchors[1]), y2 = ay(anchors[1]);
+          const rx = Math.min(x1, x2), ry = Math.min(y1, y2);
+          const rw = Math.abs(x2 - x1), rh = Math.abs(y2 - y1);
+          if (mx >= rx - threshold && mx <= rx + rw + threshold &&
+              my >= ry - threshold && my <= ry + rh + threshold) return dr.id;
+        }
+        break;
+
+      /* ── Callout — hit if near the label box area ── */
+      case "callout":
+        if (anchors.length >= 1) {
+          const x = ax(anchors[0]), y = ay(anchors[0]);
+          const fs = dr.style.fontSize || 12;
+          const txt = dr.style.text || "Label";
+          const tw = Math.max(txt.length * fs * 0.65, 40) + 16;
+          const th = fs + 14;
+          /* The callout box sits above and to the right of the anchor */
+          const bx = x + 6, by = y - th - 8;
+          if ((mx >= bx - threshold && mx <= bx + tw + threshold &&
+               my >= by - threshold && my <= by + th + threshold) ||
+              /* Also test against the pointer line from anchor to box */
+              Math.hypot(mx - x, my - y) < threshold + 6) return dr.id;
+        }
+        break;
+
+      /* ── Vertical Line — hit if near the vertical line at anchor X ── */
+      case "verticalLine":
+        if (anchors.length >= 1) {
+          const x = ax(anchors[0]);
+          if (Math.abs(mx - x) < threshold) return dr.id;
+        }
+        break;
+
       default: break;
     }
   }
   return null;
+}
+
+/* ── Anchor Handle Rendering ──────────────────────────────────────────── */
+
+/**
+ * Render interactive anchor handles (circles) for a selected drawing.
+ * Each circle is positioned at an anchor's pixel coordinates and carries
+ * a data-anchor-idx attribute for identification during drag interactions.
+ *
+ * Only call this for the currently selected drawing — handles should not
+ * appear on unselected drawings.
+ *
+ * @param {Object} drawing     - drawing object with anchors array
+ * @param {Object} chartParams - { visibleData, visibleStart, allData, xOf, PAD, H, pLo, pHi }
+ * @returns {Array<JSX.Element>} Array of SVG <circle> elements
+ */
+export function renderAnchorHandles(drawing, chartParams) {
+  const { visibleData, visibleStart, allData, xOf, PAD, H, pLo, pHi } = chartParams;
+  const { anchors } = drawing;
+  if (!anchors || !anchors.length) return [];
+
+  return anchors.map((anchor, i) => {
+    const cx = resolveAnchorX(anchor, visibleData, visibleStart, allData, xOf);
+    const cy = resolveAnchorY(anchor.price, PAD, H, pLo, pHi);
+    return (
+      <circle
+        key={`ah-${drawing.id}-${i}`}
+        cx={cx}
+        cy={cy}
+        r={5}
+        fill="var(--amber)"
+        stroke="var(--bg0)"
+        strokeWidth={1.5}
+        cursor="crosshair"
+        data-anchor-idx={i}
+        style={{ pointerEvents: "visiblePainted" }}
+      />
+    );
+  });
+}
+
+/* ── Drag / Resize Coordinate Helpers ─────────────────────────────────── */
+
+/**
+ * Move all anchors of a drawing by pixel deltas (dx, dy).
+ * Converts each anchor's current position to pixels, applies the delta,
+ * and converts back to {time, price}. Clamps time to the visible data
+ * range and prevents negative prices.
+ *
+ * @param {Object} drawing     - drawing object with anchors array
+ * @param {number} dx          - horizontal pixel offset
+ * @param {number} dy          - vertical pixel offset
+ * @param {Object} chartParams - { visibleData, visibleStart, allData, xOf, PAD, H, pLo, pHi, n, candleGap }
+ * @returns {Object} New drawing object with updated anchors
+ */
+export function moveDrawingAnchors(drawing, dx, dy, chartParams) {
+  const { visibleData, visibleStart, allData, xOf, PAD, H, pLo, pHi, n, candleGap } = chartParams;
+
+  const newAnchors = drawing.anchors.map(anchor => {
+    /* Convert anchor to pixel coordinates */
+    const px = resolveAnchorX(anchor, visibleData, visibleStart, allData, xOf);
+    const py = resolveAnchorY(anchor.price, PAD, H, pLo, pHi);
+
+    /* Apply pixel delta */
+    const newPx = px + dx;
+    const newPy = py + dy;
+
+    /* Convert back to {time, price} */
+    const result = pixelToAnchor(newPx, newPy, visibleData, n, PAD, candleGap, H, pLo, pHi);
+    if (!result) return anchor; // fallback if out of range
+
+    /* Clamp price to non-negative */
+    result.price = Math.max(0, result.price);
+    return result;
+  });
+
+  return { ...drawing, anchors: newAnchors };
+}
+
+/**
+ * Move a single anchor of a drawing to a new pixel position.
+ * Converts the pixel position to {time, price} and replaces just
+ * that anchor, leaving all others unchanged.
+ *
+ * @param {Object} drawing     - drawing object with anchors array
+ * @param {number} anchorIdx   - index of the anchor to move
+ * @param {number} px          - new pixel X position
+ * @param {number} py          - new pixel Y position
+ * @param {Object} chartParams - { visibleData, n, PAD, candleGap, H, pLo, pHi }
+ * @returns {Object} New drawing object with the specified anchor updated
+ */
+export function moveOneAnchor(drawing, anchorIdx, px, py, chartParams) {
+  const { visibleData, n, PAD, candleGap, H, pLo, pHi } = chartParams;
+
+  const newAnchor = pixelToAnchor(px, py, visibleData, n, PAD, candleGap, H, pLo, pHi);
+  if (!newAnchor) return drawing;
+
+  /* Clamp price to non-negative */
+  newAnchor.price = Math.max(0, newAnchor.price);
+
+  const newAnchors = drawing.anchors.map((a, i) => i === anchorIdx ? newAnchor : a);
+  return { ...drawing, anchors: newAnchors };
+}
+
+/* ── Drawing Context Toolbar ─────────────────────────────────────────────── */
+
+/**
+ * Floating toolbar rendered when a drawing object is selected on the chart.
+ * Positioned near the top-right of the chart area. Provides delete and
+ * deselect actions so users have a visible UI alternative to keyboard shortcuts.
+ *
+ * @param {Object}   props
+ * @param {Function} props.onDelete  - Called to delete the currently selected drawing
+ * @param {Function} props.onDeselect - Called to clear the selection
+ * @returns {JSX.Element}
+ */
+export function DrawingContextToolbar({ onDelete, onDeselect }) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: 8,
+        right: 80,
+        background: "rgba(0,0,0,0.85)",
+        border: "1px solid var(--border)",
+        borderRadius: 3,
+        padding: 4,
+        zIndex: 50,
+        display: "flex",
+        gap: 4,
+        pointerEvents: "auto",
+      }}
+    >
+      {/* Delete (trash) button — red on hover */}
+      <button
+        title="Delete drawing (Del)"
+        onClick={(e) => { e.stopPropagation(); onDelete(); }}
+        onMouseDown={(e) => e.stopPropagation()}
+        style={{
+          width: 22,
+          height: 22,
+          background: "transparent",
+          border: "1px solid var(--border)",
+          borderRadius: 2,
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 0,
+          color: "var(--muted)",
+          transition: "color 0.15s, border-color 0.15s",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.color = "#f04438";
+          e.currentTarget.style.borderColor = "#f04438";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.color = "var(--muted)";
+          e.currentTarget.style.borderColor = "var(--border)";
+        }}
+      >
+        {/* Simple trash icon SVG */}
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none"
+          stroke="currentColor" strokeWidth="1.5"
+          strokeLinecap="round" strokeLinejoin="round">
+          <path d="M2 4h12" />
+          <path d="M5 4V2.5A.5.5 0 0 1 5.5 2h5a.5.5 0 0 1 .5.5V4" />
+          <path d="M3.5 4l.8 9.6a1 1 0 0 0 1 .9h5.4a1 1 0 0 0 1-.9L12.5 4" />
+          <path d="M6.5 7v4" />
+          <path d="M9.5 7v4" />
+        </svg>
+      </button>
+
+      {/* Deselect (X) button — amber on hover */}
+      <button
+        title="Deselect (ESC)"
+        onClick={(e) => { e.stopPropagation(); onDeselect(); }}
+        onMouseDown={(e) => e.stopPropagation()}
+        style={{
+          width: 22,
+          height: 22,
+          background: "transparent",
+          border: "1px solid var(--border)",
+          borderRadius: 2,
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 0,
+          fontFamily: "var(--font-mono)",
+          fontSize: 13,
+          fontWeight: 600,
+          lineHeight: 1,
+          color: "var(--muted)",
+          transition: "color 0.15s, border-color 0.15s",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.color = "var(--amber)";
+          e.currentTarget.style.borderColor = "var(--amber)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.color = "var(--muted)";
+          e.currentTarget.style.borderColor = "var(--border)";
+        }}
+      >
+        &times;
+      </button>
+    </div>
+  );
 }
 
 /* ── SVG Renderers ───────────────────────────────────────────────────────── */
@@ -420,6 +737,146 @@ export function renderDrawing(drawing, visibleData, visibleStart, allData, xOf, 
         </g>
       );
     }
+
+    /* ── Parallel Channel — two parallel trend lines with semi-transparent fill ── */
+    case "parallelChannel": {
+      if (anchors.length < 2) return null;
+      const x1 = ax(0), y1 = ay(0), x2 = ax(1), y2 = ay(1);
+      /* Compute perpendicular offset equal to vertical distance between anchors */
+      const offset = Math.abs(y2 - y1);
+      const sign = y2 > y1 ? -1 : 1;  // offset in opposite vertical direction
+      const dx = x2 - x1, dy = y2 - y1;
+      const len = Math.hypot(dx, dy) || 1;
+      /* Normal vector scaled by offset */
+      const nx = (-dy / len) * offset * sign;
+      const ny = (dx / len) * offset * sign;
+      /* Parallel line endpoints */
+      const px1 = x1 + nx, py1 = y1 + ny;
+      const px2 = x2 + nx, py2 = y2 + ny;
+      /* Polygon fill between the two lines */
+      const fillPts = `${x1},${y1} ${x2},${y2} ${px2},${py2} ${px1},${py1}`;
+      return (
+        <g key={drawing.id}>
+          <polygon points={fillPts} fill={col} fillOpacity="0.08" stroke="none" />
+          {isSelected && (
+            <>
+              <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#fff" strokeWidth={lw + 2} opacity="0.3" />
+              <line x1={px1} y1={py1} x2={px2} y2={py2} stroke="#fff" strokeWidth={lw + 2} opacity="0.3" />
+            </>
+          )}
+          <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={col} strokeWidth={lw} strokeDasharray={dash} />
+          <line x1={px1} y1={py1} x2={px2} y2={py2} stroke={col} strokeWidth={lw} strokeDasharray={dash} />
+          {/* Midline (dashed, half opacity) */}
+          <line x1={(x1 + px1) / 2} y1={(y1 + py1) / 2} x2={(x2 + px2) / 2} y2={(y2 + py2) / 2}
+            stroke={col} strokeWidth={lw * 0.5} strokeDasharray="4,4" opacity="0.4" />
+          <circle cx={x1} cy={y1} r={3} fill={col} opacity="0.7" />
+          <circle cx={x2} cy={y2} r={3} fill={col} opacity="0.7" />
+        </g>
+      );
+    }
+
+    /* ── Extended Horizontal Line — right-extending line from anchor ── */
+    case "extHorizontalLine": {
+      if (anchors.length < 1) return null;
+      const xStart = ax(0);
+      const y = ay(0);
+      const price = anchors[0].price;
+      /* Extend from anchor X to the right edge of the chart (including future zone) */
+      const xEnd = dims.w - PAD.right;
+      return (
+        <g key={drawing.id}>
+          {isSelected && <line x1={xStart} y1={y} x2={xEnd} y2={y} stroke="#fff" strokeWidth={lw + 2} opacity="0.3" />}
+          <line x1={xStart} y1={y} x2={xEnd} y2={y} stroke={col} strokeWidth={lw} strokeDasharray={dash} />
+          {/* Anchor dot */}
+          <circle cx={xStart} cy={y} r={3} fill={col} opacity="0.7" />
+          {/* Price label at anchor */}
+          <rect x={xStart - 2} y={y - 8} width={60} height={16} rx={1} fill={col} opacity="0.85" />
+          <text x={xStart + 4} y={y + 4} fontFamily="IBM Plex Mono" fontSize="9" fontWeight="600" fill="#060f08">
+            {currSym}{price.toFixed(2)}
+          </text>
+        </g>
+      );
+    }
+
+    /* ── Price Range — filled rectangle with price diff, pct change, and bar count ── */
+    case "priceRange": {
+      if (anchors.length < 2) return null;
+      const x1 = ax(0), y1 = ay(0), x2 = ax(1), y2 = ay(1);
+      const price1 = anchors[0].price, price2 = anchors[1].price;
+      const diff = price2 - price1;
+      const pct = price1 !== 0 ? (diff / price1) * 100 : 0;
+      /* Estimate bar count from time distance */
+      const barCount = Math.abs(Math.round(timeToIndex(anchors[1].time, allData) - timeToIndex(anchors[0].time, allData)));
+      /* Rectangle bounds */
+      const rx = Math.min(x1, x2), ry = Math.min(y1, y2);
+      const rw = Math.abs(x2 - x1), rh = Math.abs(y2 - y1);
+      const midX = (x1 + x2) / 2, midY = (y1 + y2) / 2;
+      const labelColor = diff >= 0 ? "#00d97e" : "#f04438";
+      const diffLabel = `${diff >= 0 ? "+" : ""}${currSym}${diff.toFixed(2)}`;
+      const pctLabel = `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`;
+      const barLabel = `${barCount} bar${barCount !== 1 ? "s" : ""}`;
+      return (
+        <g key={drawing.id}>
+          <rect x={rx} y={ry} width={rw} height={rh} fill={labelColor} fillOpacity="0.08" stroke={labelColor} strokeWidth={lw} strokeDasharray={dash} />
+          {isSelected && <rect x={rx} y={ry} width={rw} height={rh} fill="none" stroke="#fff" strokeWidth={lw + 1} opacity="0.3" />}
+          {/* Stats overlay — centered in the rectangle */}
+          <rect x={midX - 65} y={midY - 22} width={130} height={40} rx={3} fill="var(--bg2, #1a1a2e)" fillOpacity="0.92" stroke={labelColor} strokeWidth="0.5" />
+          <text x={midX} y={midY - 6} textAnchor="middle" fontFamily="IBM Plex Mono" fontSize="10" fontWeight="700" fill={labelColor}>
+            {diffLabel}  {pctLabel}
+          </text>
+          <text x={midX} y={midY + 10} textAnchor="middle" fontFamily="IBM Plex Mono" fontSize="8" fontWeight="500" fill="var(--muted, #888)">
+            {barLabel}
+          </text>
+        </g>
+      );
+    }
+
+    /* ── Callout — text label with background box and pointer arrow ── */
+    case "callout": {
+      if (anchors.length < 1) return null;
+      const x = ax(0), y = ay(0);
+      const txt = style.text || "Label";
+      const fs = style.fontSize || 12;
+      const tw = Math.max(txt.length * fs * 0.65, 40) + 16;  // box width
+      const th = fs + 14;                                     // box height
+      /* Box positioned above-right of anchor */
+      const bx = x + 6, by = y - th - 8;
+      return (
+        <g key={drawing.id}>
+          {isSelected && <rect x={bx - 2} y={by - 2} width={tw + 4} height={th + 4} fill="none" stroke="#fff" strokeWidth="1" opacity="0.3" rx="3" />}
+          {/* Pointer line from anchor to box bottom-left corner */}
+          <line x1={x} y1={y} x2={bx + 4} y2={by + th} stroke={col} strokeWidth={lw * 0.7} opacity="0.6" />
+          {/* Anchor dot */}
+          <circle cx={x} cy={y} r={3.5} fill={col} opacity="0.8" />
+          {/* Background box */}
+          <rect x={bx} y={by} width={tw} height={th} rx={3} fill={col} fillOpacity="0.15" stroke={col} strokeWidth={lw * 0.7} />
+          {/* Label text */}
+          <text x={bx + 8} y={by + th / 2 + fs * 0.35} fontFamily="IBM Plex Mono" fontSize={fs} fontWeight="600" fill={col}>
+            {txt}
+          </text>
+        </g>
+      );
+    }
+
+    /* ── Vertical Line — full-height vertical line at a specific time ── */
+    case "verticalLine": {
+      if (anchors.length < 1) return null;
+      const x = ax(0);
+      const yTop = PAD.top;
+      const yBot = PAD.top + H;
+      return (
+        <g key={drawing.id}>
+          {isSelected && <line x1={x} y1={yTop} x2={x} y2={yBot} stroke="#fff" strokeWidth={lw + 2} opacity="0.3" />}
+          <line x1={x} y1={yTop} x2={x} y2={yBot} stroke={col} strokeWidth={lw} strokeDasharray={dash} />
+          {/* Small time label at bottom */}
+          <rect x={x - 30} y={yBot + 2} width={60} height={14} rx={1} fill={col} opacity="0.85" />
+          <text x={x} y={yBot + 12} textAnchor="middle" fontFamily="IBM Plex Mono" fontSize="8" fontWeight="600" fill="#060f08">
+            {new Date(anchors[0].time).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+          </text>
+        </g>
+      );
+    }
+
     default:
       return null;
   }
@@ -509,6 +966,73 @@ export function renderPreview(toolType, anchors, previewPoint, visibleData, visi
       return null;
     case "text":
       return <text x={px} y={py} fontFamily="IBM Plex Mono" fontSize={style.fontSize || 12} fill={col} opacity="0.5">{style.text || "Text"}</text>;
+
+    /* ── Parallel Channel preview — two parallel dashed lines with fill ── */
+    case "parallelChannel":
+      if (anchors.length === 1) {
+        const x1 = ax(anchors[0]), y1 = ay(anchors[0]);
+        const offset = Math.abs(py - y1);
+        const sign = py > y1 ? -1 : 1;
+        const ddx = px - x1, ddy = py - y1;
+        const len = Math.hypot(ddx, ddy) || 1;
+        const nx = (-ddy / len) * offset * sign;
+        const ny = (ddx / len) * offset * sign;
+        return (
+          <g opacity="0.6">
+            <line x1={x1} y1={y1} x2={px} y2={py} stroke={col} strokeWidth={lw} strokeDasharray="4,4" />
+            <line x1={x1 + nx} y1={y1 + ny} x2={px + nx} y2={py + ny} stroke={col} strokeWidth={lw} strokeDasharray="4,4" />
+            <polygon points={`${x1},${y1} ${px},${py} ${px + nx},${py + ny} ${x1 + nx},${y1 + ny}`} fill={col} fillOpacity="0.06" stroke="none" />
+          </g>
+        );
+      }
+      return null;
+
+    /* ── Extended Horizontal Line preview — right-extending line from cursor ── */
+    case "extHorizontalLine":
+      return (
+        <g opacity="0.6">
+          <line x1={px} y1={py} x2={dims.w - PAD.right} y2={py} stroke={col} strokeWidth={lw} strokeDasharray="4,4" />
+          <circle cx={px} cy={py} r={3} fill={col} opacity="0.5" />
+        </g>
+      );
+
+    /* ── Price Range preview — filled rectangle between anchor and cursor ── */
+    case "priceRange":
+      if (anchors.length === 1) {
+        const x1 = ax(anchors[0]), y1 = ay(anchors[0]);
+        const rx = Math.min(x1, px), ry = Math.min(y1, py);
+        const rw = Math.abs(px - x1), rh = Math.abs(py - y1);
+        const diff = previewPoint.price - anchors[0].price;
+        const labelColor = diff >= 0 ? "#00d97e" : "#f04438";
+        return (
+          <g opacity="0.6">
+            <rect x={rx} y={ry} width={rw} height={rh} fill={labelColor} fillOpacity="0.06" stroke={labelColor} strokeWidth={lw} strokeDasharray="4,4" />
+          </g>
+        );
+      }
+      return null;
+
+    /* ── Callout preview — label box with pointer near cursor ── */
+    case "callout": {
+      const txt = style.text || "Label";
+      const fs = style.fontSize || 12;
+      const tw = Math.max(txt.length * fs * 0.65, 40) + 16;
+      const th = fs + 14;
+      const bx = px + 6, by = py - th - 8;
+      return (
+        <g opacity="0.5">
+          <line x1={px} y1={py} x2={bx + 4} y2={by + th} stroke={col} strokeWidth={lw * 0.7} />
+          <circle cx={px} cy={py} r={3.5} fill={col} />
+          <rect x={bx} y={by} width={tw} height={th} rx={3} fill={col} fillOpacity="0.12" stroke={col} strokeWidth={lw * 0.7} strokeDasharray="4,4" />
+          <text x={bx + 8} y={by + th / 2 + fs * 0.35} fontFamily="IBM Plex Mono" fontSize={fs} fontWeight="600" fill={col}>{txt}</text>
+        </g>
+      );
+    }
+
+    /* ── Vertical Line preview — full-height dashed vertical at cursor X ── */
+    case "verticalLine":
+      return <line x1={px} y1={PAD.top} x2={px} y2={PAD.top + H} stroke={col} strokeWidth={lw} strokeDasharray="4,4" opacity="0.6" />;
+
     default:
       return null;
   }

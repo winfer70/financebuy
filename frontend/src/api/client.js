@@ -193,6 +193,17 @@ const api = {
     apiFetch(`/market/ohlcv_interval/${symbol}?interval=${interval}&days=${days}`, { token }),
 
   /**
+   * Fetch comprehensive fundamental data for a symbol (valuation, financials,
+   * dividends, analyst targets, trading info, etc.).  Cached on the backend.
+   *
+   * @param {string} symbol - Ticker symbol (e.g. "AAPL")
+   * @param {string} token  - JWT access token
+   * @returns {Promise<object>} Fundamental data object
+   */
+  getFundamentals: (symbol, token) =>
+    apiFetch(`/market/fundamentals/${encodeURIComponent(symbol)}`, { token }),
+
+  /**
    * Fetch financial events (earnings, dividends, splits) and analyst
    * target prices for a symbol.  Cached for 1 hour on the backend.
    *
@@ -602,6 +613,24 @@ const api = {
   getSignalsBySymbol: (symbol, token) =>
     apiFetch(`/trading/signals/symbol/${symbol}`, { token }),
 
+  // ── Price Alerts ────────────────────────────────────────────────────────
+
+  /** Create a new price alert. */
+  createAlert: (body, token) =>
+    apiFetch("/alerts", { method: "POST", body, token }),
+
+  /** List user's price alerts. */
+  listAlerts: (activeOnly, token) =>
+    apiFetch(`/alerts?active_only=${activeOnly ? "true" : "false"}`, { token }),
+
+  /** Update an existing price alert. */
+  updateAlert: (alertId, body, token) =>
+    apiFetch(`/alerts/${alertId}`, { method: "PATCH", body, token }),
+
+  /** Delete a price alert. */
+  deleteAlert: (alertId, token) =>
+    apiFetch(`/alerts/${alertId}`, { method: "DELETE", token }),
+
   // ── Notifications ───────────────────────────────────────────────────────
 
   /** List notifications (paginated). */
@@ -787,6 +816,25 @@ const api = {
     apiFetch(`/trading/paper/${id}/stop`, { method: "POST", token }),
 
   /**
+   * Delete a stopped paper trade and all its associated data.
+   * @param {string} paperTradeId - Paper trade ID
+   * @param {string} token        - JWT access token
+   * @returns {Promise<null>} Null on success (204)
+   */
+  deletePaperTrade: (paperTradeId, token) =>
+    apiFetch(`/trading/paper/${paperTradeId}`, { method: "DELETE", token }),
+
+  /**
+   * Update an active or paused paper trade's capital and/or parameters.
+   * @param {string} paperTradeId - Paper trade ID
+   * @param {object} body         - { initial_capital?, parameters? }
+   * @param {string} token        - JWT access token
+   * @returns {Promise<object>} Updated paper trade
+   */
+  updatePaperTrade: (paperTradeId, body, token) =>
+    apiFetch(`/trading/paper/${paperTradeId}`, { method: "PATCH", body, token }),
+
+  /**
    * Fetch equity snapshots (time series) for a paper trade.
    * @param {string} id    - Paper trade ID
    * @param {string} token - JWT access token
@@ -803,6 +851,99 @@ const api = {
    */
   getPaperPositions: (id, token) =>
     apiFetch(`/trading/paper/${id}/positions`, { token }),
+
+  /**
+   * Score a portfolio of symbols with technical analysis.
+   * Returns overall score, per-symbol breakdowns with trend, RSI, volatility, signal.
+   * @param {object} body  - { symbols: ["AAPL", "MSFT", ...] }
+   * @param {string} token - JWT access token
+   * @returns {Promise<object>} Portfolio scoring results
+   */
+  scorePortfolio: (body, token) =>
+    apiFetch("/trading/portfolio-score", { method: "POST", body, token }),
+
+  /**
+   * Run exit analysis for a symbol — computes ATR stops, Bollinger levels,
+   * moving-average support/resistance, Fibonacci retracements, and more.
+   *
+   * @param {object} body  - { symbol: string, period_days?: number }
+   * @param {string} token - JWT access token
+   * @returns {Promise<object>} ExitAnalysisResponse
+   */
+  analyzeExitPoints: (body, token) =>
+    apiFetch("/trading/exit-analysis", { method: "POST", body, token }),
+
+  // ── Research / Screener ─────────────────────────────────────────────────
+
+  /**
+   * Fetch sector performance overview (all GICS sector ETFs).
+   * Returns { sectors: [{ symbol, name, price, change_pct, ytd_pct, month_pct }] }.
+   * @param {string} token - JWT access token
+   * @returns {Promise<{sectors: Array}>}
+   */
+  getSectors: (token) =>
+    apiFetch("/market/sectors", { token }),
+
+  /**
+   * Run the stock screener with optional filter parameters.
+   * Sends only non-empty params as query string values.
+   * Returns { results, total_matched, filters_applied }.
+   * @param {object} params - Filter/sort params (min_price, max_price, sector, etc.)
+   * @param {string} token  - JWT access token
+   * @returns {Promise<{results: Array, total_matched: number, filters_applied: object}>}
+   */
+  runScreener: (params, token) => {
+    const qs = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v != null && v !== "") qs.set(k, v);
+    });
+    return apiFetch(`/market/screener?${qs}`, { token });
+  },
+
+  // ── Admin ───────────────────────────────────────────────────────────────
+
+  /** Check if current user is admin. Returns { is_admin: true } or throws 403. */
+  checkAdmin: (token) =>
+    apiFetch("/admin/check", { token }),
+
+  /** List all users (admin). */
+  adminListUsers: (token) =>
+    apiFetch("/admin/users", { token }),
+
+  /** Lock (deactivate) a user. */
+  adminLockUser: (userId, token) =>
+    apiFetch(`/admin/users/${userId}/lock`, { method: "POST", token }),
+
+  /** Unlock (reactivate) a user. */
+  adminUnlockUser: (userId, token) =>
+    apiFetch(`/admin/users/${userId}/unlock`, { method: "POST", token }),
+
+  /** List reports with optional filters. */
+  adminListReports: (params, token) => {
+    const qs = new URLSearchParams();
+    if (params.status) qs.set("status", params.status);
+    if (params.report_type) qs.set("report_type", params.report_type);
+    if (params.limit) qs.set("limit", params.limit);
+    if (params.offset) qs.set("offset", params.offset);
+    return apiFetch(`/reports?${qs}`, { token });
+  },
+
+  /** Update a report (status, admin_notes). */
+  adminUpdateReport: (reportId, body, token) =>
+    apiFetch(`/reports/${reportId}`, { method: "PATCH", body, token }),
+
+  /** Delete a report. */
+  adminDeleteReport: (reportId, token) =>
+    apiFetch(`/reports/${reportId}`, { method: "DELETE", token }),
+
+  /** Query audit logs. */
+  adminAuditLogs: (params, token) => {
+    const qs = new URLSearchParams();
+    if (params.user_id) qs.set("user_id", params.user_id);
+    if (params.action) qs.set("action", params.action);
+    if (params.limit) qs.set("limit", params.limit);
+    return apiFetch(`/admin/audit-logs?${qs}`, { token });
+  },
 
   /**
    * subscribePaperTrade — Stream paper trade updates via SSE.

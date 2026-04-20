@@ -35,6 +35,9 @@ import { Ic } from "../common/Icons.jsx";
 import {
   DRAWING_TOOLS, DEFAULT_DRAW_STYLE, genDrawingId,
   pixelToAnchor, hitTestDrawing, renderDrawing, renderPreview,
+  DrawingContextToolbar,
+  renderAnchorHandles, moveDrawingAnchors, moveOneAnchor,
+  resolveAnchorX, resolveAnchorY,
 } from "./DrawingTools.jsx";
 import { OHLCV_INTERACTIVE_CSS } from "./chartStyles.js";
 
@@ -119,6 +122,11 @@ export default function OHLCVChart({
   const [selectedDrawingId, setSelectedDrawingId] = useState(null);
   const [drawingStyle, setDrawingStyle]       = useState({ ...DEFAULT_DRAW_STYLE });
   const [textInput, setTextInput]             = useState("");
+
+  /* ── Draw interaction state (move/resize drawings) ──────────────────── */
+  const [drawInteraction, setDrawInteraction] = useState("idle"); // "idle" | "moving" | "resizing"
+  const drawDragStartRef = useRef(null);   // { x, y, anchors: [...] } — captured at drag start
+  const drawDragAnchorRef = useRef(null);  // anchor index being resized, null during move
 
   /* ── Inject interactive CSS once ─────────────────────────────────────── */
   useEffect(() => {
@@ -294,6 +302,32 @@ export default function OHLCVChart({
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
 
+    /* ── Moving a drawing: apply pixel delta to all anchors ── */
+    if (drawInteraction === "moving" && drawDragStartRef.current && selectedDrawingId) {
+      const selDrawing = drawings.find(d => d.id === selectedDrawingId);
+      if (selDrawing) {
+        const dx = mx - drawDragStartRef.current.x;
+        const dy = my - drawDragStartRef.current.y;
+        /* Use the original anchors from drag start to avoid accumulation drift */
+        const original = { ...selDrawing, anchors: drawDragStartRef.current.anchors };
+        const chartParams = { visibleData, visibleStart, allData, xOf, PAD, H, pLo, pHi, n, candleGap };
+        const updated = moveDrawingAnchors(original, dx, dy, chartParams);
+        setDrawings(prev => prev.map(d => d.id === selectedDrawingId ? updated : d));
+      }
+      return;
+    }
+
+    /* ── Resizing a drawing: move one anchor to mouse position ── */
+    if (drawInteraction === "resizing" && drawDragAnchorRef.current != null && selectedDrawingId) {
+      const selDrawing = drawings.find(d => d.id === selectedDrawingId);
+      if (selDrawing) {
+        const chartParams = { visibleData, visibleStart, allData, xOf, PAD, H, pLo, pHi, n, candleGap };
+        const updated = moveOneAnchor(selDrawing, drawDragAnchorRef.current, mx, my, chartParams);
+        setDrawings(prev => prev.map(d => d.id === selectedDrawingId ? updated : d));
+      }
+      return;
+    }
+
     /* Drawing preview point update */
     if (enableDrawingTools && activeTool && pendingAnchors.length > 0) {
       const anchor = pixelToAnchor(mx, my, visibleData, n, PAD, candleGap, H, pLo, pHi);
@@ -318,7 +352,19 @@ export default function OHLCVChart({
     const clamped = Math.max(0, Math.min(n - 1, idx));
     setHoverIdx(clamped);
     if (onBarHover && visibleData[clamped]) onBarHover(visibleData[clamped], clamped);
-  }, [showCrosshair, n, candleGap, onBarHover, visibleData, PAD, enableZoom, enableDrawingTools, activeTool, pendingAnchors, allData.length, H, pLo, pHi]);
+
+    /* ── Cursor hint: show "move" when hovering body of selected drawing ── */
+    if (enableDrawingTools && selectedDrawingId && !activeTool && drawInteraction === "idle") {
+      const hitId = hitTestDrawing(drawings, mx, my, visibleData, visibleStart, allData, xOf, PAD, H, W, pLo, pHi);
+      if (hitId === selectedDrawingId && wrapRef.current) {
+        wrapRef.current.style.cursor = "move";
+      } else if (wrapRef.current) {
+        wrapRef.current.style.cursor = "";
+      }
+    }
+  }, [showCrosshair, n, candleGap, onBarHover, visibleData, PAD, enableZoom, enableDrawingTools, activeTool,
+      pendingAnchors, allData, H, pLo, pHi, drawInteraction, selectedDrawingId, drawings,
+      visibleStart, xOf, W]);
 
   const handleMouseDown = useCallback((e) => {
     if (e.button !== 0) return;
@@ -351,9 +397,44 @@ export default function OHLCVChart({
       return;
     }
 
-    /* Hit-test drawings for selection */
+    /* ── Anchor-handle hit-test: start resizing if click lands on a handle ── */
+    if (enableDrawingTools && selectedDrawingId && !activeTool) {
+      const selDrawing = drawings.find(d => d.id === selectedDrawingId);
+      if (selDrawing && selDrawing.anchors) {
+        for (let i = 0; i < selDrawing.anchors.length; i++) {
+          const anchorPx = resolveAnchorX(selDrawing.anchors[i], visibleData, visibleStart, allData, xOf);
+          const anchorPy = resolveAnchorY(selDrawing.anchors[i].price, PAD, H, pLo, pHi);
+          if (Math.hypot(mx - anchorPx, my - anchorPy) <= 8) {
+            /* Enter resize mode for this anchor */
+            setDrawInteraction("resizing");
+            drawDragAnchorRef.current = i;
+            drawDragStartRef.current = { x: mx, y: my, anchors: selDrawing.anchors.map(a => ({ ...a })) };
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
+        }
+      }
+    }
+
+    /* Hit-test drawings for selection or body-drag */
     if (enableDrawingTools) {
       const hitId = hitTestDrawing(drawings, mx, my, visibleData, visibleStart, allData, xOf, PAD, H, W, pLo, pHi);
+
+      /* ── Body hit on already-selected drawing: start moving ── */
+      if (hitId && hitId === selectedDrawingId && !activeTool) {
+        const selDrawing = drawings.find(d => d.id === selectedDrawingId);
+        if (selDrawing) {
+          setDrawInteraction("moving");
+          drawDragAnchorRef.current = null;
+          drawDragStartRef.current = { x: mx, y: my, anchors: selDrawing.anchors.map(a => ({ ...a })) };
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+      }
+
+      /* ── Hit a different drawing: select it ── */
       if (hitId) { setSelectedDrawingId(hitId); e.preventDefault(); return; }
       setSelectedDrawingId(null);
     }
@@ -364,15 +445,34 @@ export default function OHLCVChart({
       dragRef.current = { startX: mx, baseStart: cur.start, baseCount: cur.count };
       e.preventDefault();
     }
-  }, [enableDrawingTools, enableZoom, activeTool, pendingAnchors, drawingStyle, textInput, visibleData, n, PAD, candleGap, H, W, pLo, pHi, drawings, visibleStart, allData, xOf, zoom]);
+  }, [enableDrawingTools, enableZoom, activeTool, pendingAnchors, drawingStyle, textInput, visibleData, n, PAD,
+      candleGap, H, W, pLo, pHi, drawings, visibleStart, allData, xOf, zoom, selectedDrawingId]);
 
-  const handleMouseUp = useCallback(() => { dragRef.current = null; }, []);
+  const handleMouseUp = useCallback(() => {
+    /* Commit move/resize: drawings state already updated live, just exit interaction */
+    if (drawInteraction !== "idle") {
+      setDrawInteraction("idle");
+      drawDragStartRef.current = null;
+      drawDragAnchorRef.current = null;
+      /* localStorage save happens automatically via the debounced useEffect on drawings */
+      return;
+    }
+    dragRef.current = null;
+  }, [drawInteraction]);
 
   const handleMouseLeave = useCallback(() => {
+    /* Reset any active drawing drag */
+    if (drawInteraction !== "idle") {
+      setDrawInteraction("idle");
+      drawDragStartRef.current = null;
+      drawDragAnchorRef.current = null;
+    }
     dragRef.current = null;
     setHoverIdx(-1);
     if (enableDrawingTools && activeTool) setPreviewPoint(null);
-  }, [enableDrawingTools, activeTool]);
+    /* Reset cursor override */
+    if (wrapRef.current) wrapRef.current.style.cursor = "";
+  }, [enableDrawingTools, activeTool, drawInteraction]);
 
   /* ── Scroll-wheel zoom ───────────────────────────────────────────────── */
   const handleWheel = useCallback((e) => {
@@ -412,7 +512,9 @@ export default function OHLCVChart({
   const hBar = hoverIdx >= 0 && hoverIdx < n ? visibleData[hoverIdx] : null;
 
   /* ── Cursor style ────────────────────────────────────────────────────── */
-  const cursor = enableDrawingTools && activeTool ? "crosshair"
+  const cursor = drawInteraction === "moving" ? "move"
+    : drawInteraction === "resizing" ? "crosshair"
+    : enableDrawingTools && activeTool ? "crosshair"
     : enableZoom && dragRef.current ? "grabbing"
     : enableZoom ? "grab"
     : showCrosshair ? "crosshair"
@@ -794,12 +896,31 @@ export default function OHLCVChart({
               renderDrawing(dr, visibleData, visibleStart, allData, xOf, yOf, PAD, H, W, pLo, pHi, dims, dr.id === selectedDrawingId, currencySymbol)
             )}
 
+            {/* Anchor handles for the selected drawing (rendered above drawing lines) */}
+            {enableDrawingTools && selectedDrawingId && !activeTool && (() => {
+              const selDrawing = drawings.find(d => d.id === selectedDrawingId);
+              if (!selDrawing) return null;
+              const chartParams = { visibleData, visibleStart, allData, xOf, PAD, H, pLo, pHi };
+              return renderAnchorHandles(selDrawing, chartParams);
+            })()}
+
             {/* ── Drawing preview ── */}
             {enableDrawingTools && activeTool && pendingAnchors.length > 0 &&
               renderPreview(activeTool, pendingAnchors, previewPoint, visibleData, visibleStart, allData, xOf, yOf, PAD, H, W, pLo, pHi, dims, drawingStyle)
             }
           </g>
         </svg>
+
+        {/* ── Drawing context toolbar (floating delete/deselect) ── */}
+        {enableDrawingTools && selectedDrawingId && !activeTool && (
+          <DrawingContextToolbar
+            onDelete={() => {
+              setDrawings(prev => prev.filter(d => d.id !== selectedDrawingId));
+              setSelectedDrawingId(null);
+            }}
+            onDeselect={() => setSelectedDrawingId(null)}
+          />
+        )}
 
         {/* Hover tooltip */}
         {showCrosshair && hBar && (

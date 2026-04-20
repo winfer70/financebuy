@@ -24,7 +24,15 @@ import yfinance as yf
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from ..schemas import EventItem, EventsResponse
+from ..schemas import (
+    EventItem,
+    EventsResponse,
+    FundamentalsResponse,
+    SectorItem,
+    SectorResponse,
+    ScreenerItem,
+    ScreenerResponse,
+)
 
 # Canonical auth dependency — returns a User ORM object (not a string)
 from .auth_routes import get_current_user
@@ -60,6 +68,16 @@ class QuoteOut(BaseModel):
     volume: int
     change: float
     change_pct: float
+
+
+class SectorPerformance(BaseModel):
+    """Performance data for a single market sector, sourced from its ETF proxy."""
+    sector: str
+    etf_symbol: str
+    price: float
+    day_change_pct: float
+    week_change_pct: Optional[float]
+    month_change_pct: Optional[float]
 
 
 # ── In-memory cache ──────────────────────────────────────────────────────────
@@ -577,20 +595,31 @@ async def get_bulk_quotes(
     if len(sym_list) > 50:
         raise HTTPException(status_code=400, detail="Maximum 50 symbols per request.")
 
-    results: List[QuoteOut] = []
+    # Separate cache hits from symbols that need network fetches.
+    hit_map: dict = {}
+    to_fetch: list = []
     for sym in sym_list:
-        cache_key = f"quote:{sym}"
-        cached = _get_cached(cache_key, _quote_ttl())
+        cached = _get_cached(f"quote:{sym}", _quote_ttl())
         if cached:
-            results.append(cached)
-            continue
+            hit_map[sym] = cached
+        else:
+            to_fetch.append(sym)
+
+    # Fetch all uncached symbols concurrently to avoid O(n) sequential latency.
+    async def _fetch_one(sym: str):
         try:
-            quote = await asyncio.to_thread(_fetch_quote, sym)
-            _set_cached(cache_key, quote)
-            results.append(quote)
+            q = await asyncio.to_thread(_fetch_quote, sym)
+            _set_cached(f"quote:{sym}", q)
+            return sym, q
         except Exception:
-            pass  # Skip symbols that can't be fetched
-    return results
+            return sym, None
+
+    for sym, q in await asyncio.gather(*(_fetch_one(s) for s in to_fetch)):
+        if q is not None:
+            hit_map[sym] = q
+
+    # Return in original request order, skipping symbols that failed.
+    return [hit_map[sym] for sym in sym_list if sym in hit_map]
 
 
 # ── Price change ──────────────────────────────────────────────────────────────
@@ -774,6 +803,166 @@ async def get_exchange_rates(current_user=Depends(get_current_user)):
     return result
 
 
+# ── Fundamentals ──────────────────────────────────────────────────────────
+
+_FUNDAMENTALS_TTL = 3600  # 1 hour — fundamental data changes infrequently
+
+
+def _fetch_fundamentals(sym: str) -> dict:
+    """Fetch fundamental data for a symbol from yfinance Ticker.info.
+
+    Maps the yfinance info dict keys to FundamentalsResponse field names,
+    using _safe_float for all numeric values to guard against NaN/Inf.
+    String and integer fields are extracted with .get() defaults.
+
+    Args:
+        sym: Uppercase ticker symbol.
+
+    Returns:
+        A dict matching the FundamentalsResponse schema.
+    """
+    info = yf.Ticker(sym).info
+
+    # ── Convert exDividendDate from epoch timestamp to ISO date string ──
+    ex_div_date = None
+    raw_ex_div = info.get("exDividendDate")
+    if raw_ex_div is not None:
+        try:
+            # yfinance returns epoch seconds as int or float
+            if isinstance(raw_ex_div, (int, float)):
+                ex_div_date = datetime.fromtimestamp(raw_ex_div).date().isoformat()
+            else:
+                ex_div_date = str(raw_ex_div)
+        except (OSError, ValueError, OverflowError):
+            pass  # Malformed timestamp — leave as None
+
+    # ── Convert earningsDate from epoch timestamp to ISO date string ────
+    earnings_date = None
+    raw_earnings = info.get("earningsDate")
+    if raw_earnings is not None:
+        try:
+            if isinstance(raw_earnings, (int, float)):
+                earnings_date = datetime.fromtimestamp(raw_earnings).date().isoformat()
+            elif isinstance(raw_earnings, list) and raw_earnings:
+                # yfinance sometimes returns a list of epoch timestamps
+                first = raw_earnings[0]
+                if isinstance(first, (int, float)):
+                    earnings_date = datetime.fromtimestamp(first).date().isoformat()
+                else:
+                    earnings_date = str(first)
+            else:
+                earnings_date = str(raw_earnings)
+        except (OSError, ValueError, OverflowError, IndexError):
+            pass
+
+    return {
+        # Company info
+        "symbol": sym,
+        "name": info.get("longName") or info.get("shortName"),
+        "sector": info.get("sector"),
+        "industry": info.get("industry"),
+        "description": info.get("longBusinessSummary"),
+        "website": info.get("website"),
+        "country": info.get("country"),
+        "employees": info.get("fullTimeEmployees"),
+        "exchange": info.get("exchange"),
+        "currency": info.get("currency"),
+
+        # Current price (for analyst target range bar)
+        "current_price": _safe_float(
+            info.get("currentPrice") or info.get("regularMarketPrice"),
+            default=None,
+        ),
+
+        # Valuation multiples
+        "market_cap": _safe_float(info.get("marketCap"), default=None),
+        "pe_ratio": _safe_float(info.get("trailingPE"), default=None),
+        "forward_pe": _safe_float(info.get("forwardPE"), default=None),
+        "peg_ratio": _safe_float(info.get("pegRatio"), default=None),
+        "pb_ratio": _safe_float(info.get("priceToBook"), default=None),
+        "ps_ratio": _safe_float(info.get("priceToSalesTrailing12Months"), default=None),
+        "ev_to_ebitda": _safe_float(info.get("enterpriseToEbitda"), default=None),
+
+        # Financial health
+        "revenue": _safe_float(info.get("totalRevenue"), default=None),
+        "net_income": _safe_float(info.get("netIncomeToCommon"), default=None),
+        "profit_margin": _safe_float(info.get("profitMargins"), default=None),
+        "operating_margin": _safe_float(info.get("operatingMargins"), default=None),
+        "roe": _safe_float(info.get("returnOnEquity"), default=None),
+        "roa": _safe_float(info.get("returnOnAssets"), default=None),
+        "debt_to_equity": _safe_float(info.get("debtToEquity"), default=None),
+        "current_ratio": _safe_float(info.get("currentRatio"), default=None),
+        "free_cash_flow": _safe_float(info.get("freeCashflow"), default=None),
+
+        # Dividends
+        "dividend_yield": _safe_float(info.get("dividendYield"), default=None),
+        "dividend_rate": _safe_float(info.get("dividendRate"), default=None),
+        "payout_ratio": _safe_float(info.get("payoutRatio"), default=None),
+        "ex_dividend_date": ex_div_date,
+
+        # Analyst targets
+        "target_low": _safe_float(info.get("targetLowPrice"), default=None),
+        "target_mean": _safe_float(info.get("targetMeanPrice"), default=None),
+        "target_high": _safe_float(info.get("targetHighPrice"), default=None),
+        "target_median": _safe_float(info.get("targetMedianPrice"), default=None),
+        "recommendation": info.get("recommendationKey"),
+        "num_analysts": info.get("numberOfAnalystOpinions"),
+
+        # Earnings
+        "eps_trailing": _safe_float(info.get("trailingEps"), default=None),
+        "eps_forward": _safe_float(info.get("forwardEps"), default=None),
+        "earnings_date": earnings_date,
+
+        # Trading info
+        "beta": _safe_float(info.get("beta"), default=None),
+        "fifty_two_week_high": _safe_float(info.get("fiftyTwoWeekHigh"), default=None),
+        "fifty_two_week_low": _safe_float(info.get("fiftyTwoWeekLow"), default=None),
+        "fifty_day_avg": _safe_float(info.get("fiftyDayAverage"), default=None),
+        "two_hundred_day_avg": _safe_float(info.get("twoHundredDayAverage"), default=None),
+        "avg_volume": _safe_float(info.get("averageVolume"), default=None),
+        "shares_outstanding": _safe_float(info.get("sharesOutstanding"), default=None),
+        "float_shares": _safe_float(info.get("floatShares"), default=None),
+        "short_ratio": _safe_float(info.get("shortRatio"), default=None),
+        "short_pct": _safe_float(info.get("shortPercentOfFloat"), default=None),
+    }
+
+
+@router.get("/fundamentals/{symbol}", response_model=FundamentalsResponse)
+async def get_fundamentals(
+    symbol: str,
+    user=Depends(get_current_user),
+):
+    """Return fundamental data for a single security.
+
+    Fetches company info, valuation multiples, financial health metrics,
+    dividend data, analyst targets, earnings, and trading statistics from
+    yfinance.  Results are cached for 1 hour.
+
+    Args:
+        symbol: Ticker symbol (case-insensitive).
+        user:   Authenticated user (injected).
+
+    Returns:
+        FundamentalsResponse with all available fundamental fields.
+    """
+    sym = symbol.upper()
+    cache_key = f"fundamentals:{sym}"
+    cached = _get_cached(cache_key, _FUNDAMENTALS_TTL)
+    if cached:
+        return cached
+
+    try:
+        result = await asyncio.to_thread(_fetch_fundamentals, sym)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Could not fetch fundamentals for '{sym}': {exc}",
+        )
+
+    _set_cached(cache_key, result)
+    return result
+
+
 # ── Financial events (earnings, dividends, splits, analyst targets) ──────────
 
 def _fetch_events(sym: str) -> dict:
@@ -917,3 +1106,360 @@ async def get_events(
 
     _set_cached(cache_key, result)
     return result
+
+
+# ── Sector analysis ──────────────────────────────────────────────────────
+
+# Sector ETF tickers mapped to human-readable sector names.
+# Each ETF is a SPDR Select Sector Fund that tracks one GICS sector.
+_SECTOR_ETFS = {
+    "XLK": "Technology",
+    "XLF": "Financials",
+    "XLV": "Health Care",
+    "XLY": "Consumer Discretionary",
+    "XLP": "Consumer Staples",
+    "XLE": "Energy",
+    "XLI": "Industrials",
+    "XLB": "Materials",
+    "XLRE": "Real Estate",
+    "XLU": "Utilities",
+    "XLC": "Communication",
+}
+
+# Mapping from display names (GICS/SPDR) to yfinance sector taxonomy.
+# yfinance uses its own naming convention that differs from GICS for 6 sectors.
+# Used by the screener to translate the incoming sector filter parameter.
+_SECTOR_DISPLAY_TO_YF = {
+    "financials":             "financial services",
+    "health care":            "healthcare",
+    "consumer discretionary": "consumer cyclical",
+    "consumer staples":       "consumer defensive",
+    "materials":              "basic materials",
+    "communication":          "communication services",
+}
+
+_SECTOR_TTL = 300  # 5 minutes
+
+
+def _fetch_sector_etf(sym: str, name: str) -> Optional[dict]:
+    """Fetch performance data for a single sector ETF.
+
+    Retrieves the current price, daily change%, YTD return%, and 1-month
+    return% by downloading recent history from yfinance.
+
+    Args:
+        sym:  ETF ticker symbol (e.g. "XLK").
+        name: Human-readable sector name (e.g. "Technology").
+
+    Returns:
+        A dict matching the SectorItem schema, or None on failure.
+    """
+    try:
+        ticker = yf.Ticker(sym)
+        fi = ticker.fast_info
+
+        price = round(_safe_float(fi.last_price), 2)
+        prev_close = _safe_float(fi.regular_market_previous_close)
+        change_pct = round((price - prev_close) / prev_close * 100, 2) if prev_close else 0.0
+
+        # YTD performance: compare current price to the first close of the year
+        ytd_pct = None
+        try:
+            year_start = date.today().replace(month=1, day=1).strftime("%Y-%m-%d")
+            ytd_hist = ticker.history(start=year_start, auto_adjust=True)
+            if len(ytd_hist) >= 2:
+                first_close = _safe_float(ytd_hist.iloc[0]["Close"])
+                if first_close > 0:
+                    ytd_pct = round((price - first_close) / first_close * 100, 2)
+        except Exception:
+            pass
+
+        # 1-month performance: compare current price to the close ~21 trading days ago
+        month_pct = None
+        try:
+            month_start = (date.today() - timedelta(days=35)).strftime("%Y-%m-%d")
+            month_hist = ticker.history(start=month_start, auto_adjust=True)
+            if len(month_hist) >= 2:
+                first_close = _safe_float(month_hist.iloc[0]["Close"])
+                if first_close > 0:
+                    month_pct = round((price - first_close) / first_close * 100, 2)
+        except Exception:
+            pass
+
+        return {
+            "symbol": sym,
+            "name": name,
+            "price": price,
+            "change_pct": change_pct,
+            "ytd_pct": ytd_pct,
+            "month_pct": month_pct,
+        }
+    except Exception:
+        return None
+
+
+@router.get("/sectors", response_model=SectorResponse)
+async def get_sectors(current_user=Depends(get_current_user)):
+    """Return sector performance overview using sector ETFs as proxies.
+
+    Fetches current price, daily change%, YTD%, and 1-month% for each
+    GICS sector ETF.  All yfinance calls run in parallel via
+    asyncio.gather + to_thread.  Results are cached for 5 minutes and
+    returned sorted by daily change% (descending).
+
+    Args:
+        current_user: Authenticated user (injected by dependency).
+
+    Returns:
+        SectorResponse with a list of SectorItem objects.
+    """
+    cache_key = "sectors_overview"
+    cached = _get_cached(cache_key, _SECTOR_TTL)
+    if cached:
+        return cached
+
+    # Fetch all sector ETFs in parallel — each call runs in a thread
+    # to avoid blocking the event loop (yfinance is synchronous).
+    tasks = [
+        asyncio.to_thread(_fetch_sector_etf, sym, name)
+        for sym, name in _SECTOR_ETFS.items()
+    ]
+    results = await asyncio.gather(*tasks)
+
+    # Filter out failed fetches and sort by daily change% descending
+    sectors = [r for r in results if r is not None]
+    sectors.sort(key=lambda s: s["change_pct"], reverse=True)
+
+    response = {"sectors": sectors}
+    _set_cached(cache_key, response)
+    return response
+
+
+# ── Stock screener ───────────────────────────────────────────────────────
+
+# Universe of ~100 popular tickers (S&P 500 top components + growth/meme
+# stocks) used as the screening pool.  yf.download() batch-fetches them
+# in a single HTTP call for speed.
+_SCREENER_UNIVERSE = [
+    "AAPL", "MSFT", "AMZN", "NVDA", "GOOGL", "META", "TSLA", "BRK-B",
+    "UNH", "JNJ", "JPM", "V", "PG", "XOM", "HD", "MA", "CVX", "MRK",
+    "ABBV", "LLY", "PEP", "KO", "COST", "AVGO", "WMT", "MCD", "CSCO",
+    "TMO", "ABT", "CRM", "ACN", "DHR", "NKE", "ADBE", "TXN", "NEE",
+    "PM", "UNP", "BMY", "RTX", "AMGN", "LOW", "HON", "QCOM", "IBM",
+    "SBUX", "CAT", "BA", "GE", "INTC", "AMD", "PYPL", "DIS", "NFLX",
+    "GILD", "BLK", "ISRG", "SYK", "MDT", "PLD", "ADP", "VRTX", "REGN",
+    "ZTS", "CI", "MMC", "SO", "DUK", "CB", "CL", "CME", "APD", "TGT",
+    "FDX", "EMR", "PSA", "NSC", "PNC", "USB", "AIG", "GM", "F",
+    "RIVN", "PLTR", "SOFI", "COIN", "MARA", "SQ", "SNAP", "ROKU",
+    "DKNG", "ABNB", "UBER", "LYFT", "RBLX", "U", "HOOD", "AFRM",
+    "PATH", "NET", "CRWD", "DDOG", "ZS", "SNOW",
+]
+
+_SCREENER_TTL = 300  # 5 minutes
+
+# Valid sort fields for the screener endpoint
+_SCREENER_SORT_FIELDS = {"change_pct", "volume", "price", "market_cap"}
+
+
+def _fetch_screener_data() -> List[dict]:
+    """Batch-download latest price data for the screener universe.
+
+    Uses yf.download() with group_by='ticker' to fetch 5 days of OHLCV
+    data for all tickers in a single request.  Extracts the most recent
+    day's data (price, change, volume) and augments each ticker with
+    company name, market cap, and sector from yf.Ticker().info (cached
+    via _resolve_name and the name cache).
+
+    Returns:
+        A list of dicts matching the ScreenerItem schema.
+    """
+    tickers_str = " ".join(_SCREENER_UNIVERSE)
+
+    # Batch download 3 months of daily data — enough to compute SMA50
+    # and daily change even if the most recent day has partial data.
+    df = yf.download(tickers_str, period="3mo", group_by="ticker", progress=False)
+
+    items: List[dict] = []
+    for sym in _SCREENER_UNIVERSE:
+        try:
+            # Extract the per-ticker slice from the multi-level DataFrame
+            if sym not in df.columns.get_level_values(0):
+                continue
+            ticker_df = df[sym].dropna(subset=["Close"])
+            if len(ticker_df) < 2:
+                continue
+
+            # Latest and previous close for daily change calculation
+            latest = ticker_df.iloc[-1]
+            prev = ticker_df.iloc[-2]
+
+            price = round(_safe_float(latest["Close"]), 2)
+            prev_close = _safe_float(prev["Close"])
+            change = round(price - prev_close, 2) if prev_close else 0.0
+            change_pct = round(change / prev_close * 100, 2) if prev_close else 0.0
+            volume = int(_safe_float(latest["Volume"]))
+
+            # Compute 50-day SMA from available close prices
+            closes = ticker_df["Close"].values
+            sma50 = round(float(closes[-50:].mean()), 2) if len(closes) >= 50 else None
+
+            # Resolve name from the long-lived name cache (avoids slow .info calls
+            # on subsequent requests).
+            ticker_obj = yf.Ticker(sym)
+            name = _resolve_name(ticker_obj, sym)
+
+            # Fetch market cap from fast_info
+            market_cap = None
+            try:
+                fi = ticker_obj.fast_info
+                mc = _safe_float(fi.market_cap, default=None)
+                if mc and mc > 0:
+                    market_cap = mc
+            except Exception:
+                pass
+
+            # Sector lookup — use a dedicated cache to avoid repeated .info calls
+            sector = None
+            sector_cache_key = f"sector:{sym}"
+            cached_sector = _get_cached(sector_cache_key, _NAME_TTL)
+            if cached_sector is not None:
+                sector = cached_sector
+            else:
+                try:
+                    info = ticker_obj.info
+                    sector = info.get("sector")
+                    _set_cached(sector_cache_key, sector)
+                except Exception:
+                    _set_cached(sector_cache_key, None)
+
+            items.append({
+                "symbol": sym,
+                "name": name,
+                "price": price,
+                "change": change,
+                "change_pct": change_pct,
+                "volume": volume,
+                "market_cap": market_cap,
+                "sector": sector,
+                "sma50": sma50,
+            })
+        except Exception:
+            continue  # Skip tickers that fail to parse
+
+    return items
+
+
+@router.get("/screener", response_model=ScreenerResponse)
+async def run_screener(
+    min_price: Optional[float] = Query(None, description="Minimum price filter"),
+    max_price: Optional[float] = Query(None, description="Maximum price filter"),
+    min_change_pct: Optional[float] = Query(None, description="Minimum daily change %"),
+    max_change_pct: Optional[float] = Query(None, description="Maximum daily change %"),
+    min_volume: Optional[int] = Query(None, description="Minimum trading volume"),
+    sector: Optional[str] = Query(None, description="Filter by sector name"),
+    above_sma50: Optional[bool] = Query(None, description="Only show stocks trading above their 50-day SMA"),
+    sort_by: str = Query("change_pct", description="Sort field: change_pct, volume, price, market_cap"),
+    sort_dir: str = Query("desc", description="Sort direction: asc or desc"),
+    limit: int = Query(25, ge=1, le=50, description="Max results to return"),
+    current_user=Depends(get_current_user),
+):
+    """Run a stock screener with optional filters over ~100 popular tickers.
+
+    Applies price, change%, volume, and sector filters to a pre-downloaded
+    universe of S&P 500 top components.  Results are sorted by the chosen
+    field and truncated to the requested limit.  The full screener data is
+    batch-downloaded via yf.download() and cached for 5 minutes.
+
+    Args:
+        min_price:      Exclude stocks below this price.
+        max_price:      Exclude stocks above this price.
+        min_change_pct: Exclude stocks with daily change% below this.
+        max_change_pct: Exclude stocks with daily change% above this.
+        min_volume:     Exclude stocks with volume below this.
+        sector:         Only include stocks in this GICS sector.
+        sort_by:        Sort column (change_pct, volume, price, market_cap).
+        sort_dir:       Sort direction (asc or desc).
+        limit:          Maximum number of results (1-50, default 25).
+        current_user:   Authenticated user (injected by dependency).
+
+    Returns:
+        ScreenerResponse with filtered/sorted results, total match count,
+        and a dict of which filters were applied.
+    """
+    # Validate sort parameters
+    if sort_by not in _SCREENER_SORT_FIELDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid sort_by '{sort_by}'. Valid: {list(_SCREENER_SORT_FIELDS)}",
+        )
+    if sort_dir not in ("asc", "desc"):
+        raise HTTPException(status_code=400, detail="sort_dir must be 'asc' or 'desc'.")
+
+    # Fetch or retrieve cached screener data (the expensive batch download)
+    cache_key = "screener_universe"
+    items = _get_cached(cache_key, _SCREENER_TTL)
+    if items is None:
+        try:
+            items = await asyncio.to_thread(_fetch_screener_data)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Screener data fetch failed: {exc}",
+            )
+        _set_cached(cache_key, items)
+
+    # Build a record of which filters were actually applied (for the response)
+    filters_applied: Dict[str, object] = {}
+
+    # Apply filters — each guard only runs if the parameter was provided
+    filtered = list(items)
+
+    if min_price is not None:
+        filters_applied["min_price"] = min_price
+        filtered = [s for s in filtered if s["price"] >= min_price]
+
+    if max_price is not None:
+        filters_applied["max_price"] = max_price
+        filtered = [s for s in filtered if s["price"] <= max_price]
+
+    if min_change_pct is not None:
+        filters_applied["min_change_pct"] = min_change_pct
+        filtered = [s for s in filtered if s["change_pct"] >= min_change_pct]
+
+    if max_change_pct is not None:
+        filters_applied["max_change_pct"] = max_change_pct
+        filtered = [s for s in filtered if s["change_pct"] <= max_change_pct]
+
+    if min_volume is not None:
+        filters_applied["min_volume"] = min_volume
+        filtered = [s for s in filtered if s["volume"] >= min_volume]
+
+    if sector is not None:
+        filters_applied["sector"] = sector
+        # Translate GICS/SPDR display name to yfinance taxonomy if needed
+        sector_lower = sector.lower()
+        yf_sector = _SECTOR_DISPLAY_TO_YF.get(sector_lower, sector_lower)
+        filtered = [s for s in filtered if s.get("sector") and s["sector"].lower() == yf_sector]
+
+    if above_sma50 is not None:
+        filters_applied["above_sma50"] = above_sma50
+        # Keep only stocks whose price is above (or below) their 50-day SMA
+        if above_sma50:
+            filtered = [s for s in filtered if s.get("sma50") and s["price"] > s["sma50"]]
+        else:
+            filtered = [s for s in filtered if s.get("sma50") and s["price"] <= s["sma50"]]
+
+    total_matched = len(filtered)
+
+    # Sort — use 0 as default for None values (market_cap can be None)
+    reverse = sort_dir == "desc"
+    filtered.sort(key=lambda s: s.get(sort_by) or 0, reverse=reverse)
+
+    # Truncate to requested limit
+    filtered = filtered[:limit]
+
+    return {
+        "results": filtered,
+        "total_matched": total_matched,
+        "filters_applied": filters_applied,
+    }

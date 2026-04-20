@@ -73,7 +73,7 @@ const FEATURES = [
       "Volume histogram bars (toggle on/off)",
       "Crosshair with hover tooltip showing Date, OHLCV, Change%, and SMA values",
       "Hover data toggle to show/hide OHLCV tooltip (session-persistent)",
-      "Drawing tools: trend lines, horizontal lines, rays, rectangles, Fibonacci retracement, pitchfork, arrows, text",
+      "Drawing tools: trend lines, horizontal lines, extended horizontal lines, vertical lines, rays, rectangles, parallel channels, Fibonacci retracement, pitchfork, arrows, text, ruler, price range, callout",
       "Drawing style options: colour picker, line width, line style (solid/dashed/dotted), font size for text",
       "Chart template save/load system — save drawings and overlay settings as named templates",
       "Purchase point indicators showing where you bought positions — uses nearest-bar matching for accurate placement across all intervals",
@@ -108,7 +108,7 @@ const FEATURES = [
       "Transaction type filter: ALL, DEPOSIT, WITHDRAWAL, BUY, SELL",
       "Search by transaction ID or symbol",
       "Summary stats: Total Volume, Total Deposits, Total Buys, Completed count, Pending count",
-      "Export CSV for transaction records",
+      "Export CSV — generates and downloads a CSV file of the currently displayed transactions",
       "Order blotter with columns: Order ID, Symbol, Side, Type, Qty, Limit Price, Filled/Total, Status, Placed At",
       "Order filter: ALL, OPEN, FILLED, CANCELLED",
       "Order stats: Total Orders, Open Orders, Filled Orders, Cancelled, Open Notional",
@@ -120,7 +120,7 @@ const FEATURES = [
     title: "IMPORT",
     icon: "holdings",
     items: [
-      "Broker statement import — supports 8 brokers: Robinhood, IBKR, E*TRADE, TD Ameritrade, Coinbase, Binance, Schwab, Fidelity",
+      "Broker statement import — demo/preview only: shows a sample walkthrough for Robinhood, IBKR, E*TRADE, TD Ameritrade, Coinbase, Binance, Schwab, and Fidelity. Full broker CSV parsing coming soon.",
       "Per-broker step-by-step export guides with supported format badges (CSV, XML, OFX, QFX, XLSX)",
       "Drag-and-drop file upload with progress indicator",
       "Manual import — editable position grid with asset type dropdown, symbol, quantity, price, date, notes",
@@ -136,7 +136,7 @@ const FEATURES = [
       "Portfolio CSV Export: Downloads all positions as CSV with columns — Ticker, Name, Quantity, Purchase Date, Purchase Price, Asset Type, Group Tag, Stop Loss",
       "Transaction CSV Export: Downloads transaction history with columns — TXN ID, Type, Symbol, Amount, Currency, Account, Status, Date",
       "CSV Import: Upload positions with required columns (Ticker, Quantity, Purchase Price) and optional columns (Name, Date, Asset Type, Group Tag, Stop Loss, Notes)",
-      "Broker Statement Import: Supports 8 brokers — Robinhood, IBKR, E*TRADE, TD Ameritrade, Coinbase, Binance, Schwab, Fidelity",
+      "Broker Statement Import: Currently a demo/preview — displays a sample walkthrough for Robinhood, IBKR, E*TRADE, TD Ameritrade, Coinbase, Binance, Schwab, and Fidelity. Full broker CSV parsing coming soon.",
       "Supported file formats: CSV, XML, OFX, QFX, XLSX depending on broker",
       "Review all imported positions on the Portfolio Review tab before committing to your portfolio",
     ],
@@ -148,7 +148,7 @@ const FEATURES = [
       "Live scrolling market ticker in the top bar",
       "Automatically shows your portfolio tickers when positions exist",
       "Falls back to market index defaults (SPY, QQQ, major tech) when no portfolio",
-      "Smart polling: 3s during market hours, 5m after close",
+      "Smart polling: 30s during market hours, 5m after close",
     ],
   },
   {
@@ -190,7 +190,7 @@ const FEATURES = [
     items: [
       "Create unlimited named watchlists to track assets you're interested in",
       "Add stocks, crypto, ETFs, and physical assets to any watchlist",
-      "Live price quotes with market-aware polling (3s open / 5m closed)",
+      "Live price quotes with market-aware polling (30s open / 5m closed)",
       "Detailed table: Symbol, Name, Price, Change ($ + %), Day Range, Since Added %, Notes",
       "Summary strip showing total value, day change, and item count per watchlist",
       "Category filter tabs (ALL / STOCKS / CRYPTO / ETFs / PHYSICAL)",
@@ -198,6 +198,35 @@ const FEATURES = [
       "Buy directly from watchlist — picks portfolio and enters quantity in a modal",
       "Rename and delete watchlists with confirmation dialogs",
       "Performance since added column tracks asset movement from your watchlist entry price",
+    ],
+  },
+  {
+    title: "PRICE ALERTS",
+    icon: "bell",
+    items: [
+      "Create price alerts from Charts, Watchlist, or Portfolio Manager pages using the bell button",
+      "Set conditions: above, below, or crosses a target price",
+      "Manage all alerts from the dedicated ALERTS page in the sidebar",
+      "Filter alerts by Active, Triggered, or All",
+      "Edit target price, condition, and notes inline",
+      "Alerts are checked every 60 seconds during market hours (every 5 minutes outside market hours)",
+      "Triggered alerts generate in-app notifications and automatically deactivate",
+      "Maximum 50 active alerts per user",
+    ],
+  },
+  {
+    title: "ASSET DETAILS",
+    icon: "holdings",
+    items: [
+      "Click the ⓘ info button next to any ticker on the Portfolio Manager, Watchlist, or Charts page to open the Asset Details panel",
+      "Company overview: name, sector, industry, full-time employees, and business summary",
+      "Valuation metrics: P/E ratio, forward P/E, PEG ratio, price-to-book, price-to-sales, and enterprise value",
+      "Financial health: profit margin, operating margin, ROE, ROA, revenue growth, current ratio, and debt-to-equity",
+      "Dividends: dividend rate, yield, payout ratio, and ex-dividend date",
+      "Analyst targets: mean, median, high, and low price targets with a visual bar showing current price relative to the range",
+      "Earnings: most recent quarterly EPS, revenue, and earnings dates",
+      "Trading info: market cap, 52-week high/low, average volume, beta, and float shares",
+      "Fundamental data is cached for 1 hour to balance freshness with performance",
     ],
   },
   {
@@ -278,6 +307,66 @@ const FEATURES = [
       "CSV export of backtest results including summary metrics and full trade log",
     ],
   },
+  {
+    title: "LEARNING CENTER",
+    icon: "charts",
+    items: [
+      "Educational content page with rich topic material — no account or API required, all content loads instantly",
+      "Three difficulty levels: BEGINNER (green), INTERMEDIATE (amber), ADVANCED (red) with colour-coded tab buttons",
+      "Beginner topics (7): What Are Stocks, Understanding Price Charts, Basic Order Types, Portfolio Basics, Dividends & Income, Reading Financial News, Risk Management Basics",
+      "Intermediate topics (7): Technical Indicators, Chart Patterns, Fundamental Analysis, Sector Analysis, Options Basics, Fair Value Gap (FVG) Trading, Backtesting Strategies",
+      "Advanced topics (6): Advanced Technical Analysis, Algorithmic Trading Concepts, Portfolio Optimization, Market Microstructure, Macroeconomic Factors, Psychology & Behavioral Finance",
+      "Rich topic content — each topic includes an intro paragraph, detailed bullet points, PRO TIP callout boxes with practical advice, and DID YOU KNOW callout boxes with interesting facts",
+      "Accordion-style topic cards with emoji/icon on each card header — click to expand/collapse with smooth animation",
+      "Only one card expanded at a time per tab; switching tabs auto-expands the first topic",
+      "Progress tracking — mark topics as read with a checkbox, progress bar per difficulty level showing completion percentage, and completion badges when all topics in a level are finished",
+      "'Try It in TickerTap' navigation links on each topic — click to jump directly to the relevant page (Charts, Trading, Portfolio, Research, etc.)",
+    ],
+  },
+  {
+    title: "RESEARCH",
+    icon: "charts",
+    items: [
+      "SECTORS tab — heat-map grid of 11 GICS sector ETFs (XLK, XLF, XLV, XLE, XLY, XLP, XLI, XLB, XLRE, XLU, XLC) colour-coded by daily change percentage",
+      "Each sector card shows current price, daily change %, YTD %, 1-month % performance, and a sparkline chart showing recent performance trend",
+      "Improved sector card grid layout with better spacing for visual clarity",
+      "Click any sector card to auto-filter the screener to that sector's stocks",
+      "SCREENER tab — stock screener with filters for price range, change %, volume, and sector",
+      "Sort screener results by symbol, price, change, volume, or market cap in ascending or descending order",
+      "Results table displays symbol, company name, price, daily change ($ and %), volume, and market cap for each stock",
+      "Action buttons on screener results — view chart, add to watchlist, or add to portfolio directly from the results row",
+      "Screener covers a universe of approximately 100 widely traded stocks across all 11 sectors",
+      "Clickable ticker symbols in the screener open the Charts page for that stock",
+    ],
+  },
+  {
+    title: "EXIT POINTS",
+    icon: "orders",
+    items: [
+      "Enter any ticker symbol, select an analysis period, and click ANALYZE to compute exit levels",
+      "Overview panel showing current price, trend badge (bullish/bearish/neutral), RSI, ATR value, and support/resistance zones",
+      "ATR-based stop-loss levels at 1.5x, 2x, and 3x ATR below the current price",
+      "Take-profit targets calculated at 1:2 and 1:3 reward-to-risk ratios relative to ATR stops",
+      "Fibonacci retracement levels (23.6%, 38.2%, 50%, 61.8%, 78.6%) based on the 52-week high/low range",
+      "Bollinger Band levels (upper, middle, lower) for volatility-based exit zones",
+      "Moving average levels — SMA 50, SMA 200, and EMA 21 — as potential support/resistance points",
+      "52-week high and low values displayed as reference boundaries",
+      "Visual price ladder showing all computed levels arranged vertically relative to the current price",
+      "Sortable levels table with colour-coded type badges (stop-loss, take-profit, Fibonacci, indicator, boundary)",
+      "Trend analysis and RSI reading help contextualize which exit levels are most relevant",
+    ],
+  },
+  {
+    title: "ADMIN DASHBOARD",
+    icon: "admin",
+    items: [
+      "Admin-only page accessible from the ADMIN link in the sidebar — restricted to users whose email is listed in the server's ADMIN_EMAILS configuration",
+      "Non-admin users see an 'Access Denied' message when attempting to access the page",
+      "USERS tab — view all registered users, lock or unlock accounts, and search/filter by email or name",
+      "REPORTS tab — filter reports by status and type, expand any report to see full details, update status and admin notes, or delete reports",
+      "AUDIT LOG tab — view the 100 most recent system actions with old and new value diffs, filter entries by action type",
+    ],
+  },
 ];
 
 /* ── FAQ entries (static answers) ─────────────────────────────────────────── */
@@ -304,11 +393,11 @@ const FAQ_ITEMS = [
   },
   {
     q: "Can I export my portfolio data?",
-    a: 'Yes! On the Portfolio Manager page, click the "EXPORT CSV" button to download all positions in the current portfolio as a CSV file. The Transactions page also has an Export CSV button for transaction records.',
+    a: 'Yes! On the Portfolio Manager page, click the "EXPORT CSV" button to download all positions in the current portfolio as a CSV file. The Transactions page also has an Export CSV button that generates and downloads a CSV file of your current transaction data.',
   },
   {
     q: "How do I import data from my broker?",
-    a: 'Go to the Import page (accessible from Portfolio Manager). You can import broker statements from 8 supported brokers (Robinhood, IBKR, E*TRADE, TD Ameritrade, Coinbase, Binance, Schwab, Fidelity) by dragging and dropping your export file. Alternatively, use the Manual Import tab to enter positions one by one in an editable grid. Review everything on the Portfolio Review tab before committing.',
+    a: 'Go to the Import page (accessible from Portfolio Manager). The broker statement import section is currently a demo/preview — it shows a sample walkthrough for supported brokers (Robinhood, IBKR, E*TRADE, TD Ameritrade, Coinbase, Binance, Schwab, Fidelity), but full CSV parsing is coming soon. In the meantime, use the Manual Import tab to enter positions one by one in an editable grid. Review everything on the Portfolio Review tab before committing.',
   },
   {
     q: "What format does the CSV export use?",
@@ -320,7 +409,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "How do I use the drawing tools on charts?",
-    a: "Select a drawing tool from the toolbar (trend line, horizontal line, ray, rectangle, Fibonacci retracement, pitchfork, arrow, or text), then click on the chart to place anchor points. You can customise colour, line width, and line style (solid/dashed/dotted). Use the cursor tool to select drawings, and Delete/Backspace to remove them.",
+    a: "Select a drawing tool from the toolbar (trend line, horizontal line, extended horizontal line, vertical line, ray, rectangle, parallel channel, Fibonacci retracement, pitchfork, arrow, text, ruler, price range, or callout), then click on the chart to place anchor points. You can customise colour, line width, and line style (solid/dashed/dotted). Use the cursor tool to select drawings, and Delete/Backspace to remove them.",
   },
   {
     q: "What are chart templates?",
@@ -332,7 +421,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "What does the market status indicator mean?",
-    a: 'The green/red dot in the top-right shows whether the NYSE is currently open (9:30 AM – 4:00 PM ET, weekdays). When closed, it shows a countdown to the next market open. Polling frequency adjusts automatically: 3-second updates during market hours, 5-minute updates when closed.',
+    a: 'The green/red dot in the top-right shows whether the NYSE is currently open (9:30 AM – 4:00 PM ET, weekdays). When closed, it shows a countdown to the next market open. Polling frequency adjusts automatically: 30-second updates during market hours, 5-minute updates when closed.',
   },
   {
     q: "How do I change the display currency?",
@@ -369,6 +458,10 @@ const FAQ_ITEMS = [
   {
     q: "What are watchlists and how do I use them?",
     a: 'Watchlists let you track assets you\'re interested in without buying them. Go to the Watchlist page from the sidebar, create a named watchlist, and add items using the "+ ADD ITEM" button. Each item shows live price, day change, price range, and performance since you added it. You can add notes, filter by asset type, and even buy directly from the watchlist into one of your portfolios.',
+  },
+  {
+    q: "How do price alerts work?",
+    a: "Create alerts from any page with the bell button or from the ALERTS page. Set a condition (above, below, or crosses) and a target price. The system checks prices every 60 seconds during market hours. When triggered, you receive an in-app notification and the alert is automatically deactivated. You can manage all alerts from the ALERTS page in the sidebar.",
   },
   {
     q: "Does browser back/forward navigation work?",
@@ -441,6 +534,30 @@ const FAQ_ITEMS = [
   {
     q: "Why did my paper trade stop automatically?",
     a: "The circuit breaker trips when drawdown exceeds 15% from peak equity, automatically stopping the trade and closing all positions. This built-in safety mechanism prevents excessive simulated losses. You can start a new paper trade with adjusted parameters.",
+  },
+  {
+    q: "How do I view fundamental data for a stock?",
+    a: 'Click the ⓘ info button next to any ticker in the Portfolio Manager, Watchlist, or Charts page. This opens the Asset Details panel showing company info, valuation metrics (P/E, PEG, P/B, etc.), financial health (margins, ROE, debt ratios), dividends, analyst price targets with a visual range bar, earnings, and trading metrics. Data is refreshed every hour.',
+  },
+  {
+    q: "What is the Learning Center?",
+    a: "The Learning Center is a static educational page accessible from the LEARNING link in the sidebar. It covers stock trading and investing concepts across three difficulty levels: Beginner (7 topics covering stocks, charts, orders, portfolio basics, dividends, news, and risk management), Intermediate (7 topics on technical indicators, chart patterns, fundamental analysis, sectors, options, FVG trading, and backtesting), and Advanced (6 topics on advanced technicals, algorithmic trading, portfolio optimization, market microstructure, macroeconomics, and behavioral finance).",
+  },
+  {
+    q: "How do I navigate the Learning Center?",
+    a: "Use the three colour-coded tab buttons at the top — BEGINNER (green), INTERMEDIATE (amber), ADVANCED (red) — to switch difficulty levels. Within each level, click any topic card header to expand it and read the content. Only one card is expanded at a time; clicking another card closes the previous one. Switching tabs automatically opens the first topic.",
+  },
+  {
+    q: "How do I use the stock screener?",
+    a: "Go to the RESEARCH page from the sidebar. The SECTORS tab shows a heat-map grid of 11 sector ETFs colour-coded by daily performance — click any sector card to auto-filter the screener to that sector. Switch to the SCREENER tab to set filters for price range, change %, volume, and sector, then click SCAN. Results show symbol, name, price, change, volume, and market cap. You can sort by any column and click a ticker symbol to open its chart.",
+  },
+  {
+    q: "What are exit points and how do I use them?",
+    a: "The EXIT POINTS page computes key price levels to help you plan trade exits. Enter a ticker, select an analysis period, and click ANALYZE. The tool calculates ATR-based stop-loss levels (1.5x, 2x, 3x ATR), take-profit targets (1:2 and 1:3 reward-to-risk), Fibonacci retracement levels, Bollinger Band boundaries, and moving averages (SMA 50, SMA 200, EMA 21). Results include an overview panel with trend, RSI, and support/resistance zones, a visual price ladder showing all levels, and a sortable table with colour-coded type badges.",
+  },
+  {
+    q: "How do I access the admin dashboard?",
+    a: "Click ADMIN in the sidebar. Access is restricted to users whose email is listed in the server's ADMIN_EMAILS configuration. Non-admin users will see an 'Access Denied' message. The dashboard provides user management, report review, and audit log viewing.",
   },
 ];
 

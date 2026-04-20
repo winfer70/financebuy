@@ -4,7 +4,7 @@
  * Displays open and filled orders with ability to cancel pending orders.
  */
 
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useState } from "react";
 import api, { useApi } from "../api/client";
 import { Ic } from "../components/common/Icons";
 import { SkeletonRow, ApiError } from "../components/common";
@@ -32,9 +32,20 @@ export function OrdersPage({ onNewTx, token, accountId, goBack }) {
   const filledCount = allOrders.filter(o=>o.status==="filled").length;
 
   const handleCancel = async (orderId) => {
+    if (!window.confirm("Cancel this order?")) return;
     if (!token) return;
     try { await api.cancelOrder(orderId, token); refetch(); }
     catch (e) { console.error("Cancel failed:", e.message); }
+  };
+
+  /** Cancel every open/pending order concurrently then refresh the list. */
+  const handleCancelAll = async () => {
+    if (!window.confirm('Cancel all open orders?')) return;
+    const openOrders = allOrders.filter(o => o.status === 'open' || o.status === 'pending');
+    try {
+      await Promise.all(openOrders.map(o => api.cancelOrder(o.id, token)));
+      refetch();
+    } catch (e) { console.error("Cancel all failed:", e.message); }
   };
 
   return (
@@ -45,7 +56,7 @@ export function OrdersPage({ onNewTx, token, accountId, goBack }) {
           <div className="page-sub">{allOrders.length} ORDERS · {openCount} OPEN · {filledCount} FILLED</div>
         </div>
         <div className="page-actions">
-          {openCount > 0 && <button className="btn btn-danger">CANCEL ALL OPEN</button>}
+          {openCount > 0 && <button className="btn btn-danger" onClick={handleCancelAll}>CANCEL ALL OPEN</button>}
           <button className="btn btn-amber" onClick={onNewTx}><Ic.plus/> PLACE ORDER</button>
         </div>
       </div>
@@ -188,7 +199,7 @@ export function OrdersPage({ onNewTx, token, accountId, goBack }) {
                   </div>
                   <div style={{marginLeft:"auto",display:"flex",gap:8}}>
                     <button className="btn btn-ghost" style={{fontSize:9,padding:"4px 10px"}}>MODIFY</button>
-                    <button className="btn btn-danger" style={{fontSize:9,padding:"4px 10px"}}>CANCEL</button>
+                    <button className="btn btn-danger" style={{fontSize:9,padding:"4px 10px"}} onClick={() => handleCancel(o.id)}>CANCEL</button>
                   </div>
                 </div>
               ))}

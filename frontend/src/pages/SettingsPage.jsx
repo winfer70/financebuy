@@ -328,7 +328,7 @@ export function SettingsPage({ token, goBack, onLogout }) {
     setEmailMsg(null);
     try {
       /* api.changeEmail — POST /auth/change-email with { new_email, password }. Sends verification link. */
-      await api.changeEmail({ new_email: newEmail.trim(), password: emailPwd }, token);
+      await api.changeEmail(newEmail.trim(), emailPwd, token);
       setEmailMsg("VERIFICATION EMAIL SENT TO NEW ADDRESS");
       setNewEmail("");
       setEmailPwd("");
@@ -352,7 +352,7 @@ export function SettingsPage({ token, goBack, onLogout }) {
     setDeactErr(null);
     try {
       /* api.deactivateAccount — POST /auth/deactivate with { password }. Disables login. */
-      await api.deactivateAccount({ password: deactPwd }, token);
+      await api.deactivateAccount(deactPwd, token);
       onLogout?.();
     } catch (err) {
       setDeactErr(err.message || "Failed to deactivate account.");
@@ -375,7 +375,7 @@ export function SettingsPage({ token, goBack, onLogout }) {
     setDeleteErr(null);
     try {
       /* api.deleteAccount — DELETE /auth/account with { mode, password }. Returns confirmation. */
-      await api.deleteAccount({ mode: deleteMode, password: deletePwd }, token);
+      await api.deleteAccount(deleteMode, deletePwd, token);
       onLogout?.();
     } catch (err) {
       setDeleteErr(err.message || "Failed to delete account.");

@@ -102,14 +102,19 @@ export function QuotesProvider({ token, children }) {
      * Results are stored in quotesMap keyed by symbol.
      */
     const fetchAll = async () => {
+      // Batch into groups of 50 to stay within the server's per-request symbol cap.
+      const BATCH = 50;
+      const batches = [];
+      for (let i = 0; i < mergedSymbols.length; i += BATCH) batches.push(mergedSymbols.slice(i, i + BATCH));
       try {
-        const quoteList = await api.bulkQuotes(mergedSymbols, token);
+        const batchResults = await Promise.all(batches.map(b => api.bulkQuotes(b, token)));
         if (cancelled) return;
         const map = {};
-        quoteList.forEach(q => { map[q.symbol] = q; });
+        batchResults.flat().forEach(q => { map[q.symbol] = q; });
         setQuotesMap(map);
-      } catch {
+      } catch (e) {
         /* non-fatal — keep stale data */
+        console.error("[QuotesContext] bulkQuotes failed:", e?.message ?? e);
       }
     };
 

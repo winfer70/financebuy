@@ -39,7 +39,7 @@ from ..email import send_admin_report_notification
 from ..limiter import limiter
 from ..models import User, UserReport
 from ..routes.auth_routes import get_current_admin
-from ..schemas import UserReportAdminUpdate, UserReportCreate, UserReportOut
+from ..schemas import ReportAdminOut, UserReportAdminUpdate, UserReportCreate, UserReportOut
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +201,7 @@ async def create_report(
     return report
 
 
-@router.get("", response_model=List[UserReportOut])
+@router.get("", response_model=List[ReportAdminOut])
 async def list_reports(
     request: Request,
     status_filter: Optional[str] = Query(

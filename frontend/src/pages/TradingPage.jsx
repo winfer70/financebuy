@@ -14,8 +14,9 @@
  *   4. Displays metrics, equity curve, signals on chart, trade log
  *
  * Props:
- *   @param {string}   token       — JWT access token
- *   @param {Function} onViewChart — Navigate to advanced chart page for a symbol
+ *   @param {string}   token          — JWT access token
+ *   @param {Function} onViewChart    — Navigate to advanced chart page for a symbol
+ *   @param {string}   [initialSymbol] — Pre-fill the symbol input (e.g. from Portfolio/Watchlist quick-launch)
  */
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
@@ -55,6 +56,7 @@ const BOTTOM_TABS = [
   { id: "replay", label: "REPLAY" },
   { id: "compare", label: "COMPARE" },
   { id: "batch", label: "BATCH" },
+  { id: "score", label: "SCORE" },
   { id: "paper", label: "PAPER" },
 ];
 
@@ -66,7 +68,15 @@ const DISCLAIMER =
 
 /* ========================================================================== */
 
-export function TradingPage({ token, onViewChart }) {
+export function TradingPage({ token, onViewChart, initialSymbol }) {
+  /* -- Responsive: detect mobile viewport for layout changes -------------- */
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+
   /* -- State: controls ---------------------------------------------------- */
   const [strategyMode, setStrategyMode] = useState("builtin"); // builtin | pinescript | compose
   const [symbol, setSymbol] = useState("");
@@ -91,6 +101,8 @@ export function TradingPage({ token, onViewChart }) {
   const [backtestStatus, setBacktestStatus] = useState("idle"); // idle | queued | running | completed | failed
   const [backtestResult, setBacktestResult] = useState(null);
   const [ohlcvData, setOhlcvData] = useState([]);
+  const [backtestStartTime, setBacktestStartTime] = useState(null); // epoch ms when backtest was queued
+  const [elapsedSec, setElapsedSec] = useState(0); // seconds since backtest started
 
   /* -- State: market regime ----------------------------------------------- */
   const [regime, setRegime] = useState(null); // { regime, confidence, volatility_percentile, trend_strength }
@@ -100,6 +112,8 @@ export function TradingPage({ token, onViewChart }) {
   const [replayIdx, setReplayIdx] = useState(-1);
   const [replayPlaying, setReplayPlaying] = useState(false);
   const [replaySpeed, setReplaySpeed] = useState(1);
+  const [showTooltip, setShowTooltip] = useState(false);           // strategy info tooltip on hover
+  const [showStrategyDetail, setShowStrategyDetail] = useState(false); // strategy detail modal on click
   const replayTimer = useRef(null);
   const searchTimeoutRef = useRef(null);
 
@@ -111,15 +125,39 @@ export function TradingPage({ token, onViewChart }) {
   /* -- State: order creation ---------------------------------------------- */
   const [orderCreating, setOrderCreating] = useState(null); // index of trade being submitted
 
-  /* -- Load strategies on mount ------------------------------------------- */
+  /* -- State: portfolio score --------------------------------------------- */
+  const [scoreResults, setScoreResults] = useState(null);   // portfolio score API response
+  const [scoreLoading, setScoreLoading] = useState(false);  // loading indicator for score
+
+  /* -- Pre-fill symbol from initialSymbol prop (quick-launch) ------------- */
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await apiFetch("/trading/strategies/registry");
-        setStrategies(res || []);
-      } catch { /* swallow — strategies list will be empty */ }
-    })();
-  }, []);
+    if (initialSymbol) {
+      setSymbol(initialSymbol.toUpperCase());
+      setSearchQuery(initialSymbol.toUpperCase());
+    }
+  }, [initialSymbol]);
+
+  /* -- Load strategies (built-in + user-created, refreshable) ------------- */
+  const loadStrategies = useCallback(
+    /**
+     * Fetches the full strategy list (built-in + user-created) and updates
+     * state. Returns the resolved array so callers can chain with .then().
+     * @returns {Promise<Array>} The refreshed strategy list.
+     */
+    () =>
+      api.listStrategies(token)
+        .then((res) => {
+          const list = res || [];
+          setStrategies(list);
+          return list;
+        })
+        .catch(() => []),
+    [token],
+  );
+
+  useEffect(() => {
+    loadStrategies();
+  }, [loadStrategies]);
 
   /* -- Symbol search (debounced) ------------------------------------------ */
   useEffect(() => {
@@ -179,6 +217,7 @@ export function TradingPage({ token, onViewChart }) {
   const runBacktest = useCallback(async () => {
     if (!symbol || !selectedStrategy) return;
     setBacktestStatus("queued");
+    setBacktestStartTime(Date.now());
     setBacktestResult(null);
     try {
       const end = new Date();
@@ -207,6 +246,7 @@ export function TradingPage({ token, onViewChart }) {
       setBacktestId(res.result_id);
     } catch (err) {
       setBacktestStatus("failed");
+      setBacktestStartTime(null);
     }
   }, [symbol, selectedStrategy, interval, period, params, commission, slippage, token, initialCapital, riskModel, riskPct]);
 
@@ -222,6 +262,7 @@ export function TradingPage({ token, onViewChart }) {
           if (res.status === "completed") {
             setBacktestResult(res);
             setBacktestStatus("completed");
+            setBacktestStartTime(null);
             // Load OHLCV data for the chart
             try {
               const resp = await api.getOhlcv(symbol, token, 2);
@@ -241,6 +282,7 @@ export function TradingPage({ token, onViewChart }) {
           }
           if (res.status === "failed") {
             setBacktestStatus("failed");
+            setBacktestStartTime(null);
             break;
           }
           setBacktestStatus(res.status || "running");
@@ -251,6 +293,16 @@ export function TradingPage({ token, onViewChart }) {
     poll();
     return () => { alive = false; };
   }, [backtestId, token, symbol]);
+
+  /* -- Elapsed time tracker for running backtest -------------------------- */
+  useEffect(() => {
+    if (!backtestStartTime) { setElapsedSec(0); return; }
+    const iv = setInterval(
+      () => setElapsedSec(Math.floor((Date.now() - backtestStartTime) / 1000)),
+      1000,
+    );
+    return () => clearInterval(iv);
+  }, [backtestStartTime]);
 
   /* -- Signal markers for the chart --------------------------------------- */
   const signalMarkers = useMemo(() => {
@@ -408,9 +460,13 @@ export function TradingPage({ token, onViewChart }) {
   const runBatchWatchlist = useCallback(() => _runBatch(async () => {
     const lists = await api.getWatchlists(token);
     if (!lists?.length) return [];
-    // Fetch items from the first watchlist (primary)
-    const detail = await api.getWatchlist(lists[0].watchlist_id, token);
-    return (detail?.items || []).map((it) => it.symbol).filter(Boolean);
+    // Fetch items from ALL watchlists and collect symbols into a deduplicated Set
+    const allSymbols = new Set();
+    for (const wl of lists) {
+      const detail = await api.getWatchlist(wl.watchlist_id, token);
+      (detail?.items || []).forEach((it) => { if (it.symbol) allSymbols.add(it.symbol); });
+    }
+    return [...allSymbols];
   }, "No watchlist items found"), [_runBatch, token]);
 
   /* -- Fetch portfolio positions and run batch ----------------------------- */
@@ -425,6 +481,57 @@ export function TradingPage({ token, onViewChart }) {
     }
     return [...allTickers];
   }, "No portfolio positions found"), [_runBatch, token]);
+
+  /* -- Portfolio scoring: fetch all symbols and score ---------------------- */
+  const _runScore = useCallback(async () => {
+    if (scoreLoading) return;
+    setScoreLoading(true);
+    setScoreResults(null);
+    setBottomTab("score");
+    try {
+      // Combine portfolio tickers + watchlist symbols into one deduplicated list
+      const allSymbols = new Set();
+
+      // Fetch portfolio positions (same logic as runBatchPortfolio)
+      try {
+        const portfolios = await api.listPortfolios(token);
+        if (portfolios?.length) {
+          for (const p of portfolios) {
+            const positions = await api.listPositions(p.portfolio_id, token);
+            (positions || []).forEach((pos) => {
+              if (pos.ticker) allSymbols.add(pos.ticker);
+            });
+          }
+        }
+      } catch { /* portfolio fetch failed — continue with watchlist */ }
+
+      // Fetch watchlist symbols from ALL watchlists
+      try {
+        const lists = await api.getWatchlists(token);
+        if (lists?.length) {
+          for (const wl of lists) {
+            const detail = await api.getWatchlist(wl.watchlist_id, token);
+            (detail?.items || []).forEach((it) => {
+              if (it.symbol) allSymbols.add(it.symbol);
+            });
+          }
+        }
+      } catch { /* watchlist fetch failed — continue with what we have */ }
+
+      if (allSymbols.size === 0) {
+        setScoreResults({ error: "No symbols found in portfolio or watchlist." });
+        return;
+      }
+
+      const res = await api.scorePortfolio({ symbols: [...allSymbols] }, token);
+      setScoreResults(res);
+    } catch (err) {
+      console.error("Score failed:", err);
+      setScoreResults({ error: err.message || "Portfolio scoring failed." });
+    } finally {
+      setScoreLoading(false);
+    }
+  }, [token, scoreLoading]);
 
   /* -- Export backtest result as CSV --------------------------------------- */
   const handleExport = useCallback(async (format = "csv") => {
@@ -493,13 +600,13 @@ export function TradingPage({ token, onViewChart }) {
       </div>
 
       <div className="page-inner">
-        {/* Main layout: controls left, chart + tabs right */}
-        <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+        {/* Main layout: controls left, chart + tabs right (stacked on mobile) */}
+        <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexDirection: isMobile ? "column" : "row" }}>
 
           {/* ── Left Panel: Controls ──────────────────────────────────────── */}
           <div
             style={{
-              width: 260,
+              width: isMobile ? "100%" : 260,
               flexShrink: 0,
               display: "flex",
               flexDirection: "column",
@@ -589,18 +696,74 @@ export function TradingPage({ token, onViewChart }) {
               {/* BUILT-IN mode: strategy dropdown + ParameterEditor */}
               {strategyMode === "builtin" && (
                 <>
-                  <select
-                    className="form-control"
-                    value={selectedStrategy?.slug || ""}
-                    onChange={handleStrategyChange}
-                  >
-                    <option value="">-- Select --</option>
-                    {strategies.map((s) => (
-                      <option key={s.slug || s.strategy_id} value={s.slug}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
+                  {/* Strategy dropdown + info icon */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <select
+                      className="form-control"
+                      style={{ flex: 1 }}
+                      value={selectedStrategy?.slug || ""}
+                      onChange={handleStrategyChange}
+                    >
+                      <option value="">-- Select --</option>
+                      {strategies.map((s) => (
+                        <option key={s.slug || s.strategy_id} value={s.slug}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+
+                    {/* Info icon — hover for tooltip, click for detail modal */}
+                    {selectedStrategy && (
+                      <span
+                        style={{
+                          position: "relative",
+                          fontSize: 14,
+                          color: "var(--muted)",
+                          cursor: "pointer",
+                          userSelect: "none",
+                          lineHeight: 1,
+                          transition: "color 0.15s",
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.color = "var(--amber)";
+                          setShowTooltip(true);
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.color = "var(--muted)";
+                          setShowTooltip(false);
+                        }}
+                        onClick={() => setShowStrategyDetail(true)}
+                        title="" /* suppress native tooltip */
+                      >
+                        &#9432; {/* ⓘ info circle */}
+
+                        {/* Hover tooltip — strategy description */}
+                        {showTooltip && selectedStrategy.description && (
+                          <span style={{
+                            position: "absolute",
+                            top: "calc(100% + 6px)",
+                            left: "50%",
+                            transform: "translateX(-50%)",
+                            background: "rgba(0,0,0,0.95)",
+                            border: "1px solid var(--border)",
+                            borderRadius: 4,
+                            padding: 8,
+                            maxWidth: 300,
+                            minWidth: 180,
+                            fontSize: 11,
+                            color: "var(--fg)",
+                            zIndex: 100,
+                            whiteSpace: "normal",
+                            lineHeight: 1.4,
+                            pointerEvents: "none",
+                            boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
+                          }}>
+                            {selectedStrategy.description}
+                          </span>
+                        )}
+                      </span>
+                    )}
+                  </div>
 
                   {/* Strategy badge */}
                   {selectedStrategy && (
@@ -611,6 +774,137 @@ export function TradingPage({ token, onViewChart }) {
                       }}>
                         VERIFIED
                       </span>
+                    </div>
+                  )}
+
+                  {/* Strategy detail modal — name, description, default params table */}
+                  {showStrategyDetail && selectedStrategy && (
+                    <div
+                      style={{
+                        position: "fixed",
+                        top: 0, left: 0, right: 0, bottom: 0,
+                        background: "rgba(0,0,0,0.7)",
+                        zIndex: 9999,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                      onClick={() => setShowStrategyDetail(false)} /* close on backdrop click */
+                    >
+                      <div
+                        style={{
+                          background: "var(--bg1)",
+                          border: "1px solid var(--amber)",
+                          borderRadius: 6,
+                          maxWidth: 500,
+                          width: "90%",
+                          maxHeight: "80vh",
+                          overflowY: "auto",
+                          padding: 20,
+                          position: "relative",
+                        }}
+                        onClick={(e) => e.stopPropagation()} /* prevent close when clicking panel */
+                      >
+                        {/* Close button */}
+                        <button
+                          onClick={() => setShowStrategyDetail(false)}
+                          style={{
+                            position: "absolute",
+                            top: 10, right: 12,
+                            background: "none",
+                            border: "none",
+                            color: "var(--muted)",
+                            fontSize: 18,
+                            cursor: "pointer",
+                            lineHeight: 1,
+                            padding: 0,
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.color = "var(--amber)"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.color = "var(--muted)"; }}
+                        >
+                          &#10005; {/* X close */}
+                        </button>
+
+                        {/* Strategy name */}
+                        <div style={{
+                          fontSize: 14,
+                          fontWeight: 700,
+                          color: "var(--amber)",
+                          marginBottom: 12,
+                          paddingRight: 24,
+                        }}>
+                          {selectedStrategy.name}
+                        </div>
+
+                        {/* Full description */}
+                        {selectedStrategy.description && (
+                          <div style={{
+                            fontSize: 12,
+                            color: "var(--fg)",
+                            lineHeight: 1.5,
+                            marginBottom: 16,
+                          }}>
+                            {selectedStrategy.description}
+                          </div>
+                        )}
+
+                        {/* Default parameters table */}
+                        {selectedStrategy.param_schema && selectedStrategy.param_schema.length > 0 && (
+                          <div>
+                            <div style={{
+                              fontSize: 10,
+                              color: "var(--muted)",
+                              textTransform: "uppercase",
+                              letterSpacing: 1,
+                              marginBottom: 8,
+                            }}>
+                              Default Parameters
+                            </div>
+                            <table style={{
+                              width: "100%",
+                              borderCollapse: "collapse",
+                              fontSize: 11,
+                            }}>
+                              <thead>
+                                <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                                  {["Name", "Type", "Default", "Min", "Max"].map((h) => (
+                                    <th key={h} style={{
+                                      textAlign: "left",
+                                      padding: "6px 8px",
+                                      color: "var(--muted)",
+                                      fontWeight: 600,
+                                      fontSize: 10,
+                                    }}>
+                                      {h}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {selectedStrategy.param_schema.map((p) => (
+                                  <tr key={p.name} style={{ borderBottom: "1px solid var(--border)" }}>
+                                    <td style={{ padding: "5px 8px", color: "var(--fg)" }}>
+                                      {p.label || p.name}
+                                    </td>
+                                    <td style={{ padding: "5px 8px", color: "var(--muted)" }}>
+                                      {p.type}
+                                    </td>
+                                    <td style={{ padding: "5px 8px", color: "var(--amber)" }}>
+                                      {p.default != null ? String(p.default) : "\u2014"}
+                                    </td>
+                                    <td style={{ padding: "5px 8px", color: "var(--muted)" }}>
+                                      {p.min != null ? String(p.min) : "\u2014"}
+                                    </td>
+                                    <td style={{ padding: "5px 8px", color: "var(--muted)" }}>
+                                      {p.max != null ? String(p.max) : "\u2014"}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
 
@@ -634,8 +928,13 @@ export function TradingPage({ token, onViewChart }) {
               <PineScriptEditor
                 token={token}
                 onTranspiled={(def, sid) => {
-                  // After PineScript transpile, show AI-Translated badge info
-                  // and optionally auto-select for backtest
+                  // Refresh strategy list, then auto-select the transpiled strategy
+                  // and return to the standard selector view.
+                  loadStrategies().then((list) => {
+                    const strat = (list || []).find((s) => s.strategy_id === sid);
+                    if (strat) setSelectedStrategy(strat);
+                    setStrategyMode("standard");
+                  });
                 }}
               />
             )}
@@ -645,7 +944,13 @@ export function TradingPage({ token, onViewChart }) {
               <CompositionEditor
                 token={token}
                 onCreated={(sid) => {
-                  // Composed strategy created — could auto-select for backtest
+                  // Refresh strategy list, then auto-select the composed strategy
+                  // and return to the standard selector view.
+                  loadStrategies().then((list) => {
+                    const strat = (list || []).find((s) => s.strategy_id === sid);
+                    if (strat) setSelectedStrategy(strat);
+                    setStrategyMode("standard");
+                  });
                 }}
               />
             )}
@@ -743,20 +1048,85 @@ export function TradingPage({ token, onViewChart }) {
             </div>
 
             {/* Run Backtest button */}
-            <button
-              className="btn btn-amber"
-              style={{ width: "100%", justifyContent: "center", padding: "12px 0", fontSize: 12, letterSpacing: "1.5px" }}
-              onClick={runBacktest}
-              disabled={!symbol || !selectedStrategy || backtestStatus === "queued" || backtestStatus === "running"}
-            >
-              {backtestStatus === "queued" || backtestStatus === "running" ? (
-                <span className="loading-pulse">RUNNING...</span>
-              ) : (
-                <>
-                  <Ic.charts /> RUN BACKTEST
-                </>
-              )}
-            </button>
+            <div style={{ position: "relative" }}>
+              {/* Inline keyframes for spinner + progress bar animations */}
+              <style>{`
+                @keyframes tt-spin { to { transform: rotate(360deg); } }
+                @keyframes tt-indeterminate {
+                  0%   { left: -40%; width: 40%; }
+                  50%  { left: 30%;  width: 50%; }
+                  100% { left: 100%; width: 40%; }
+                }
+              `}</style>
+              <button
+                className="btn btn-amber"
+                style={{
+                  width: "100%",
+                  justifyContent: "center",
+                  padding: "12px 0",
+                  fontSize: 12,
+                  letterSpacing: "1.5px",
+                  position: "relative",
+                  overflow: "hidden",
+                }}
+                onClick={runBacktest}
+                disabled={!symbol || !selectedStrategy || backtestStatus === "queued" || backtestStatus === "running"}
+              >
+                {backtestStatus === "queued" ? (
+                  /* Queuing state: spinner + QUEUING label */
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <svg width="14" height="14" viewBox="0 0 14 14" style={{ animation: "tt-spin 0.8s linear infinite" }}>
+                      <circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--amber)" strokeWidth="2"
+                        strokeDasharray="20 14" strokeLinecap="round" />
+                    </svg>
+                    QUEUING...
+                  </span>
+                ) : backtestStatus === "running" ? (
+                  /* Running state: spinner + RUNNING + elapsed seconds */
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <svg width="14" height="14" viewBox="0 0 14 14" style={{ animation: "tt-spin 0.8s linear infinite" }}>
+                      <circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--amber)" strokeWidth="2"
+                        strokeDasharray="20 14" strokeLinecap="round" />
+                    </svg>
+                    RUNNING
+                    <span style={{
+                      fontFamily: "'IBM Plex Mono', monospace",
+                      fontSize: 10,
+                      color: "var(--amber)",
+                      minWidth: 28,
+                      textAlign: "right",
+                    }}>
+                      {elapsedSec}s
+                    </span>
+                  </span>
+                ) : (
+                  <>
+                    <Ic.charts /> RUN BACKTEST
+                  </>
+                )}
+
+                {/* Indeterminate progress bar — visible only while queued/running */}
+                {(backtestStatus === "queued" || backtestStatus === "running") && (
+                  <span style={{
+                    position: "absolute",
+                    bottom: 0,
+                    left: 0,
+                    width: "100%",
+                    height: 2,
+                    overflow: "hidden",
+                    pointerEvents: "none",
+                  }}>
+                    <span style={{
+                      position: "absolute",
+                      height: "100%",
+                      background: "var(--amber)",
+                      borderRadius: 1,
+                      animation: "tt-indeterminate 1.4s ease-in-out infinite",
+                    }} />
+                  </span>
+                )}
+              </button>
+            </div>
 
             {/* Batch + Export row */}
             <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
@@ -785,6 +1155,25 @@ export function TradingPage({ token, onViewChart }) {
                   EXPORT CSV
                 </button>
               )}
+            </div>
+
+            {/* Score portfolio row */}
+            <div style={{ marginTop: 6 }}>
+              <button
+                className="btn btn-outline"
+                style={{
+                  width: "100%",
+                  justifyContent: "center",
+                  fontSize: 9,
+                  padding: "6px 0",
+                  letterSpacing: "0.8px",
+                  color: scoreLoading ? "var(--amber)" : undefined,
+                }}
+                disabled={scoreLoading}
+                onClick={_runScore}
+              >
+                {scoreLoading ? "SCORING..." : "SCORE PORTFOLIO"}
+              </button>
             </div>
 
             {/* Metrics summary (when results available) */}
@@ -887,7 +1276,7 @@ export function TradingPage({ token, onViewChart }) {
             )}
 
             {/* Chart area */}
-            <div className="panel" style={{ height: 520, overflow: "hidden" }}>
+            <div className="panel" style={{ height: isMobile ? 300 : 520, overflow: "hidden" }}>
               {ohlcvData.length > 0 ? (
                 <OHLCVChart
                   data={bottomTab === "replay" ? replayData : ohlcvData}
@@ -1427,6 +1816,270 @@ export function TradingPage({ token, onViewChart }) {
                   </div>
                 ) : (
                   <EmptyState message="Click WATCHLIST or PORTFOLIO to batch-backtest across multiple symbols." />
+                )
+              )}
+
+              {/* SCORE tab */}
+              {bottomTab === "score" && (
+                scoreLoading ? (
+                  <div style={{ padding: 24, textAlign: "center" }}>
+                    <div style={{
+                      color: "var(--amber)",
+                      fontSize: 13,
+                      letterSpacing: "0.5px",
+                      marginBottom: 8,
+                    }}>
+                      SCORING PORTFOLIO...
+                    </div>
+                    <div style={{
+                      width: 120,
+                      height: 2,
+                      margin: "0 auto",
+                      background: "var(--border)",
+                      borderRadius: 1,
+                      overflow: "hidden",
+                    }}>
+                      <div style={{
+                        width: "40%",
+                        height: "100%",
+                        background: "var(--amber)",
+                        borderRadius: 1,
+                        animation: "tt-indeterminate 1.4s ease-in-out infinite",
+                      }} />
+                    </div>
+                  </div>
+                ) : scoreResults && !scoreResults.error ? (
+                  <div style={{ padding: 12, overflow: "auto", maxHeight: 420 }}>
+                    {/* Overall score header */}
+                    <div style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "10px 14px",
+                      marginBottom: 12,
+                      background: "var(--bg)",
+                      border: "1px solid var(--border)",
+                      borderRadius: 4,
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <span style={{
+                          fontSize: 11,
+                          color: "var(--muted)",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.8px",
+                        }}>
+                          Portfolio Score
+                        </span>
+                        <span style={{
+                          fontSize: 28,
+                          fontWeight: 700,
+                          color: (scoreResults.overall_score ?? 0) >= 70
+                            ? "var(--green)"
+                            : (scoreResults.overall_score ?? 0) >= 40
+                              ? "var(--amber)"
+                              : "var(--red)",
+                        }}>
+                          {scoreResults.overall_score ?? "—"}
+                          <span style={{ fontSize: 14, color: "var(--muted)", fontWeight: 400 }}>/100</span>
+                        </span>
+                      </div>
+                      {(scoreResults.top_suggestion || scoreResults.suggestion) && (
+                        <div style={{
+                          fontSize: 11,
+                          color: "var(--muted)",
+                          maxWidth: 320,
+                          textAlign: "right",
+                          lineHeight: 1.4,
+                        }}>
+                          {scoreResults.top_suggestion || scoreResults.suggestion}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Per-symbol table */}
+                    {(scoreResults.positions || scoreResults.symbols)?.length > 0 && (
+                      <div style={{ overflowX: "auto" }}>
+                        <table className="data-table" style={{
+                          width: "100%",
+                          borderCollapse: "collapse",
+                          fontSize: 11,
+                        }}>
+                          <thead>
+                            <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                              {["SYMBOL", "PRICE", "TREND", "RSI", "VOL", "SIGNAL", "SCORE"].map((h) => (
+                                <th key={h} style={{
+                                  textAlign: h === "SYMBOL" ? "left" : "right",
+                                  padding: "8px 10px",
+                                  color: "var(--muted)",
+                                  fontWeight: 600,
+                                  fontSize: 10,
+                                  letterSpacing: "0.5px",
+                                  whiteSpace: "nowrap",
+                                }}>
+                                  {h}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(scoreResults.positions || scoreResults.symbols).map((s, idx) => {
+                              /* Trend badge color */
+                              const trendColor = (s.trend || "").toLowerCase().includes("bull")
+                                ? "var(--green)"
+                                : (s.trend || "").toLowerCase().includes("bear")
+                                  ? "var(--red)"
+                                  : "var(--amber)";
+                              const trendIcon = (s.trend || "").toLowerCase().includes("bull")
+                                ? "\ud83d\udfe2"
+                                : (s.trend || "").toLowerCase().includes("bear")
+                                  ? "\ud83d\udd34"
+                                  : "\ud83d\udfe1";
+
+                              /* Signal badge color */
+                              const signalUpper = (s.signal || "").toUpperCase();
+                              const signalColor = signalUpper === "BUY"
+                                ? "var(--green)"
+                                : signalUpper === "SELL"
+                                  ? "var(--red)"
+                                  : "var(--amber)";
+
+                              /* Score bar color */
+                              const scoreVal = s.score ?? 0;
+                              const scoreColor = scoreVal >= 70
+                                ? "var(--green)"
+                                : scoreVal >= 40
+                                  ? "var(--amber)"
+                                  : "var(--red)";
+
+                              return (
+                                <tr key={s.symbol || idx} style={{
+                                  borderBottom: "1px solid var(--border)",
+                                }}>
+                                  {/* Symbol */}
+                                  <td style={{
+                                    padding: "7px 10px",
+                                    fontWeight: 600,
+                                    color: "var(--fg)",
+                                    textAlign: "left",
+                                  }}>
+                                    {s.symbol}
+                                  </td>
+
+                                  {/* Price */}
+                                  <td style={{
+                                    padding: "7px 10px",
+                                    textAlign: "right",
+                                    color: "var(--fg)",
+                                    fontVariantNumeric: "tabular-nums",
+                                  }}>
+                                    {s.price != null ? fmtUSD(s.price) : "—"}
+                                  </td>
+
+                                  {/* Trend */}
+                                  <td style={{
+                                    padding: "7px 10px",
+                                    textAlign: "right",
+                                  }}>
+                                    <span style={{
+                                      display: "inline-block",
+                                      padding: "2px 8px",
+                                      borderRadius: 3,
+                                      fontSize: 10,
+                                      fontWeight: 600,
+                                      color: trendColor,
+                                      background: `color-mix(in srgb, ${trendColor} 12%, transparent)`,
+                                      letterSpacing: "0.3px",
+                                    }}>
+                                      {trendIcon} {(s.trend || "N/A").toUpperCase()}
+                                    </span>
+                                  </td>
+
+                                  {/* RSI */}
+                                  <td style={{
+                                    padding: "7px 10px",
+                                    textAlign: "right",
+                                    color: "var(--fg)",
+                                    fontVariantNumeric: "tabular-nums",
+                                  }}>
+                                    {s.rsi != null ? Math.round(s.rsi) : "—"}
+                                  </td>
+
+                                  {/* Volatility */}
+                                  <td style={{
+                                    padding: "7px 10px",
+                                    textAlign: "right",
+                                    color: "var(--fg)",
+                                    fontVariantNumeric: "tabular-nums",
+                                  }}>
+                                    {s.volatility != null ? `${(s.volatility * 100).toFixed(1)}%` : "—"}
+                                  </td>
+
+                                  {/* Signal */}
+                                  <td style={{
+                                    padding: "7px 10px",
+                                    textAlign: "right",
+                                  }}>
+                                    <span style={{
+                                      display: "inline-block",
+                                      padding: "2px 8px",
+                                      borderRadius: 3,
+                                      fontSize: 10,
+                                      fontWeight: 600,
+                                      color: signalColor,
+                                      background: `color-mix(in srgb, ${signalColor} 12%, transparent)`,
+                                      letterSpacing: "0.3px",
+                                    }}>
+                                      {signalUpper || "—"}
+                                    </span>
+                                  </td>
+
+                                  {/* Score with colored bar */}
+                                  <td style={{
+                                    padding: "7px 10px",
+                                    textAlign: "right",
+                                  }}>
+                                    <div style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "flex-end",
+                                      gap: 6,
+                                    }}>
+                                      <div style={{
+                                        width: 48,
+                                        height: 4,
+                                        background: "var(--border)",
+                                        borderRadius: 2,
+                                        overflow: "hidden",
+                                      }}>
+                                        <div style={{
+                                          width: `${Math.min(scoreVal, 100)}%`,
+                                          height: "100%",
+                                          background: scoreColor,
+                                          borderRadius: 2,
+                                        }} />
+                                      </div>
+                                      <span style={{
+                                        fontWeight: 600,
+                                        color: scoreColor,
+                                        fontVariantNumeric: "tabular-nums",
+                                        minWidth: 20,
+                                      }}>
+                                        {scoreVal}
+                                      </span>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                ) : scoreResults?.error ? (
+                  <EmptyState message={scoreResults.error} />
+                ) : (
+                  <EmptyState message="Click SCORE PORTFOLIO to analyze your holdings and watchlist." />
                 )
               )}
 
