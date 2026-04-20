@@ -55,6 +55,7 @@ async def get_positions(
                 current_price=holding.current_price,
                 market_value=market_value,
                 currency=security.currency,
+                security_type=security.security_type,
             )
         )
 

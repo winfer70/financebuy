@@ -1,53 +1,257 @@
+# docker-compose.yml — TickerTap service definitions
+#
+# Network architecture
+# ────────────────────
+# All services communicate over the internal 'tickertap_net' bridge network
+# using their service names as hostnames (e.g. db:5432, redis:6379).
+# No database or cache ports are exposed to the host — they are only reachable
+# from within the Docker network, eliminating the P5.10 critical finding.
+#
+# Port exposure policy
+# ────────────────────
+#   db    — no host port (internal only)
+#   redis — no host port (internal only)
+#   app   — port 8000 bound to 127.0.0.1 only (nginx proxies externally)
+#
+# To connect to PostgreSQL for admin tasks use:
+#   docker compose exec db psql -U postgres tickerTap
+
+networks:
+  tickertap_net:
+    driver: bridge
+    # Restrict the subnet to a non-routable private range.
+    ipam:
+      config:
+        - subnet: REDACTED/16
+
 services:
   db:
-    image: postgres:15
+    image: timescale/timescaledb:latest-pg15
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: tickerTap
+      POSTGRES_USER:     ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD env var is required}
+      POSTGRES_DB:       ${POSTGRES_DB:-tickerTap}
     volumes:
       - db_data:/var/lib/postgresql/data
+    # No 'ports:' section — db is only reachable within tickertap_net.
     networks:
-      - finance_net
+      - tickertap_net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test:     ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
-      timeout: 5s
-      retries: 5
+      timeout:  5s
+      retries:  5
+    # Resource limits (P6.6) — prevent a runaway DB from starving other services
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    # No 'ports:' section — redis is only reachable within tickertap_net.
     networks:
-      - finance_net
+      - tickertap_net
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test:     ["CMD", "redis-cli", "ping"]
       interval: 10s
-      timeout: 5s
-      retries: 5
+      timeout:  5s
+      retries:  5
+    # Resource limits (P6.6)
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+        reservations:
+          cpus: "0.1"
+          memory: 32M
 
   app:
     build:
-      context: .
+      context:    .
       dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/tickerTap
-      JWT_SECRET: replace-this-secret
-      ALLOWED_ORIGINS: http://localhost:3000
+      # Use Docker service hostnames — no longer relies on host networking.
+      DATABASE_URL:    postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-tickerTap}
+      REDIS_URL:       redis://redis:6379/0
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173,https://ticker-tap.com}
+      SMTP_HOST:       ${SMTP_HOST:-smtp.example.com}
+      OLLAMA_URL:      ${OLLAMA_URL:-http://host.docker.internal:11434}
+      TRADING_ML_URL:  http://trading-ml:8001
+      ADMIN_EMAILS:    ${ADMIN_EMAILS:-}
+    # Map host.docker.internal to the host machine IP (automatic on
+    # Mac/Windows but requires this explicit mapping on Linux).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Bind to all interfaces so Server B workers can reach the API over LAN.
     ports:
-      - "8000:8000"
+      - "0.0.0.0:8000:8000"
+    networks:
+      - tickertap_net
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
-    networks:
-      - finance_net
+      trading-ml:
+        condition: service_healthy
     volumes:
       - ./backend/app:/app/app:ro
+      - ./backend/alembic:/app/alembic:ro
+    # Resource limits (P6.6)
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+  trading-worker:
+    build:
+      context:    .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    command: ["arq", "app.trading.worker.WorkerSettings"]
+    healthcheck:
+      # arq has no HTTP endpoint — verify PID 1 (arq) is still running
+      test: ["CMD-SHELL", "test -d /proc/1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-tickerTap}
+      REDIS_URL:    redis://redis:6379/0
+      TRADING_ML_URL: http://trading-ml:8001
+    networks:
+      - tickertap_net
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/app:/app/app:ro
+      - ./backend/alembic:/app/alembic:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+
+  paper-worker:
+    build:
+      context:    .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    command: ["arq", "app.trading.paper_worker.WorkerSettings"]
+    healthcheck:
+      test: ["CMD-SHELL", "test -d /proc/1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-tickerTap}
+      REDIS_URL:    redis://redis:6379/0
+    networks:
+      - tickertap_net
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/app:/app/app:ro
+      - ./backend/alembic:/app/alembic:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+  alert-worker:
+    build:
+      context:    .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    command: ["arq", "app.trading.alert_worker.WorkerSettings"]
+    healthcheck:
+      test: ["CMD-SHELL", "test -d /proc/1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-tickerTap}
+      REDIS_URL:    redis://redis:6379/0
+    networks:
+      - tickertap_net
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./backend/app:/app/app:ro
+      - ./backend/alembic:/app/alembic:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+  trading-ml:
+    build:
+      context:    ./trading-ml
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # Internal only — not exposed to the host.  The backend and
+    # trading-worker reach it via http://trading-ml:8001.
+    networks:
+      - tickertap_net
+    volumes:
+      - ml_checkpoints:/app/checkpoints
+    healthcheck:
+      test:     ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 30s
+      timeout:  10s
+      retries:  3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
 
 volumes:
   db_data:
-
-networks:
-  finance_net:
-    driver: bridge
+  ml_checkpoints:

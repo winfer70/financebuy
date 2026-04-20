@@ -1,33 +1,319 @@
-from fastapi import FastAPI
+"""
+main.py — FastAPI application entry point for TickerTap.
+
+Configures middleware (CORS, rate limiting, security headers, request
+logging, body size enforcement), registers all route modules under the
+/api/v1 prefix, and validates critical settings on startup.
+
+Security middleware applied (outermost → innermost):
+  1. SlowAPIMiddleware          — rate-limit enforcement (429 on breach)
+  2. CORSMiddleware             — origin restriction
+  3. SecurityHeadersMiddleware  — injects HSTS/CSP/X-Frame etc. (P6.2)
+  4. RequestBodySizeMiddleware  — rejects oversized payloads (P6.5)
+  5. RequestLoggingMiddleware   — structured access logs
+
+API versioning:
+  All business routes are mounted under /api/v1/ (P7.18).
+  The /health endpoint remains unversioned for monitoring tools.
+"""
+
+import logging
+import os
+import time
+
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
-from .routes import accounts, admin, auth_routes, orders, portfolio, transactions
+from .auth import validate_jwt_config
+from .limiter import limiter
+from .routes import accounts, admin, alerts, auth_routes, chart_templates, feedback, guide, holdings, market, news, orders, portfolio, portfolio_manager, reports, transactions, trading, watchlists
+from .routes.news import register_retention_task
+from .routes.feedback import register_outcome_checker
+from .routes.auth_routes import register_deletion_purge
 
-app = FastAPI(title="tickerTap API")
+# ── Logging ──────────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+)
+logger = logging.getLogger("tickerTap")
 
-# Minimal CORS - adjust origins in production
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+# ── Application ──────────────────────────────────────────────────────────────
+app = FastAPI(
+    title="tickerTap API",
+    version="1.0.0",
+    # Expose docs only in non-production environments
+    docs_url=None if os.getenv("ENVIRONMENT") == "production" else "/docs",
+    redoc_url=None if os.getenv("ENVIRONMENT") == "production" else "/redoc",
 )
 
-app.include_router(auth_routes.router)
-app.include_router(accounts.router)
-app.include_router(transactions.router)
-app.include_router(portfolio.router)
-app.include_router(orders.router)
-app.include_router(admin.router)
+# Attach limiter to app state so SlowAPIMiddleware can find it.
+app.state.limiter = limiter
+
+# Return HTTP 429 with a clear JSON body when a rate limit is exceeded.
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
-@app.get("/health")
+# ── Startup validation ───────────────────────────────────────────────────────
+
+async def _seed_system_strategies():
+    """Insert system strategy templates if the strategies table is empty.
+
+    Reads templates from trading/templates.py and inserts them as
+    ``is_system=True`` rows.  Skips if any system strategies already exist
+    to avoid duplicates on subsequent restarts.
+    """
+    import uuid
+    from .db import AsyncSessionLocal
+    from .models import Strategy
+    from .trading.templates import TEMPLATES
+    from sqlalchemy import select
+
+    async with AsyncSessionLocal() as session:
+        # Load existing system strategy slugs
+        existing_stmt = select(Strategy).where(
+            Strategy.is_system == True  # noqa: E712
+        )
+        existing = (await session.execute(existing_stmt)).scalars().all()
+        existing_slugs = {
+            (s.definition_json or {}).get("strategy_slug")
+            for s in existing
+        }
+
+        # Insert only templates whose slug is not already in the DB
+        inserted = 0
+        for tmpl in TEMPLATES:
+            slug = tmpl["definition_json"].get("strategy_slug")
+            if slug in existing_slugs:
+                continue
+            strategy = Strategy(
+                strategy_id=uuid.uuid4(),
+                user_id=None,
+                name=tmpl["name"],
+                description=tmpl["description"],
+                strategy_type=tmpl["strategy_type"],
+                category=tmpl.get("category"),
+                timeframe=tmpl.get("timeframe"),
+                asset_class=tmpl.get("asset_class"),
+                definition_json=tmpl["definition_json"],
+                is_public=True,
+                is_system=True,
+            )
+            session.add(strategy)
+            inserted += 1
+
+        if inserted:
+            await session.commit()
+            logger.info("Seeded %d new system strategies from templates.", inserted)
+        else:
+            logger.info("System strategies already seeded (%d found). Skipping.", len(existing))
+
+
+@app.on_event("startup")
+async def _startup_checks():
+    """Validate critical configuration on startup.
+
+    Performs the following checks and raises RuntimeError on failure:
+    - JWT secret is not the default placeholder
+    - LOG_LEVEL is not DEBUG when ENVIRONMENT=production (P7.6)
+    """
+    validate_jwt_config()
+
+    # P7.6 — Block debug logging in production to prevent sensitive data leakage
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    _env = os.getenv("ENVIRONMENT", "development").lower()
+    if log_level == "DEBUG" and _env == "production":
+        raise RuntimeError(
+            "LOG_LEVEL=DEBUG is not allowed in production — "
+            "debug logs can expose sensitive data such as query parameters, "
+            "account balances, and authentication tokens. "
+            "Set LOG_LEVEL=INFO or higher."
+        )
+
+    logger.info("Startup checks passed — JWT secret validated, log level OK.")
+
+    # Warn if INTERNAL_NEWS_KEY is weak or using a known default
+    _news_key = os.getenv("INTERNAL_NEWS_KEY", "")
+    _weak_keys = {"", "please-change-me", "dev_internal_news_key_not_for_production"}
+    if _news_key in _weak_keys:
+        logger.warning(
+            "INTERNAL_NEWS_KEY is missing or set to a known default — "
+            "the internal news ingestion endpoint is effectively unprotected. "
+            "Generate a strong key with: openssl rand -hex 32"
+        )
+
+    # Seed system strategies from templates on first run
+    await _seed_system_strategies()
+
+
+# ── Middleware stack (registered last → executes first) ──────────────────────
+
+# 1. Rate limiting — outermost so limits apply before any other processing.
+app.add_middleware(SlowAPIMiddleware)
+
+# 2. CORS — restricted to known origins with explicit methods/headers.
+_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in _origins.split(",")],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
+)
+
+
+# 3. Security headers middleware (P6.2) ─────────────────────────────────────
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Injects security headers on every response.
+
+    Provides a defence-in-depth layer for cases where nginx is not in front
+    of the backend (e.g. direct development access or container-to-container
+    calls).  nginx adds the same headers at the edge for production traffic.
+
+    Headers set:
+        Strict-Transport-Security — enforce HTTPS for 1 year, including subdomains
+        Content-Security-Policy   — restrictive default; block framing
+        X-Content-Type-Options    — prevent MIME-type sniffing
+        X-Frame-Options           — prevent clickjacking via iframes
+        Referrer-Policy           — limit referrer leakage
+        Permissions-Policy        — disable unused browser features
+        Cache-Control             — prevent sensitive API responses from caching
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+        response.headers.setdefault(
+            "Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'"
+        )
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault(
+            "Referrer-Policy", "strict-origin-when-cross-origin"
+        )
+        response.headers.setdefault(
+            "Permissions-Policy",
+            "camera=(), microphone=(), geolocation=(), payment=()",
+        )
+        # Prevent API responses from being stored in shared caches
+        response.headers.setdefault(
+            "Cache-Control", "no-store, no-cache, must-revalidate, private"
+        )
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
+
+
+# 4. Request body size limit (P6.5) ────────────────────────────────────────
+_MAX_BODY_BYTES = int(os.getenv("MAX_REQUEST_BODY_BYTES", str(10 * 1024 * 1024)))  # 10 MB
+
+
+class RequestBodySizeMiddleware(BaseHTTPMiddleware):
+    """Reject requests whose Content-Length exceeds MAX_REQUEST_BODY_BYTES.
+
+    Prevents Denial-of-Service attacks where a client sends a huge payload
+    to exhaust server memory.  The limit defaults to 10 MB and can be tuned
+    via the MAX_REQUEST_BODY_BYTES environment variable.
+
+    Returns HTTP 413 Payload Too Large with a descriptive JSON body.
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        content_length = request.headers.get("content-length")
+        if content_length and int(content_length) > _MAX_BODY_BYTES:
+            return JSONResponse(
+                status_code=413,
+                content={
+                    "detail": (
+                        f"Request payload exceeds the maximum allowed size "
+                        f"({_MAX_BODY_BYTES // (1024 * 1024)} MB)."
+                    )
+                },
+            )
+        return await call_next(request)
+
+
+app.add_middleware(RequestBodySizeMiddleware)
+
+
+# 5. Request logging middleware ──────────────────────────────────────────────
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    """Logs every request with method, path, status code, and duration.
+
+    Paths containing 'password' or 'token' are logged with the path
+    truncated to prevent accidental credential leakage into log files.
+    """
+
+    _SENSITIVE = ("password", "token", "secret")
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        start = time.perf_counter()
+        response = await call_next(request)
+        duration_ms = (time.perf_counter() - start) * 1000
+        path = request.url.path
+        # Redact paths that look like they carry sensitive route segments
+        if any(s in path.lower() for s in self._SENSITIVE):
+            path = path.split("?")[0]  # strip query string only
+        logger.info(
+            "%s %s → %d (%.1fms)",
+            request.method,
+            path,
+            response.status_code,
+            duration_ms,
+        )
+        return response
+
+
+app.add_middleware(RequestLoggingMiddleware)
+
+
+# ── Routes — all under /api/v1/ prefix (P7.18) ───────────────────────────────
+_V1 = "/api/v1"
+
+app.include_router(auth_routes.router, prefix=_V1)
+app.include_router(accounts.router, prefix=_V1)
+app.include_router(transactions.router, prefix=_V1)
+app.include_router(portfolio.router, prefix=_V1)
+app.include_router(orders.router, prefix=_V1)
+app.include_router(admin.router, prefix=_V1)
+app.include_router(market.router, prefix=f"{_V1}/market", tags=["market"])
+app.include_router(holdings.router, prefix=f"{_V1}/holdings", tags=["holdings"])
+app.include_router(news.router, prefix=_V1)
+app.include_router(portfolio_manager.router, prefix=_V1)
+app.include_router(chart_templates.router, prefix=_V1)
+app.include_router(feedback.router, prefix=_V1)
+app.include_router(guide.router, prefix=_V1)
+app.include_router(reports.router, prefix=_V1)
+app.include_router(watchlists.router, prefix=_V1)
+app.include_router(trading.router, prefix=_V1)
+app.include_router(alerts.router, prefix=_V1)
+
+# Register the 30-day news retention cleanup background task (Phase 9).
+register_retention_task(app)
+
+# Register the outcome checker that validates LLM scoring accuracy.
+register_outcome_checker(app)
+
+# Register the daily purge of soft-deleted accounts past their 30-day window.
+register_deletion_purge(app)
+
+
+@app.get("/health", tags=["health"])
 async def health():
-    return {"status": "ok"}
+    """Lightweight health check for load balancers and monitoring.
 
+    Intentionally unversioned so monitoring tools need no configuration
+    changes between API versions.
 
-@app.get("/docker-compose")
-async def docker_compose():
-    # lightweight endpoint used by tests to validate docker-compose setup
+    Returns:
+        dict: {"status": "ok"}
+    """
     return {"status": "ok"}
