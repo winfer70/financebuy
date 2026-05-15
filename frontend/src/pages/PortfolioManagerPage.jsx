@@ -25,6 +25,7 @@ import { fmtUSD, fmtQty, fmtPct, fmtDate } from "../utils/formatters";
 import { MODAL_BACKDROP as BDK } from "../styles/shared";
 import AssetDetailPanel from "../components/common/AssetDetailPanel";
 import AlertModal from "../components/common/AlertModal";
+import StaleDataBanner from "../components/common/StaleDataBanner";
 
 /* -- Asset section config ------------------------------------------------- */
 const SECTIONS = [
@@ -33,6 +34,8 @@ const SECTIONS = [
   { id: "crypto",   label: "CRYPTO" },
   { id: "etf",      label: "ETFs" },
   { id: "physical", label: "PHYSICAL" },
+  { id: "trades",   label: "TRADE HISTORY" },
+  { id: "rules",    label: "RULES" },
 ];
 
 const METALS = [
@@ -96,11 +99,14 @@ function CreatePortfolioModal({ onClose, onCreated, token }) {
 /* =========================================================================
    MODAL: Add Stock Position
 ========================================================================= */
-function AddStockModal({ portfolioId, onClose, onAdded, token }) {
+function AddStockModal({ portfolioId, portfolio, onClose, onAdded, token }) {
   const [form, setForm] = useState({ ticker: "", quantity: "", purchase_date: "", purchase_price: "", group_tag: "", stop_loss: "", profit_taking: "" });
+  const [deductCash, setDeductCash] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const estimatedCost = (parseFloat(form.quantity) || 0) * (parseFloat(form.purchase_price) || 0);
 
   const submit = async () => {
     if (!form.ticker.trim()) { setErr("Ticker is required."); return; }
@@ -119,6 +125,7 @@ function AddStockModal({ portfolioId, onClose, onAdded, token }) {
         asset_type:     "stock",
         stop_loss:      form.stop_loss && !isNaN(+form.stop_loss) && +form.stop_loss > 0 ? parseFloat(form.stop_loss) : null,
         profit_taking:  form.profit_taking && !isNaN(+form.profit_taking) && +form.profit_taking > 0 ? parseFloat(form.profit_taking) : null,
+        deduct_cash:    deductCash,
       };
       const pos = await api.addPosition(portfolioId, payload, token);
       onAdded(pos);
@@ -171,6 +178,16 @@ function AddStockModal({ portfolioId, onClose, onAdded, token }) {
             </div>
             <div className="form-field" />
           </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 12, fontFamily: "var(--font-mono)", cursor: "pointer", color: "var(--c-text)" }}>
+            <input type="checkbox" checked={deductCash} onChange={e => setDeductCash(e.target.checked)}
+              style={{ accentColor: "var(--c-accent)", cursor: "pointer" }} />
+            Deduct ${estimatedCost > 0 ? estimatedCost.toFixed(2) : "?"} from cash balance
+          </label>
+          {deductCash && estimatedCost > 0 && estimatedCost > (portfolio?.cash_balance ?? 0) && (
+            <p style={{ color: "var(--red)", fontSize: 11, marginTop: 4, fontFamily: "var(--font-mono)" }}>
+              Insufficient cash. Available: ${(portfolio?.cash_balance ?? 0).toFixed(2)}
+            </p>
+          )}
         </div>
         {err && <div style={{ padding: "8px 20px", fontSize: 11, color: "var(--red)", background: "rgba(239,68,68,.06)", borderTop: "1px solid rgba(239,68,68,.2)" }}>{err}</div>}
         <div className="modal-footer">
@@ -187,11 +204,14 @@ function AddStockModal({ portfolioId, onClose, onAdded, token }) {
 /* =========================================================================
    MODAL: Add Crypto Position
 ========================================================================= */
-function AddCryptoModal({ portfolioId, onClose, onAdded, token }) {
+function AddCryptoModal({ portfolioId, portfolio, onClose, onAdded, token }) {
   const [form, setForm] = useState({ ticker: "", quantity: "", purchase_date: "", purchase_price: "", stop_loss: "", profit_taking: "" });
+  const [deductCash, setDeductCash] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const estimatedCost = (parseFloat(form.quantity) || 0) * (parseFloat(form.purchase_price) || 0);
 
   const submit = async () => {
     if (!form.ticker.trim()) { setErr("Symbol is required (e.g. BTC-USD)."); return; }
@@ -210,6 +230,7 @@ function AddCryptoModal({ portfolioId, onClose, onAdded, token }) {
         asset_type:     "crypto",
         stop_loss:      form.stop_loss && !isNaN(+form.stop_loss) && +form.stop_loss > 0 ? parseFloat(form.stop_loss) : null,
         profit_taking:  form.profit_taking && !isNaN(+form.profit_taking) && +form.profit_taking > 0 ? parseFloat(form.profit_taking) : null,
+        deduct_cash:    deductCash,
       };
       const pos = await api.addPosition(portfolioId, payload, token);
       onAdded(pos);
@@ -254,6 +275,16 @@ function AddCryptoModal({ portfolioId, onClose, onAdded, token }) {
             <label className="form-label">Profit Taking</label>
             <input className="form-control" type="number" min="0.01" step="any" placeholder="55000.00" value={form.profit_taking} onChange={e => set("profit_taking", e.target.value)} />
           </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 12, fontFamily: "var(--font-mono)", cursor: "pointer", color: "var(--c-text)" }}>
+            <input type="checkbox" checked={deductCash} onChange={e => setDeductCash(e.target.checked)}
+              style={{ accentColor: "var(--c-accent)", cursor: "pointer" }} />
+            Deduct ${estimatedCost > 0 ? estimatedCost.toFixed(2) : "?"} from cash balance
+          </label>
+          {deductCash && estimatedCost > 0 && estimatedCost > (portfolio?.cash_balance ?? 0) && (
+            <p style={{ color: "var(--red)", fontSize: 11, marginTop: 4, fontFamily: "var(--font-mono)" }}>
+              Insufficient cash. Available: ${(portfolio?.cash_balance ?? 0).toFixed(2)}
+            </p>
+          )}
         </div>
         {err && <div style={{ padding: "8px 20px", fontSize: 11, color: "var(--red)", background: "rgba(239,68,68,.06)", borderTop: "1px solid rgba(239,68,68,.2)" }}>{err}</div>}
         <div className="modal-footer">
@@ -270,11 +301,14 @@ function AddCryptoModal({ portfolioId, onClose, onAdded, token }) {
 /* =========================================================================
    MODAL: Add ETF Position
 ========================================================================= */
-function AddETFModal({ portfolioId, onClose, onAdded, token }) {
+function AddETFModal({ portfolioId, portfolio, onClose, onAdded, token }) {
   const [form, setForm] = useState({ ticker: "", quantity: "", purchase_date: "", purchase_price: "", stop_loss: "", profit_taking: "" });
+  const [deductCash, setDeductCash] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const estimatedCost = (parseFloat(form.quantity) || 0) * (parseFloat(form.purchase_price) || 0);
 
   const submit = async () => {
     if (!form.ticker.trim()) { setErr("Symbol is required (e.g. GLD)."); return; }
@@ -293,6 +327,7 @@ function AddETFModal({ portfolioId, onClose, onAdded, token }) {
         asset_type:     "etf",
         stop_loss:      form.stop_loss && !isNaN(+form.stop_loss) && +form.stop_loss > 0 ? parseFloat(form.stop_loss) : null,
         profit_taking:  form.profit_taking && !isNaN(+form.profit_taking) && +form.profit_taking > 0 ? parseFloat(form.profit_taking) : null,
+        deduct_cash:    deductCash,
       };
       const pos = await api.addPosition(portfolioId, payload, token);
       onAdded(pos);
@@ -337,6 +372,16 @@ function AddETFModal({ portfolioId, onClose, onAdded, token }) {
             <label className="form-label">Profit Taking</label>
             <input className="form-control" type="number" min="0.01" step="any" placeholder="200.00" value={form.profit_taking} onChange={e => set("profit_taking", e.target.value)} />
           </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 12, fontFamily: "var(--font-mono)", cursor: "pointer", color: "var(--c-text)" }}>
+            <input type="checkbox" checked={deductCash} onChange={e => setDeductCash(e.target.checked)}
+              style={{ accentColor: "var(--c-accent)", cursor: "pointer" }} />
+            Deduct ${estimatedCost > 0 ? estimatedCost.toFixed(2) : "?"} from cash balance
+          </label>
+          {deductCash && estimatedCost > 0 && estimatedCost > (portfolio?.cash_balance ?? 0) && (
+            <p style={{ color: "var(--red)", fontSize: 11, marginTop: 4, fontFamily: "var(--font-mono)" }}>
+              Insufficient cash. Available: ${(portfolio?.cash_balance ?? 0).toFixed(2)}
+            </p>
+          )}
         </div>
         {err && <div style={{ padding: "8px 20px", fontSize: 11, color: "var(--red)", background: "rgba(239,68,68,.06)", borderTop: "1px solid rgba(239,68,68,.2)" }}>{err}</div>}
         <div className="modal-footer">
@@ -353,11 +398,14 @@ function AddETFModal({ portfolioId, onClose, onAdded, token }) {
 /* =========================================================================
    MODAL: Add Physical Asset
 ========================================================================= */
-function AddPhysicalModal({ portfolioId, onClose, onAdded, token }) {
+function AddPhysicalModal({ portfolioId, portfolio, onClose, onAdded, token }) {
   const [form, setForm] = useState({ metal: METALS[0].symbol, quantity: "", purchase_date: "", purchase_price: "", physical_type: "coin", name: "", stop_loss: "", profit_taking: "" });
+  const [deductCash, setDeductCash] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const estimatedCost = (parseFloat(form.quantity) || 0) * (parseFloat(form.purchase_price) || 0);
 
   const submit = async () => {
     if (!form.quantity || isNaN(+form.quantity) || +form.quantity <= 0) { setErr("Quantity must be a positive number."); return; }
@@ -376,6 +424,7 @@ function AddPhysicalModal({ portfolioId, onClose, onAdded, token }) {
         physical_type:  form.physical_type,
         stop_loss:      form.stop_loss && !isNaN(+form.stop_loss) && +form.stop_loss > 0 ? parseFloat(form.stop_loss) : null,
         profit_taking:  form.profit_taking && !isNaN(+form.profit_taking) && +form.profit_taking > 0 ? parseFloat(form.profit_taking) : null,
+        deduct_cash:    deductCash,
       };
       const pos = await api.addPosition(portfolioId, payload, token);
       onAdded(pos);
@@ -441,6 +490,16 @@ function AddPhysicalModal({ portfolioId, onClose, onAdded, token }) {
             </div>
             <div className="form-field" />
           </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 12, fontFamily: "var(--font-mono)", cursor: "pointer", color: "var(--c-text)" }}>
+            <input type="checkbox" checked={deductCash} onChange={e => setDeductCash(e.target.checked)}
+              style={{ accentColor: "var(--c-accent)", cursor: "pointer" }} />
+            Deduct ${estimatedCost > 0 ? estimatedCost.toFixed(2) : "?"} from cash balance
+          </label>
+          {deductCash && estimatedCost > 0 && estimatedCost > (portfolio?.cash_balance ?? 0) && (
+            <p style={{ color: "var(--red)", fontSize: 11, marginTop: 4, fontFamily: "var(--font-mono)" }}>
+              Insufficient cash. Available: ${(portfolio?.cash_balance ?? 0).toFixed(2)}
+            </p>
+          )}
         </div>
         {err && <div style={{ padding: "8px 20px", fontSize: 11, color: "var(--red)", background: "rgba(239,68,68,.06)", borderTop: "1px solid rgba(239,68,68,.2)" }}>{err}</div>}
         <div className="modal-footer">
@@ -662,26 +721,44 @@ function ModifyPositionModal({ position, onClose, onModified, token }) {
 /* =========================================================================
    MODAL: Sell Position
 ========================================================================= */
-function SellPositionModal({ position, onClose, onSold, token }) {
+function SellPositionModal({ position, portfolio, onClose, onSold, onPortfolioRefresh, token }) {
   const maxQty = parseFloat(position.quantity);
-  const [qty,     setQty]     = useState(String(maxQty));
-  const [loading, setLoading] = useState(false);
-  const [err,     setErr]     = useState("");
+  const [qty,        setQty]        = useState(String(maxQty));
+  const [sellPrice,  setSellPrice]  = useState(String(parseFloat(position.purchase_price)));
+  const [priceLoading, setPriceLoading] = useState(true);
+  const [creditCash, setCreditCash] = useState(true);
+  const [loading,    setLoading]    = useState(false);
+  const [err,        setErr]        = useState("");
+
+  // Fetch current market price on open; pre-populate sell price field
+  useEffect(() => {
+    let cancelled = false;
+    api.getQuote(position.ticker, token)
+      .then(q => { if (!cancelled) setSellPrice(String(q.price)); })
+      .catch(() => { /* keep purchase_price fallback */ })
+      .finally(() => { if (!cancelled) setPriceLoading(false); });
+    return () => { cancelled = true; };
+  }, [position.ticker, token]);
 
   const sell = async () => {
     const n = parseFloat(qty);
+    const p = parseFloat(sellPrice);
     if (isNaN(n) || n <= 0) { setErr("Enter a valid quantity."); return; }
     if (n > maxQty) { setErr(`Cannot sell more than ${fmtQty(maxQty)} units.`); return; }
+    if (isNaN(p) || p <= 0) { setErr("Enter a valid sell price."); return; }
     setLoading(true); setErr("");
     try {
-      const result = await api.sellPosition(position.position_id, n, token);
+      const result = await api.sellPosition(position.position_id, n, p, token, creditCash);
       onSold(result);
+      if (creditCash && onPortfolioRefresh) onPortfolioRefresh();
     } catch (e) { setErr(e.message || "Sell failed."); }
     finally { setLoading(false); }
   };
 
-  const n       = parseFloat(qty) || 0;
-  const isFull  = n >= maxQty;
+  const n      = parseFloat(qty) || 0;
+  const p      = parseFloat(sellPrice) || 0;
+  const isFull = n >= maxQty;
+  const estimatedProceeds = n * p;
 
   return (
     <div className="modal-overlay" style={BDK} onClick={e => e.target === e.currentTarget && onClose()}>
@@ -704,6 +781,23 @@ function SellPositionModal({ position, onClose, onSold, token }) {
                 : `${fmtQty(maxQty - n)} units remaining after sale.`}
             </span>
           </div>
+          <div className="form-field" style={{ marginTop: 12 }}>
+            <label className="form-label">
+              Sell Price
+              {priceLoading && <span style={{ fontWeight: 400, color: "var(--c-muted)", marginLeft: 6, fontSize: 10 }}>fetching market price…</span>}
+            </label>
+            <input className="form-control" type="number" min="0.000001" step="any"
+              value={sellPrice} onChange={e => { setErr(""); setSellPrice(e.target.value); }} />
+            <span className="form-hint">Current market price pre-filled. Edit to override.</span>
+          </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 12, fontFamily: "var(--font-mono)", cursor: "pointer", color: "var(--c-text)" }}>
+            <input type="checkbox" checked={creditCash} onChange={e => setCreditCash(e.target.checked)}
+              style={{ accentColor: "var(--c-accent)", cursor: "pointer" }} />
+            Credit proceeds to cash balance
+            {n > 0 && p > 0 && <span style={{ color: "var(--c-muted)", fontSize: 11 }}>
+              (~{fmtUSD(estimatedProceeds)})
+            </span>}
+          </label>
         </div>
         {err && <div style={{ padding: "8px 20px", fontSize: 11, color: "var(--red)", background: "rgba(239,68,68,.06)", borderTop: "1px solid rgba(239,68,68,.2)" }}>{err}</div>}
         <div className="modal-footer">
@@ -780,6 +874,56 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
   const [alertSymbol,   setAlertSymbol]   = useState(null);   // symbol for AlertModal
   const [alertPrice,    setAlertPrice]    = useState(null);   // current price for AlertModal
 
+  // Portfolio scoring (detailed)
+  const [scoreLoading,  setScoreLoading]  = useState(false);
+  const [scoreResults,  setScoreResults]  = useState(null);   // array of PositionScore or null
+  const [showScoreModal, setShowScoreModal] = useState(false);
+
+  // Trade history
+  const [trades,        setTrades]        = useState([]);
+  const [loadingTrades, setLoadingTrades] = useState(false);
+
+  // Cash adjustment
+  const [showCashModal, setShowCashModal] = useState(false);
+  const [cashAmount,    setCashAmount]    = useState("");
+  const [cashNotes,     setCashNotes]     = useState("");
+  const [cashLoading,   setCashLoading]   = useState(false);
+
+  // Portfolio rules
+  const [ruleAlerts,      setRuleAlerts]      = useState([]);
+  const [loadingAlerts,   setLoadingAlerts]   = useState(false);
+  const [runningRules,    setRunningRules]    = useState(false);
+  const [rulesSchedule,   setRulesSchedule]   = useState("on_demand");
+  const [alertSevFilter,  setAlertSevFilter]  = useState(null);   // null | "info" | "warning" | "critical"
+  const [alertStateFilter, setAlertStateFilter] = useState(null); // null | "active" | "snoozed" | "actioned"
+
+  /* Stale-quote tracking — banner appears after 5 min without a fresh fetch */
+  const [quotesTimestamp, setQuotesTimestamp] = useState(null);
+  const [quotesStale,     setQuotesStale]     = useState(false);
+
+  /* Column visibility — persisted to localStorage */
+  const DEFAULT_COLS = new Set(["ticker", "name", "qty", "bep", "price", "value", "gainloss", "chg", "actions"]);
+  const [visibleCols, setVisibleCols] = useState(() => {
+    try {
+      const s = localStorage.getItem("tickertap_visible_cols");
+      return s ? new Set(JSON.parse(s)) : new Set(DEFAULT_COLS);
+    } catch { return new Set(DEFAULT_COLS); }
+  });
+  const [showColPicker, setShowColPicker] = useState(false);
+
+  /**
+   * toggleCol — toggles a column in the visible-columns set and persists to localStorage.
+   * @param {string} col - column ID to toggle
+   */
+  const toggleCol = (col) => {
+    setVisibleCols(prev => {
+      const next = new Set(prev);
+      if (next.has(col)) next.delete(col); else next.add(col);
+      localStorage.setItem("tickertap_visible_cols", JSON.stringify([...next]));
+      return next;
+    });
+  };
+
   /* -- Data loading ------------------------------------------------------- */
   const loadPortfolios = useCallback(async () => {
     if (!token) return;
@@ -816,6 +960,9 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
       // Merge into existing state so intermittent per-symbol failures
       // during polling don't wipe previously-loaded data.
       setQuotes(prev => replace ? incoming : { ...prev, ...incoming });
+      /* Mark quotes as fresh — stale banner resets its 5-min countdown */
+      setQuotesTimestamp(Date.now());
+      setQuotesStale(false);
     } catch (e) {
       console.error("[PortfolioManager] bulkQuotes failed:", e?.message ?? e);
     }
@@ -836,8 +983,7 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
     setPriceChanges(prev => replace ? incoming : { ...prev, ...incoming });
   }, [token]);
 
-  const loadSmaData = useCallback(async (positionList, customPeriod) => {
-    if (!token || !positionList.length) { setSmaData({}); return; }
+  const loadSmaData = useCallback(async (positionList, customPeriod) => {    if (!token || !positionList.length) { setSmaData({}); return; }
     const tickers = [...new Set(positionList.map(p => p.ticker))];
     const [res50, resCustom] = await Promise.allSettled([
       api.bulkSma(tickers, 50, token),
@@ -856,6 +1002,97 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
     }
     setSmaData(map);
   }, [token]);
+
+  /**
+   * loadTrades — fetches trade history for the active portfolio.
+   * Called when the user switches to the TRADE HISTORY tab.
+   */
+  const loadTrades = useCallback(async (portfolioId) => {
+    if (!token || !portfolioId) { setTrades([]); return; }
+    setLoadingTrades(true);
+    try {
+      const list = await api.getPortfolioTrades(portfolioId, token);
+      setTrades(list);
+    } catch (e) {
+      console.error("[PortfolioManager] loadTrades failed:", e?.message ?? e);
+    } finally { setLoadingTrades(false); }
+  }, [token]);
+
+  /**
+   * loadRuleAlerts — fetches rule alerts for the active portfolio.
+   * Applies optional severity and state filters.
+   *
+   * @param {string}      portfolioId  - Portfolio UUID
+   * @param {string|null} sevFilter    - Severity filter or null for all
+   * @param {string|null} stateFilter  - State filter or null for all
+   */
+  const loadRuleAlerts = useCallback(async (portfolioId, sevFilter = null, stateFilter = null) => {
+    if (!token || !portfolioId) { setRuleAlerts([]); return; }
+    setLoadingAlerts(true);
+    try {
+      const list = await api.getRuleAlerts(portfolioId, {
+        severity:  sevFilter  || undefined,
+        state:     stateFilter || undefined,
+      }, token);
+      setRuleAlerts(list);
+    } catch (e) {
+      console.error("[PortfolioManager] loadRuleAlerts failed:", e?.message ?? e);
+    } finally { setLoadingAlerts(false); }
+  }, [token]);
+
+  /**
+   * handleDeleteTrade — confirms and deletes a trade record by ID.
+   * Removes the entry from local state optimistically after the server
+   * confirms deletion (204 No Content).
+   *
+   * @param {string} tradeId - UUID of the trade to remove
+   */
+  const handleDeleteTrade = async (tradeId) => {
+    if (!window.confirm("Delete this trade record?")) return;
+    try {
+      await api.deleteTrade(tradeId, token);
+      // Remove the deleted trade from local state without a full reload.
+      setTrades(prev => prev.filter(t => t.trade_id !== tradeId));
+    } catch (e) {
+      console.error("Delete trade failed:", e?.message ?? e);
+    }
+  };
+
+  /**
+   * handleRunRules — enqueues portfolio rules evaluation on the arq worker.
+   * Passes the current rulesSchedule value so the worker knows whether to
+   * re-enqueue automatically on each market-hours cycle.
+   * Reloads rule alerts after a short delay to let the worker settle.
+   */
+  const handleRunRules = async () => {
+    if (!activePortfolioId) return;
+    setRunningRules(true);
+    try {
+      await api.runPortfolioRules(activePortfolioId, rulesSchedule, token);
+      // Give the worker ~3s to process before refreshing alerts
+      setTimeout(() => loadRuleAlerts(activePortfolioId, alertSevFilter, alertStateFilter), 3000);
+    } catch (e) {
+      console.error("[PortfolioManager] runRules failed:", e?.message ?? e);
+    } finally {
+      setRunningRules(false);
+    }
+  };
+
+  /**
+   * handlePatchAlert — updates a rule alert state (snoozed | actioned | expired).
+   * Optimistically updates the local alerts list without a full reload.
+   *
+   * @param {string} alertId  - Alert UUID
+   * @param {string} newState - New state value
+   */
+  const handlePatchAlert = async (alertId, newState) => {
+    try {
+      const updated = await api.patchRuleAlert(alertId, { state: newState }, token);
+      setRuleAlerts(prev => prev.map(a => a.alert_id === alertId ? updated : a));
+    } catch (e) {
+      console.error("[PortfolioManager] patchAlert failed:", e?.message ?? e);
+    }
+  };
 
   /* -- Effects ------------------------------------------------------------ */
   useEffect(() => { loadPortfolios(); }, [loadPortfolios]);
@@ -880,6 +1117,25 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
   useEffect(() => {
     if (positions.length) loadSmaData(positions, customSmaPeriod);
   }, [customSmaPeriod]); // eslint-disable-line
+
+  /* Load trade history when the TRADE HISTORY tab becomes active */
+  useEffect(() => {
+    if (activeSection === "trades" && activePortfolioId) loadTrades(activePortfolioId);
+  }, [activeSection, activePortfolioId]); // eslint-disable-line
+
+  /* Load rule alerts when the RULES tab becomes active */
+  useEffect(() => {
+    if (activeSection === "rules" && activePortfolioId) loadRuleAlerts(activePortfolioId, alertSevFilter, alertStateFilter);
+  }, [activeSection, activePortfolioId]); // eslint-disable-line
+
+  /* Check staleness every minute — marks quotes as stale after 5 minutes */
+  useEffect(() => {
+    if (!quotesTimestamp) return;
+    const id = setInterval(() => {
+      setQuotesStale(Date.now() - quotesTimestamp > 300000);
+    }, 60000);
+    return () => clearInterval(id);
+  }, [quotesTimestamp]);
 
   /* -- Live price polling ------------------------------------------------- */
   /* Refreshes quotes and price changes at a market-aware interval:
@@ -911,8 +1167,10 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
   const sectionCounts = useMemo(() => {
     const counts = { all: positions.length, stock: 0, crypto: 0, etf: 0, physical: 0 };
     positions.forEach(p => { counts[p.asset_type || "stock"] = (counts[p.asset_type || "stock"] || 0) + 1; });
+    // Show active alert count on RULES tab badge
+    counts.rules = ruleAlerts.filter(a => a.state === "active").length;
     return counts;
-  }, [positions]);
+  }, [positions, ruleAlerts]);
 
   const sortedPositions = useMemo(() => {
     if (!sortCol) return sectionPositions;
@@ -1101,6 +1359,8 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
     setShowAddModal(null);
     loadQuotes(next);
     loadPriceChanges(next, changePeriod);
+    // Refresh portfolios to reflect updated cash_balance if deduct_cash was used
+    loadPortfolios();
   };
 
   const handleImported = (imported) => {
@@ -1123,10 +1383,53 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
       setPositions(prev => prev.map(p => p.position_id === result.position_id ? result : p));
     }
     setSellPos(null);
+    // Refresh portfolio list so cash_balance is current
+    loadPortfolios();
   };
 
-  const showTypeCol = activeSection === "physical" || activeSection === "all";
-  const showGroupCol = activeSection !== "physical";
+  /**
+   * handleDetailedScore — runs a detailed portfolio score with P&L per position.
+   * Builds a positions array from current state (tickers with purchase_price,
+   * stop_loss, profit_taking) and calls the extended scoring endpoint.
+   */
+  const handleDetailedScore = async () => {
+    if (!activePortfolioId || !positions.length) return;
+    setScoreLoading(true); setScoreResults(null);
+    try {
+      const positionItems = positions.map(p => ({
+        ticker:         p.ticker,
+        quantity:       parseFloat(p.quantity),
+        purchase_price: parseFloat(p.purchase_price),
+        stop_loss:      p.stop_loss ? parseFloat(p.stop_loss) : null,
+        profit_taking:  p.profit_taking ? parseFloat(p.profit_taking) : null,
+      }));
+      const results = await api.scorePortfolioDetailed(positionItems, token);
+      // response is PortfolioScoreResponse — extract the positions array
+      setScoreResults(results.positions ?? []);
+      setShowScoreModal(true);
+    } catch (e) { setGlobalErr(e.message || "Scoring failed."); }
+    finally { setScoreLoading(false); }
+  };
+
+  /**
+   * handleAdjustCash — posts a manual cash balance adjustment.
+   * Refreshes portfolios so the header shows the updated balance.
+   */
+  const handleAdjustCash = async () => {
+    const amount = parseFloat(cashAmount);
+    if (isNaN(amount) || amount === 0) return;
+    setCashLoading(true);
+    try {
+      await api.adjustPortfolioCash(activePortfolioId, amount, cashNotes.trim() || null, token);
+      setShowCashModal(false);
+      setCashAmount(""); setCashNotes("");
+      loadPortfolios();
+    } catch (e) { setGlobalErr(e.message || "Cash adjustment failed."); }
+    finally { setCashLoading(false); }
+  };
+
+  const showTypeCol  = (activeSection === "physical" || activeSection === "all") && visibleCols.has("type");
+  const showGroupCol = activeSection !== "physical" && visibleCols.has("group");
 
   /* -- Render ------------------------------------------------------------- */
   return (
@@ -1197,8 +1500,20 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
                 {activePortfolio.strategy
                   ? <span style={{ color: "var(--c-text)" }}>{activePortfolio.strategy}</span>
                   : <span style={{ fontStyle: "italic" }}>No strategy description.</span>}
+                {/* Cash balance display */}
+                <span style={{ marginLeft: 16, color: "var(--c-accent)", fontWeight: 700 }}>
+                  CASH: ${parseFloat(activePortfolio.cash_balance ?? 0).toFixed(2)}
+                </span>
+                <button
+                  onClick={() => setShowCashModal(true)}
+                  title="Adjust cash balance"
+                  style={{ marginLeft: 6, background: "none", border: "1px solid var(--c-border)", borderRadius: 3, color: "var(--c-muted)", cursor: "pointer", fontSize: 11, fontFamily: "var(--font-mono)", padding: "1px 7px", lineHeight: 1.4 }}
+                >+/−</button>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn btn-outline" onClick={handleDetailedScore} disabled={scoreLoading || !positions.length}>
+                  {scoreLoading ? <span className="loading-pulse">SCORING...</span> : "DETAILED SCORE"}
+                </button>
                 <button className="btn btn-outline" onClick={() => setShowImport(true)}>
                   <Ic.upload /> IMPORT CSV
                 </button>
@@ -1218,6 +1533,7 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
               { lbl: "RETURN",          val: fmtPct(summary.gainPct),     cls: summary.gainPct >= 0 ? "green" : "red" },
               { lbl: `${changePeriod} G/L`, val: <>{formatValue(summary.periodGL, { showSign: true })} <span style={{ fontSize: 10, opacity: .75 }}>({fmtPct(summary.periodPct)})</span></>, cls: summary.periodGL >= 0 ? "green" : "red" },
               { lbl: "ACTIVE POS.",     val: summary.count,               cls: "" },
+              { lbl: "CASH",            val: formatValue(activePortfolio?.cash_balance ?? 0), cls: "amber" },
             ].map((s, i) => (
               <div key={i} className="stat-block">
                 <div className="stat-lbl">{s.lbl}</div>
@@ -1252,7 +1568,7 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
           </div>
 
           {/* Section action bar */}
-          {activeSection !== "all" && (
+          {activeSection !== "all" && activeSection !== "trades" && activeSection !== "rules" && (
             <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
               <button className="btn btn-amber" onClick={() => setShowAddModal(activeSection)}>
                 <Ic.plus /> ADD {SECTIONS.find(s => s.id === activeSection)?.label.replace(/s$/i, "") || "POSITION"}
@@ -1260,13 +1576,335 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
             </div>
           )}
 
-          {/* Positions table */}
+          {/* Trade History panel — shown only when TRADE HISTORY tab is active */}
+          {activeSection === "trades" && (
+            <div className="panel page-inner stagger">
+              <div className="panel-header">
+                <span className="panel-title">TRADE HISTORY</span>
+                {loadingTrades && <span style={{ fontSize: 11, color: "var(--c-muted)", marginLeft: 10 }} className="loading-pulse">LOADING...</span>}
+              </div>
+
+              {/* Realized P&L summary card */}
+              {(() => {
+                const sellTrades = trades.filter(tr => tr.trade_type === "SELL" && tr.cost_basis != null);
+                const totalPnl = sellTrades.reduce((sum, tr) => sum + (parseFloat(tr.price) - parseFloat(tr.cost_basis)) * parseFloat(tr.quantity), 0);
+                const profitable = sellTrades.filter(tr => (parseFloat(tr.price) - parseFloat(tr.cost_basis)) * parseFloat(tr.quantity) > 0).length;
+                const losing = sellTrades.filter(tr => (parseFloat(tr.price) - parseFloat(tr.cost_basis)) * parseFloat(tr.quantity) < 0).length;
+                const pnlColor = totalPnl > 0 ? "var(--green)" : totalPnl < 0 ? "var(--red)" : "var(--c-muted)";
+                return (
+                  <div style={{ display: "flex", alignItems: "center", gap: 24, padding: "10px 14px", marginBottom: 12, background: "rgba(255,255,255,0.03)", border: "1px solid var(--c-border)", borderRadius: 4, fontFamily: "var(--font-mono)", fontSize: 11 }}>
+                    <div>
+                      <span style={{ color: "var(--c-muted)", marginRight: 8 }}>REALIZED P&L</span>
+                      <span style={{ color: pnlColor, fontWeight: 700, fontSize: 13 }}>
+                        {sellTrades.length === 0 ? "—" : `${totalPnl >= 0 ? "+" : ""}$${Math.abs(totalPnl).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                      </span>
+                    </div>
+                    <div style={{ color: "var(--c-muted)" }}>|</div>
+                    <div>
+                      <span style={{ color: "var(--green)", marginRight: 4 }}>{profitable}</span>
+                      <span style={{ color: "var(--c-muted)" }}>profitable</span>
+                    </div>
+                    <div>
+                      <span style={{ color: "var(--red)", marginRight: 4 }}>{losing}</span>
+                      <span style={{ color: "var(--c-muted)" }}>losing</span>
+                    </div>
+                    {sellTrades.length > 0 && (
+                      <div style={{ color: "var(--c-muted)" }}>
+                        {sellTrades.length} closed trade{sellTrades.length !== 1 ? "s" : ""}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              <div style={{ overflowX: "auto" }}>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>DATE</th>
+                      <th>TYPE</th>
+                      <th>TICKER</th>
+                      <th className="right">QTY</th>
+                      <th className="right">PRICE</th>
+                      <th className="right">TOTAL</th>
+                      <th className="right">REALIZED P&L</th>
+                      <th>NOTES</th>
+                      <th>ACTIONS</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {trades.length === 0 && !loadingTrades && (
+                      <tr>
+                        <td colSpan={9} style={{ textAlign: "center", padding: "32px 0", color: "var(--c-muted)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                          No trades recorded yet. Trades are logged when you buy or sell positions with cash integration enabled.
+                        </td>
+                      </tr>
+                    )}
+                    {trades.map(tr => (
+                      <tr key={tr.trade_id} style={{ borderLeft: tr.trade_type === "BUY" ? "3px solid rgba(34,197,94,.35)" : "3px solid rgba(239,68,68,.35)" }}>
+                        <td style={{ fontSize: 11, whiteSpace: "nowrap" }}>{fmtDate(tr.created_at)}</td>
+                        <td>
+                          <span style={{ fontWeight: 700, color: tr.trade_type === "BUY" ? "var(--green)" : "var(--red)", fontFamily: "var(--font-mono)", fontSize: 11 }}>
+                            {tr.trade_type}
+                          </span>
+                        </td>
+                        <td><span className="amber" style={{ fontWeight: 700 }}>{tr.ticker}</span></td>
+                        <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>{fmtQty(parseFloat(tr.quantity))}</td>
+                        <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>{formatValue(parseFloat(tr.price))}</td>
+                        <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>{formatValue(parseFloat(tr.total_value))}</td>
+                        <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
+                          {tr.trade_type === "SELL" && tr.cost_basis != null
+                            ? (() => {
+                                const pnl = (parseFloat(tr.price) - parseFloat(tr.cost_basis)) * parseFloat(tr.quantity);
+                                const color = pnl >= 0 ? "var(--green)" : "var(--red)";
+                                const sign = pnl >= 0 ? "+" : "-";
+                                return (
+                                  <span style={{ color, fontWeight: 600 }}>
+                                    {sign}${Math.abs(pnl).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </span>
+                                );
+                              })()
+                            : <span style={{ color: "var(--c-muted)" }}>&mdash;</span>
+                          }
+                        </td>
+                        <td style={{ fontSize: 11, color: "var(--c-muted)" }}>{tr.notes || "\u2014"}</td>
+                        <td style={{ textAlign: "center" }}>
+                          {/* Delete trade button — removes record after confirmation */}
+                          <button
+                            onClick={() => handleDeleteTrade(tr.trade_id)}
+                            title="Delete trade record"
+                            style={{ background: "none", border: "none", color: "var(--red)", cursor: "pointer", fontSize: 14, padding: "0 4px" }}
+                          >
+                            ×
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Rules panel — shown only when RULES tab is active */}
+          {activeSection === "rules" && (
+            <div className="panel page-inner stagger">
+              <div className="panel-header">
+                <span className="panel-title">PORTFOLIO RULES</span>
+                {loadingAlerts && <span className="loading-pulse" style={{ fontSize: 11, color: "var(--c-muted)", marginLeft: 10 }}>LOADING...</span>}
+              </div>
+
+              {/* Controls: run + schedule picker + refresh */}
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12, padding: "0 2px" }}>
+                <button
+                  className="btn btn-amber"
+                  onClick={handleRunRules}
+                  disabled={runningRules || !activePortfolioId}
+                >
+                  {runningRules ? <span className="loading-pulse">RUNNING...</span> : "▶ RUN RULES"}
+                </button>
+                <select
+                  value={rulesSchedule}
+                  onChange={e => setRulesSchedule(e.target.value)}
+                  style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)", color: "var(--c-text)", fontFamily: "var(--font-mono)", fontSize: 11, borderRadius: 3, padding: "5px 8px", cursor: "pointer" }}
+                >
+                  <option value="on_demand">On demand</option>
+                  <option value="market_hours">Auto — market hours</option>
+                  <option value="end_of_day">Auto — end of day</option>
+                </select>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => loadRuleAlerts(activePortfolioId, alertSevFilter, alertStateFilter)}
+                  style={{ marginLeft: "auto" }}
+                >
+                  ↻ REFRESH
+                </button>
+              </div>
+
+              {/* Filter chips: severity + state */}
+              <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+                {[null, "critical", "warning", "info"].map(sev => {
+                  const active = alertSevFilter === sev;
+                  const color = sev === "critical" ? "var(--red)" : sev === "warning" ? "#f59e0b" : sev === "info" ? "var(--blue)" : "var(--c-accent)";
+                  return (
+                    <button
+                      key={sev ?? "all_sev"}
+                      onClick={() => { setAlertSevFilter(sev); loadRuleAlerts(activePortfolioId, sev, alertStateFilter); }}
+                      style={{
+                        padding: "3px 10px", fontSize: 10, fontFamily: "var(--font-mono)", borderRadius: 3,
+                        cursor: "pointer", border: "1px solid",
+                        borderColor: active ? color : "var(--c-border)",
+                        background: active ? "rgba(255,255,255,0.05)" : "transparent",
+                        color: active ? color : "var(--c-muted)",
+                      }}
+                    >
+                      {sev ? sev.toUpperCase() : "ALL SEV"}
+                    </button>
+                  );
+                })}
+                <div style={{ width: 1, height: 16, background: "var(--c-border)" }} />
+                {[null, "active", "snoozed", "actioned"].map(st => {
+                  const active = alertStateFilter === st;
+                  return (
+                    <button
+                      key={st ?? "all_st"}
+                      onClick={() => { setAlertStateFilter(st); loadRuleAlerts(activePortfolioId, alertSevFilter, st); }}
+                      style={{
+                        padding: "3px 10px", fontSize: 10, fontFamily: "var(--font-mono)", borderRadius: 3,
+                        cursor: "pointer", border: "1px solid",
+                        borderColor: active ? "var(--c-accent)" : "var(--c-border)",
+                        background: active ? "rgba(255,255,255,0.05)" : "transparent",
+                        color: active ? "var(--c-accent)" : "var(--c-muted)",
+                      }}
+                    >
+                      {st ? st.toUpperCase() : "ALL STATES"}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Empty state */}
+              {ruleAlerts.length === 0 && !loadingAlerts && (
+                <div style={{ padding: "48px 20px", textAlign: "center", color: "var(--c-muted)", fontFamily: "var(--font-mono)", fontSize: 12, lineHeight: 1.7 }}>
+                  No rule alerts found.<br />
+                  <span style={{ fontSize: 11 }}>Click <strong style={{ color: "var(--c-text)" }}>▶ RUN RULES</strong> to analyze current positions.</span>
+                </div>
+              )}
+
+              {/* Alert cards */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {ruleAlerts.map(alert => {
+                  const sevColor = alert.severity === "critical" ? "var(--red)" : alert.severity === "warning" ? "#f59e0b" : "var(--cyan)";
+                  const sevBg    = alert.severity === "critical" ? "rgba(240,68,56,.08)"  : alert.severity === "warning" ? "rgba(245,158,11,.08)" : "rgba(15,192,208,.06)";
+                  const isActioned = alert.state === "actioned";
+                  const isSnoozed  = alert.state === "snoozed";
+                  return (
+                    <div
+                      key={alert.alert_id}
+                      style={{
+                        padding: "12px 14px", borderRadius: 4, border: "1px solid",
+                        borderColor: isActioned || isSnoozed ? "var(--c-border)" : sevColor,
+                        background: isActioned || isSnoozed ? "rgba(255,255,255,0.015)" : sevBg,
+                        opacity: isActioned ? 0.5 : 1,
+                        display: "flex", flexDirection: "column", gap: 6,
+                        transition: "opacity .2s",
+                      }}
+                    >
+                      {/* Header row */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span className="amber" style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>
+                          {alert.ticker}
+                        </span>
+                        <span style={{ fontSize: 10, fontFamily: "var(--font-mono)", padding: "1px 7px", borderRadius: 3, border: "1px solid var(--c-border)", color: "var(--c-muted)", textTransform: "uppercase", letterSpacing: ".04em" }}>
+                          {(alert.rule_type || "").replace(/_/g, " ")}
+                        </span>
+                        <span style={{ fontSize: 10, fontFamily: "var(--font-mono)", padding: "1px 7px", borderRadius: 3, border: `1px solid ${sevColor}`, color: sevColor, textTransform: "uppercase", letterSpacing: ".04em", marginLeft: "auto" }}>
+                          {alert.severity}
+                        </span>
+                        {isSnoozed  && <span style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--c-muted)", padding: "1px 7px", border: "1px solid var(--c-border)", borderRadius: 3 }}>SNOOZED</span>}
+                        {isActioned && <span style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--c-muted)", padding: "1px 7px", border: "1px solid var(--c-border)", borderRadius: 3 }}>ACTIONED</span>}
+                      </div>
+
+                      {/* Title */}
+                      <div style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--bright)", fontWeight: 600 }}>
+                        {alert.title}
+                      </div>
+
+                      {/* Detail message */}
+                      {alert.detail && (
+                        <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--c-text)", lineHeight: 1.6 }}>
+                          {alert.detail}
+                        </div>
+                      )}
+
+                      {/* Footer: timestamp + action buttons */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 10, color: "var(--c-muted)", fontFamily: "var(--font-mono)" }}>
+                          {alert.triggered_at ? new Date(alert.triggered_at).toLocaleString() : ""}
+                        </span>
+                        {!isActioned && (
+                          <>
+                            {!isSnoozed && (
+                              <button
+                                onClick={() => handlePatchAlert(alert.alert_id, "snoozed")}
+                                style={{ marginLeft: "auto", padding: "2px 10px", fontSize: 10, fontFamily: "var(--font-mono)", cursor: "pointer", background: "transparent", border: "1px solid var(--c-border)", borderRadius: 3, color: "var(--c-muted)" }}
+                              >
+                                SNOOZE
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handlePatchAlert(alert.alert_id, "actioned")}
+                              style={{ padding: "2px 10px", fontSize: 10, fontFamily: "var(--font-mono)", cursor: "pointer", background: "transparent", border: `1px solid ${sevColor}`, borderRadius: 3, color: sevColor, marginLeft: isSnoozed ? "auto" : undefined }}
+                            >
+                              MARK ACTIONED
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Positions table — hidden on TRADE HISTORY and RULES tabs */}
+          {activeSection !== "trades" && activeSection !== "rules" && (
           <div className="panel page-inner stagger">
             <div className="panel-header">
               <span className="panel-title">{SECTIONS.find(s => s.id === activeSection)?.label || "POSITIONS"}</span>
               {loadingPositions && <span style={{ fontSize: 11, color: "var(--c-muted)", marginLeft: 10 }} className="loading-pulse">LOADING...</span>}
+              {/* Column visibility picker — toggles optional columns */}
+              {(() => {
+                const OPTIONAL_COLS = [
+                  { id: "50sma",         label: "50 SMA" },
+                  { id: "stop_loss",     label: "Stop Loss" },
+                  { id: "profit_taking", label: "Prof. Take" },
+                  { id: "group",         label: "Group" },
+                  { id: "type",          label: "Type" },
+                  { id: "purchase_date", label: "Date" },
+                ];
+                return (
+                  <div style={{ position: "relative", display: "inline-block", marginLeft: "auto" }}>
+                    <button
+                      className="btn-ghost"
+                      onClick={() => setShowColPicker(v => !v)}
+                      style={{ fontSize: "10px", padding: "3px 8px", fontFamily: "var(--font-mono)", border: "1px solid var(--border)", cursor: "pointer", background: "transparent", color: "var(--muted)" }}
+                    >
+                      COLUMNS ▾
+                    </button>
+                    {showColPicker && (
+                      <div style={{
+                        position: "absolute", top: "100%", right: 0, zIndex: 100,
+                        background: "var(--panel)", border: "1px solid var(--border)",
+                        padding: "8px 12px", minWidth: 140, display: "flex", flexDirection: "column", gap: 6,
+                        boxShadow: "0 4px 16px rgba(0,0,0,.4)",
+                      }}>
+                        {OPTIONAL_COLS.map(({ id, label }) => (
+                          <label key={id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, fontFamily: "var(--font-mono)", cursor: "pointer", color: "var(--c-text)" }}>
+                            <input
+                              type="checkbox"
+                              checked={visibleCols.has(id)}
+                              onChange={() => toggleCol(id)}
+                              style={{ accentColor: "var(--c-accent)", cursor: "pointer" }}
+                            />
+                            {label}
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
-            <div style={{ overflowX: "auto" }}>
+            {/* Stale data banner — appears when quotes are older than 5 minutes */}
+            {quotesStale && (
+              <StaleDataBanner
+                lastUpdated={quotesTimestamp}
+                onRefresh={() => { setQuotesStale(false); loadQuotes(positions); }}
+              />
+            )}
+            <div className="table-responsive" style={{ overflow: "auto", maxHeight: "calc(100vh - 320px)" }}>
               <table className="data-table">
                 <thead>
                   <tr>
@@ -1274,11 +1912,11 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
                     <SortTh label="NAME"   col="name"          sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
                     <SortTh label="TICKER" col="ticker"        sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
                     {showTypeCol && <th>TYPE</th>}
-                    <SortTh label="DATE"   col="purchase_date" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                    {visibleCols.has("purchase_date") && <SortTh label="DATE" col="purchase_date" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />}
                     <SortTh label="QTY"    col="quantity"      sortCol={sortCol} sortDir={sortDir} onSort={handleSort} right />
                     <SortTh label="BEP"    col="bep"           sortCol={sortCol} sortDir={sortDir} onSort={handleSort} right />
                     <SortTh label="PRICE"  col="price"         sortCol={sortCol} sortDir={sortDir} onSort={handleSort} right />
-                    <SortTh label="50 SMA" col="sma50"          sortCol={sortCol} sortDir={sortDir} onSort={handleSort} right />
+                    {visibleCols.has("50sma") && <SortTh label="50 SMA" col="sma50" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} right />}
                     <th className="right" style={{ whiteSpace: "nowrap", cursor: "default" }}>
                       SMA
                       <input
@@ -1289,8 +1927,8 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
                         style={{ marginLeft: 4, width: 42, background: "var(--c-surface)", border: "1px solid var(--c-border)", color: "var(--c-text)", fontFamily: "var(--font-mono)", fontSize: 10, borderRadius: 2, padding: "1px 3px", textAlign: "center" }}
                       />
                     </th>
-                    <SortTh label="STOP LOSS" col="stoploss"    sortCol={sortCol} sortDir={sortDir} onSort={handleSort} right />
-                    <SortTh label="PROFIT TAKING" col="profittaking" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} right />
+                    {visibleCols.has("stop_loss")     && <SortTh label="STOP LOSS"    col="stoploss"    sortCol={sortCol} sortDir={sortDir} onSort={handleSort} right />}
+                    {visibleCols.has("profit_taking") && <SortTh label="PROFIT TAKING" col="profittaking" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} right />}
                     <th className="right" title="Allocation % relative to current view">ALLOC %</th>
                     <th className="right" onClick={() => handleSort("change")}
                       style={{ whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }}>
@@ -1352,37 +1990,42 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
                           />
                         </td>
 
-                        <td style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <td data-label="NAME" style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {displayName || <span style={{ color: "var(--c-muted)" }}>{"\u2014"}</span>}
                         </td>
 
-                        <td><span className="amber" style={{ fontWeight: 700 }}>{pos.ticker}</span></td>
+                        <td data-label="TICKER"><span className="amber" style={{ fontWeight: 700 }}>{pos.ticker}</span></td>
 
                         {showTypeCol && (
-                          <td style={{ fontSize: 11, textTransform: "capitalize" }}>
+                          <td data-label="TYPE" style={{ fontSize: 11, textTransform: "capitalize" }}>
                             {pos.physical_type || "\u2014"}
                           </td>
                         )}
 
-                        <td style={{ whiteSpace: "nowrap", fontSize: 11 }}>{fmtDate(pos.purchase_date)}</td>
+                        {visibleCols.has("purchase_date") && (
+                          <td data-label="DATE" style={{ whiteSpace: "nowrap", fontSize: 11 }}>{fmtDate(pos.purchase_date)}</td>
+                        )}
 
-                        <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>{fmtQty(qty)}</td>
+                        <td data-label="QTY" className="right" style={{ fontVariantNumeric: "tabular-nums" }}>{fmtQty(qty)}</td>
 
-                        <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>{formatValue(bep)}</td>
+                        <td data-label="BEP" className="right" style={{ fontVariantNumeric: "tabular-nums" }}>{formatValue(bep)}</td>
 
-                        <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
+                        <td data-label="PRICE" className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
                           {price != null ? formatValue(price) : <span className="loading-pulse" style={{ color: "var(--c-muted)", fontSize: 11 }}>...</span>}
                         </td>
 
-                        <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
-                          {smaData[pos.ticker]?.[50] != null ? formatValue(smaData[pos.ticker][50]) : <span style={{ color: "var(--c-muted)", fontSize: 11 }}>...</span>}
-                        </td>
+                        {visibleCols.has("50sma") && (
+                          <td data-label="50 SMA" className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
+                            {smaData[pos.ticker]?.[50] != null ? formatValue(smaData[pos.ticker][50]) : <span style={{ color: "var(--c-muted)", fontSize: 11 }}>...</span>}
+                          </td>
+                        )}
 
-                        <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
+                        <td data-label="SMA N" className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
                           {smaData[pos.ticker]?.[customSmaPeriod] != null ? formatValue(smaData[pos.ticker][customSmaPeriod]) : <span style={{ color: "var(--c-muted)", fontSize: 11 }}>...</span>}
                         </td>
 
-                        <td className="right" style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                        {visibleCols.has("stop_loss") && (
+                        <td data-label="STOP LOSS" className="right" style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
                           {editingStopLoss === pos.position_id ? (
                             <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                               <input
@@ -1406,9 +2049,11 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
                             </span>
                           )}
                         </td>
+                        )}
 
                         {/* Profit Taking — inline editable like Stop Loss */}
-                        <td className="right" style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                        {visibleCols.has("profit_taking") && (
+                        <td data-label="PROFIT TAKING" className="right" style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
                           {editingProfitTaking === pos.position_id ? (
                             <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                               <input
@@ -1432,15 +2077,16 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
                             </span>
                           )}
                         </td>
+                        )}
 
                         {/* Allocation % — position value as percentage of section total */}
-                        <td className="right" style={{ fontVariantNumeric: "tabular-nums", fontSize: 11 }}>
+                        <td data-label="ALLOC %" className="right" style={{ fontVariantNumeric: "tabular-nums", fontSize: 11 }}>
                           {value != null && summary.totalValue > 0 && !excluded
                             ? fmtPct((value / summary.totalValue) * 100)
                             : <span style={{ color: "var(--c-muted)" }}>{"\u2014"}</span>}
                         </td>
 
-                        <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
+                        <td data-label="CHG" className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
                           {changePct != null
                             ? <span className={changePct >= 0 ? "green" : "red"}>
                                 {formatValue(qty * price * changePct / (100 + changePct), { showSign: true })}
@@ -1449,11 +2095,11 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
                             : <span style={{ color: "var(--c-muted)", fontSize: 11 }}>...</span>}
                         </td>
 
-                        <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
+                        <td data-label="VALUE" className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
                           {value != null ? formatValue(value) : "\u2014"}
                         </td>
 
-                        <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
+                        <td data-label="GAIN/LOSS" className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
                           {gainLoss != null
                             ? <span className={gainLoss >= 0 ? "green" : "red"}>
                                 {formatValue(gainLoss, { showSign: true })}
@@ -1463,7 +2109,7 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
                         </td>
 
                         {showGroupCol && (
-                          <td style={{ fontSize: 11, color: "var(--c-muted)" }}>
+                          <td data-label="GROUP" style={{ fontSize: 11, color: "var(--c-muted)" }}>
                             {pos.group_tag || "\u2014"}
                           </td>
                         )}
@@ -1472,21 +2118,21 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
                           <div style={{ display: "flex", gap: 6 }}>
                             {/* Asset detail info button */}
                             <button
-                              className="btn btn-ghost"
+                              className="btn btn-ghost table-action-btn"
                               title="Asset details"
                               onClick={() => setDetailSymbol(pos.ticker)}
                               style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer", fontSize: 15, padding: "3px 7px" }}
                             >{"\u24D8"}</button>
                             {/* Price alert button */}
                             <button
-                              className="btn btn-ghost"
+                              className="btn btn-ghost table-action-btn"
                               title="Set price alert"
                               onClick={() => { setAlertSymbol(pos.ticker); setAlertPrice(quotes[pos.ticker]?.price ?? null); }}
                               style={{ padding: "3px 7px", color: "#f59e0b" }}
                             ><Ic.bell /></button>
                             {onViewChart && (
                               <button
-                                className="btn btn-ghost"
+                                className="btn btn-ghost table-action-btn"
                                 title="View chart"
                                 onClick={() => onViewChart(pos.ticker)}
                                 style={{ padding: "3px 7px" }}
@@ -1494,7 +2140,7 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
                             )}
                             {onViewNews && (
                               <button
-                                className="btn btn-ghost"
+                                className="btn btn-ghost table-action-btn"
                                 title="View news"
                                 onClick={() => onViewNews(pos.ticker)}
                                 style={{ padding: "3px 7px" }}
@@ -1502,26 +2148,26 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
                             )}
                             {onTradeAI && (
                               <button
-                                className="btn btn-ghost"
+                                className="btn btn-ghost table-action-btn"
                                 title="Trade AI"
                                 onClick={() => onTradeAI(pos.ticker)}
                                 style={{ padding: "3px 7px", color: "var(--amber)" }}
                               ><Ic.trading /></button>
                             )}
                             <button
-                              className="btn btn-ghost"
+                              className="btn btn-ghost table-action-btn"
                               title="Modify"
                               onClick={() => setModifyPos(pos)}
                               style={{ padding: "3px 7px" }}
                             ><Ic.edit /></button>
                             <button
-                              className="btn btn-ghost"
+                              className="btn btn-ghost table-action-btn"
                               title="Sell"
                               onClick={() => setSellPos(pos)}
                               style={{ padding: "3px 7px", color: "var(--red)" }}
                             ><Ic.sell /></button>
                             <button
-                              className="btn btn-ghost"
+                              className="btn btn-ghost table-action-btn"
                               title="Delete"
                               onClick={() => handleDeletePosition(pos)}
                               style={{ padding: "3px 7px", color: "var(--red)" }}
@@ -1535,6 +2181,7 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
               </table>
             </div>
           </div>
+          )}
         </>
       )}
 
@@ -1549,6 +2196,7 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
       {showAddModal === "stock" && activePortfolioId && (
         <AddStockModal
           portfolioId={activePortfolioId}
+          portfolio={activePortfolio}
           onClose={() => setShowAddModal(null)}
           onAdded={handlePositionAdded}
           token={token}
@@ -1557,6 +2205,7 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
       {showAddModal === "crypto" && activePortfolioId && (
         <AddCryptoModal
           portfolioId={activePortfolioId}
+          portfolio={activePortfolio}
           onClose={() => setShowAddModal(null)}
           onAdded={handlePositionAdded}
           token={token}
@@ -1565,6 +2214,7 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
       {showAddModal === "etf" && activePortfolioId && (
         <AddETFModal
           portfolioId={activePortfolioId}
+          portfolio={activePortfolio}
           onClose={() => setShowAddModal(null)}
           onAdded={handlePositionAdded}
           token={token}
@@ -1573,6 +2223,7 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
       {showAddModal === "physical" && activePortfolioId && (
         <AddPhysicalModal
           portfolioId={activePortfolioId}
+          portfolio={activePortfolio}
           onClose={() => setShowAddModal(null)}
           onAdded={handlePositionAdded}
           token={token}
@@ -1599,8 +2250,10 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
       {sellPos && (
         <SellPositionModal
           position={sellPos}
+          portfolio={activePortfolio}
           onClose={() => setSellPos(null)}
           onSold={handleSold}
+          onPortfolioRefresh={loadPortfolios}
           token={token}
         />
       )}
@@ -1615,6 +2268,106 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
           onClose={() => { setAlertSymbol(null); setAlertPrice(null); }}
           onCreated={() => {}}
         />
+      )}
+
+      {/* Score Results Modal */}
+      {showScoreModal && scoreResults && (
+        <div className="modal-overlay" style={BDK} onClick={e => e.target === e.currentTarget && setShowScoreModal(false)}>
+          <div className="modal-box" style={{ maxWidth: 720, width: "95vw" }}>
+            <div className="modal-top">
+              <div className="modal-title">DETAILED PORTFOLIO SCORE</div>
+              <button className="modal-close" onClick={() => setShowScoreModal(false)}><Ic.close /></button>
+            </div>
+            <div style={{ overflowX: "auto", maxHeight: "60vh", overflowY: "auto" }}>
+              <table className="data-table" style={{ fontSize: 11 }}>
+                <thead>
+                  <tr>
+                    <th>TICKER</th>
+                    <th className="right">SCORE</th>
+                    <th>SIGNAL</th>
+                    <th className="right">UNREALIZED P&L</th>
+                    <th className="right">P&L %</th>
+                    <th>STOP STATUS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {scoreResults.map(r => (
+                    <tr key={r.symbol}>
+                      <td><span className="amber" style={{ fontWeight: 700 }}>{r.symbol}</span></td>
+                      <td className="right" style={{ fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>
+                        <span style={{ color: r.score >= 70 ? "var(--green)" : r.score >= 40 ? "var(--c-accent)" : "var(--red)" }}>
+                          {r.score != null ? r.score.toFixed(1) : "\u2014"}
+                        </span>
+                      </td>
+                      <td style={{ fontSize: 10 }}>
+                        <span style={{ color: r.signal === "BUY" ? "var(--green)" : r.signal === "SELL" ? "var(--red)" : "var(--c-muted)" }}>
+                          {r.signal || "\u2014"}
+                        </span>
+                      </td>
+                      <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
+                        {r.unrealized_pnl != null
+                          ? <span className={r.unrealized_pnl >= 0 ? "green" : "red"}>
+                              {r.unrealized_pnl >= 0 ? "+" : ""}{formatValue(r.unrealized_pnl)}
+                            </span>
+                          : <span style={{ color: "var(--c-muted)" }}>\u2014</span>}
+                      </td>
+                      <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
+                        {r.unrealized_pnl_pct != null
+                          ? <span className={r.unrealized_pnl_pct >= 0 ? "green" : "red"}>
+                              {fmtPct(r.unrealized_pnl_pct)}
+                            </span>
+                          : <span style={{ color: "var(--c-muted)" }}>\u2014</span>}
+                      </td>
+                      <td style={{ fontSize: 10, color: r.stop_loss_recommendation?.startsWith("TRIGGERED") ? "var(--red)" : r.stop_loss_recommendation?.startsWith("WARNING") ? "var(--amber)" : "var(--c-muted)" }}>
+                        {r.stop_loss_recommendation || "\u2014"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={() => setShowScoreModal(false)}>CLOSE</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cash Adjustment Modal */}
+      {showCashModal && (
+        <div className="modal-overlay" style={BDK} onClick={e => e.target === e.currentTarget && setShowCashModal(false)}>
+          <div className="modal-box" style={{ maxWidth: 400 }}>
+            <div className="modal-top">
+              <div className="modal-title">ADJUST CASH BALANCE</div>
+              <button className="modal-close" onClick={() => setShowCashModal(false)}><Ic.close /></button>
+            </div>
+            <div className="modal-body">
+              <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--c-muted)", marginBottom: 12 }}>
+                Current balance: <span style={{ color: "var(--c-accent)", fontWeight: 700 }}>
+                  ${parseFloat(activePortfolio?.cash_balance ?? 0).toFixed(2)}
+                </span>
+                <br />Use positive value to deposit, negative to withdraw.
+              </div>
+              <div className="form-field">
+                <label className="form-label">Amount *</label>
+                <input className="form-control" type="number" step="any" placeholder="e.g. 1000 or -500"
+                  value={cashAmount} onChange={e => setCashAmount(e.target.value)} autoFocus />
+              </div>
+              <div className="form-field">
+                <label className="form-label">Notes (optional)</label>
+                <textarea className="form-control" placeholder="e.g. Initial deposit, dividend, etc."
+                  value={cashNotes} onChange={e => setCashNotes(e.target.value)} rows={2}
+                  style={{ resize: "vertical", minHeight: 52, fontFamily: "var(--font-mono)", fontSize: 12 }} />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={() => setShowCashModal(false)}>CANCEL</button>
+              <button className="btn btn-amber" onClick={handleAdjustCash} disabled={cashLoading || !cashAmount}>
+                {cashLoading ? <span className="loading-pulse">SAVING...</span> : "APPLY"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

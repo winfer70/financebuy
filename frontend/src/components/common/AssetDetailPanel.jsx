@@ -84,6 +84,21 @@ const MODAL_BOX = {
   overflow: "hidden",
 };
 
+/** Sidebar panel — fixed right-edge drawer, full viewport height, scrollable. */
+const SIDEBAR_STYLES = {
+  position: 'fixed',
+  right: 0,
+  top: 0,
+  width: '380px',
+  height: '100vh',
+  overflowY: 'auto',
+  zIndex: 200,
+  background: 'var(--bg-secondary, #1a1a2e)',
+  borderLeft: '1px solid var(--border, #333)',
+  boxShadow: '-4px 0 20px rgba(0,0,0,0.3)',
+  padding: '16px'
+};
+
 /** Section card — subtle background block for each data section. */
 const SECTION_CARD = {
   background: "rgba(255,255,255,0.03)",
@@ -169,7 +184,7 @@ function colorForValue(n) {
  * @param {string}   props.token   - JWT access token for API calls
  * @param {Function} props.onClose - Callback to close the modal
  */
-export default function AssetDetailPanel({ symbol, token, onClose }) {
+export default function AssetDetailPanel({ symbol, token, onClose, mode = "modal" }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -450,86 +465,119 @@ export default function AssetDetailPanel({ symbol, token, onClose }) {
   }
 
   /* ── Main render ─────────────────────────────────────────────────────── */
+
+  /**
+   * content — shared panel content (header + scrollable body) used by both
+   * modal and sidebar render paths to avoid duplication.
+   */
+  const content = (
+    <>
+      {/* ── Header ── */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)",
+        flexShrink: 0,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{
+            fontFamily: "'Bebas Neue', sans-serif", fontSize: 26,
+            color: "#0f7d40", letterSpacing: 2, lineHeight: 1,
+          }}>
+            {symbol}
+          </span>
+          {data?.name && (
+            <span style={{
+              fontFamily: "'IBM Plex Mono', monospace", fontSize: 11,
+              color: "#6b7280", maxWidth: 260, overflow: "hidden",
+              textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>
+              {data.name}
+            </span>
+          )}
+        </div>
+        <button
+          onClick={onClose}
+          style={{
+            background: "none", border: "none", color: "#6b7280",
+            cursor: "pointer", fontSize: 18, padding: "4px 8px",
+            lineHeight: 1,
+          }}
+          title="Close"
+        >
+          &times;
+        </button>
+      </div>
+
+      {/* ── Body (scrollable) ── */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }}>
+
+        {/* Loading state */}
+        {loading && (
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: "60px 0", color: "#6b7280",
+            fontFamily: "'IBM Plex Mono', monospace", fontSize: 12,
+          }}>
+            <span className="loading-pulse">Loading fundamentals for {symbol}...</span>
+          </div>
+        )}
+
+        {/* Error state */}
+        {error && !loading && (
+          <div style={{
+            padding: "40px 20px", textAlign: "center",
+            color: "#f04438", fontFamily: "'IBM Plex Mono', monospace", fontSize: 12,
+          }}>
+            {error}
+          </div>
+        )}
+
+        {/* Data sections */}
+        {data && !loading && (
+          <>
+            {renderCompanyInfo()}
+            {renderValuation()}
+            {renderFinancialHealth()}
+            {renderDividends()}
+            {renderAnalystTargets()}
+            {renderEarnings()}
+            {renderTradingInfo()}
+          </>
+        )}
+      </div>
+    </>
+  );
+
+  /* ── Sidebar render — fixed right-edge drawer, no backdrop overlay ── */
+  if (mode === 'sidebar') {
+    return (
+      <div style={SIDEBAR_STYLES}>
+        {/* Close button pinned to top-right corner of the sidebar */}
+        <button
+          onClick={onClose}
+          style={{
+            position: 'absolute', top: 12, right: 12,
+            background: 'none', border: 'none',
+            color: 'var(--text-primary, #fff)',
+            fontSize: 20, cursor: 'pointer',
+          }}
+          title="Close"
+        >
+          &#x2715;
+        </button>
+        {content}
+      </div>
+    );
+  }
+
+  /* ── Modal render (default) — backdrop overlay + centered box ── */
   return (
     <div
       style={BDK}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div style={MODAL_BOX}>
-
-        {/* ── Header ── */}
-        <div style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)",
-          flexShrink: 0,
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{
-              fontFamily: "'Bebas Neue', sans-serif", fontSize: 26,
-              color: "#0f7d40", letterSpacing: 2, lineHeight: 1,
-            }}>
-              {symbol}
-            </span>
-            {data?.name && (
-              <span style={{
-                fontFamily: "'IBM Plex Mono', monospace", fontSize: 11,
-                color: "#6b7280", maxWidth: 260, overflow: "hidden",
-                textOverflow: "ellipsis", whiteSpace: "nowrap",
-              }}>
-                {data.name}
-              </span>
-            )}
-          </div>
-          <button
-            onClick={onClose}
-            style={{
-              background: "none", border: "none", color: "#6b7280",
-              cursor: "pointer", fontSize: 18, padding: "4px 8px",
-              lineHeight: 1,
-            }}
-            title="Close"
-          >
-            &times;
-          </button>
-        </div>
-
-        {/* ── Body (scrollable) ── */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }}>
-
-          {/* Loading state */}
-          {loading && (
-            <div style={{
-              display: "flex", alignItems: "center", justifyContent: "center",
-              padding: "60px 0", color: "#6b7280",
-              fontFamily: "'IBM Plex Mono', monospace", fontSize: 12,
-            }}>
-              <span className="loading-pulse">Loading fundamentals for {symbol}...</span>
-            </div>
-          )}
-
-          {/* Error state */}
-          {error && !loading && (
-            <div style={{
-              padding: "40px 20px", textAlign: "center",
-              color: "#f04438", fontFamily: "'IBM Plex Mono', monospace", fontSize: 12,
-            }}>
-              {error}
-            </div>
-          )}
-
-          {/* Data sections */}
-          {data && !loading && (
-            <>
-              {renderCompanyInfo()}
-              {renderValuation()}
-              {renderFinancialHealth()}
-              {renderDividends()}
-              {renderAnalystTargets()}
-              {renderEarnings()}
-              {renderTradingInfo()}
-            </>
-          )}
-        </div>
+        {content}
       </div>
     </div>
   );

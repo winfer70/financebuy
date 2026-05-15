@@ -21,11 +21,12 @@ import api from "../api/client";
 import { Ic } from "../components/common/Icons";
 import { useCurrency } from "../context/CurrencyContext";
 import { useI18n } from "../context/I18nContext";
-import { useMarketStatus } from "../components/common";
+import { useMarketStatus, SkeletonRow } from "../components/common";
 import { fmtPct } from "../utils/formatters";
 import { MODAL_BACKDROP as BDK } from "../styles/shared";
 import AssetDetailPanel from "../components/common/AssetDetailPanel";
 import AlertModal from "../components/common/AlertModal";
+import StaleDataBanner from "../components/common/StaleDataBanner";
 
 /* ── Asset section IDs (labels resolved via t() inside each component) ── */
 
@@ -598,6 +599,10 @@ export function WatchlistPage({ token, onViewChart, onViewNews, onTradeAI }) {
   const [globalErr,         setGlobalErr]         = useState("");
   const [activeSection,     setActiveSection]     = useState("all");
 
+  /* Stale-quote tracking — banner appears after 5 min without a fresh fetch */
+  const [quotesTimestamp, setQuotesTimestamp] = useState(null);
+  const [quotesStale,     setQuotesStale]     = useState(false);
+
   // Modals
   const [showCreate,   setShowCreate]   = useState(false);
   const [showAddItem,  setShowAddItem]  = useState(false);
@@ -655,6 +660,9 @@ export function WatchlistPage({ token, onViewChart, onViewNews, onTradeAI }) {
       const map = {};
       quoteList.forEach(q => { map[q.symbol] = q; });
       setQuotes(map);
+      /* Mark quotes as fresh — stale banner resets its 5-min countdown */
+      setQuotesTimestamp(Date.now());
+      setQuotesStale(false);
     } catch { /* non-fatal — table will show loading dots */ }
   }, [token]);
 
@@ -681,6 +689,15 @@ export function WatchlistPage({ token, onViewChart, onViewNews, onTradeAI }) {
     const interval = setInterval(() => loadQuotes(items), intervalMs);
     return () => clearInterval(interval);
   }, [items, token, mktStatus.isOpen, loadQuotes]);
+
+  /* Check staleness every minute — marks quotes as stale after 5 minutes */
+  useEffect(() => {
+    if (!quotesTimestamp) return;
+    const id = setInterval(() => {
+      setQuotesStale(Date.now() - quotesTimestamp > 300000);
+    }, 60000);
+    return () => clearInterval(id);
+  }, [quotesTimestamp]);
 
   /* ── Derived data ──────────────────────────────────────────────────────── */
 
@@ -994,7 +1011,14 @@ export function WatchlistPage({ token, onViewChart, onViewNews, onTradeAI }) {
                 </span>
               )}
             </div>
-            <div style={{ overflowX: "auto" }}>
+            {/* Stale data banner — appears when quotes are older than 5 minutes */}
+            {quotesStale && (
+              <StaleDataBanner
+                lastUpdated={quotesTimestamp}
+                onRefresh={() => { setQuotesStale(false); loadQuotes(items); }}
+              />
+            )}
+            <div className="table-responsive" style={{ overflow: "auto", maxHeight: "calc(100vh - 280px)" }}>
               <table className="data-table">
                 <thead>
                   <tr>
@@ -1009,6 +1033,9 @@ export function WatchlistPage({ token, onViewChart, onViewNews, onTradeAI }) {
                   </tr>
                 </thead>
                 <tbody>
+                  {/* Skeleton rows while items are loading */}
+                  {loadingItems && Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} cols={8} />)}
+
                   {/* Empty state row */}
                   {sortedItems.length === 0 && !loadingItems && (
                     <tr>
@@ -1051,24 +1078,24 @@ export function WatchlistPage({ token, onViewChart, onViewNews, onTradeAI }) {
                     return (
                       <tr key={item.item_id}>
                         {/* SYMBOL */}
-                        <td>
+                        <td data-label="SYMBOL">
                           <span className="amber" style={{ fontWeight: 700 }}>{item.symbol}</span>
                         </td>
 
                         {/* NAME — from quotes */}
-                        <td style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <td data-label="NAME" style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {q?.name || <span style={{ color: "var(--c-muted)" }}>{"\u2014"}</span>}
                         </td>
 
                         {/* PRICE — live price */}
-                        <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
+                        <td data-label="PRICE" className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
                           {price != null
                             ? formatValue(price)
                             : <span className="loading-pulse" style={{ color: "var(--c-muted)", fontSize: 11 }}>...</span>}
                         </td>
 
                         {/* CHG — daily $ change + % */}
-                        <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
+                        <td data-label="CHANGE" className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
                           {dayChg != null
                             ? (
                               <span className={dayChg >= 0 ? "green" : "red"}>
@@ -1082,14 +1109,14 @@ export function WatchlistPage({ token, onViewChart, onViewNews, onTradeAI }) {
                         </td>
 
                         {/* DAY RANGE — low-high */}
-                        <td className="right" style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", fontSize: 11 }}>
+                        <td data-label="DAY RANGE" className="right" style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", fontSize: 11 }}>
                           {dayLow != null && dayHigh != null
                             ? <span style={{ color: "var(--c-muted)" }}>{formatValue(dayLow)} {"\u2013"} {formatValue(dayHigh)}</span>
                             : <span style={{ color: "var(--c-muted)" }}>{"\u2014"}</span>}
                         </td>
 
                         {/* SINCE ADDED — dollar change with % in brackets */}
-                        <td className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
+                        <td data-label="SINCE ADDED" className="right" style={{ fontVariantNumeric: "tabular-nums" }}>
                           {sinceAdded != null
                             ? <span className={sinceAdded >= 0 ? "green" : "red"}>
                                 {formatValue(sinceAddedDollar, { showSign: true })} ({fmtPct(sinceAdded)})
@@ -1098,7 +1125,7 @@ export function WatchlistPage({ token, onViewChart, onViewNews, onTradeAI }) {
                         </td>
 
                         {/* NOTES — truncated */}
-                        <td style={{
+                        <td data-label="NOTES" style={{
                           maxWidth: 140, overflow: "hidden",
                           textOverflow: "ellipsis", whiteSpace: "nowrap",
                           fontSize: 11, color: "var(--c-muted)",
@@ -1107,11 +1134,11 @@ export function WatchlistPage({ token, onViewChart, onViewNews, onTradeAI }) {
                         </td>
 
                         {/* ACTIONS — info, buy, chart, edit, remove */}
-                        <td>
+                        <td data-label="ACTIONS">
                           <div style={{ display: "flex", gap: 6 }}>
                             {/* Asset detail info button */}
                             <button
-                              className="btn btn-ghost"
+                              className="btn btn-ghost table-action-btn"
                               title="Asset details"
                               onClick={() => setDetailSymbol(item.symbol)}
                               style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer", fontSize: 15, padding: "3px 7px" }}
@@ -1120,7 +1147,7 @@ export function WatchlistPage({ token, onViewChart, onViewNews, onTradeAI }) {
                             </button>
                             {/* Price alert button */}
                             <button
-                              className="btn btn-ghost"
+                              className="btn btn-ghost table-action-btn"
                               title="Set price alert"
                               onClick={() => { setAlertSymbol(item.symbol); setAlertPrice(quotes[item.symbol]?.price ?? null); }}
                               style={{ padding: "3px 7px", color: "#f59e0b" }}
@@ -1129,7 +1156,7 @@ export function WatchlistPage({ token, onViewChart, onViewNews, onTradeAI }) {
                             </button>
                             {/* Buy button */}
                             <button
-                              className="btn btn-ghost"
+                              className="btn btn-ghost table-action-btn"
                               title={t("watchlist.buy")}
                               onClick={() => setBuyItem(item)}
                               style={{ padding: "3px 7px", color: "var(--green)" }}
@@ -1139,7 +1166,7 @@ export function WatchlistPage({ token, onViewChart, onViewNews, onTradeAI }) {
                             {/* Chart button */}
                             {onViewChart && (
                               <button
-                                className="btn btn-ghost"
+                                className="btn btn-ghost table-action-btn"
                                 title={t("dashboard.viewChart")}
                                 onClick={() => onViewChart(item.symbol)}
                                 style={{ padding: "3px 7px" }}
@@ -1150,7 +1177,7 @@ export function WatchlistPage({ token, onViewChart, onViewNews, onTradeAI }) {
                             {/* Trade AI button */}
                             {onTradeAI && (
                               <button
-                                className="btn btn-ghost"
+                                className="btn btn-ghost table-action-btn"
                                 title="Trade AI"
                                 onClick={() => onTradeAI(item.symbol)}
                                 style={{ padding: "3px 7px", color: "var(--amber)" }}
@@ -1160,7 +1187,7 @@ export function WatchlistPage({ token, onViewChart, onViewNews, onTradeAI }) {
                             )}
                             {/* Edit notes button */}
                             <button
-                              className="btn btn-ghost"
+                              className="btn btn-ghost table-action-btn"
                               title={t("watchlist.editNotes")}
                               onClick={() => setEditItem(item)}
                               style={{ padding: "3px 7px" }}
@@ -1169,7 +1196,7 @@ export function WatchlistPage({ token, onViewChart, onViewNews, onTradeAI }) {
                             </button>
                             {/* Remove button */}
                             <button
-                              className="btn btn-ghost"
+                              className="btn btn-ghost table-action-btn"
                               title={t("watchlist.remove")}
                               onClick={() => handleRemoveItem(item)}
                               style={{ padding: "3px 7px", color: "var(--red)" }}

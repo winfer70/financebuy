@@ -48,7 +48,8 @@
     "loadingPortfolio": "ŁADOWANIE DANYCH PORTFELA...",
     "allTime": "OD POCZĄTKU",
     "today": "DZIŚ",
-    "viewChart": "POKAŻ WYKRES"
+    "viewChart": "POKAŻ WYKRES",
+    "cashBalance": "SALDO GOTÓWKOWE"
   },
   "portfolioManager": {
     "title": "MENEDŻER PORTFELI",

@@ -18,7 +18,7 @@ networks:
 
 services:
   db:
-    image: postgres:15
+    image: timescale/timescaledb:latest-pg15
     restart: always
     environment:
       POSTGRES_USER:     ${POSTGRES_USER:-postgres}
@@ -109,15 +109,20 @@ services:
     restart: always
     command: ["arq", "app.trading.alert_worker.WorkerSettings"]
     healthcheck:
-      test: ["CMD-SHELL", "test -d /proc/1 || exit 1"]
-      interval: 30s
-      timeout: 5s
+      test: ["CMD", "python", "-m", "app.trading.worker_healthcheck", "alert-worker", "600"]
+      interval: 60s
+      timeout: 10s
       retries: 3
+      start_period: 30s
     env_file:
       - ./backend/.env
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-tickerTap}
-      REDIS_URL:    redis://redis:6379/0
+      DATABASE_URL:    postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-tickerTap}
+      REDIS_URL:       redis://redis:6379/0
+      # Workers never own schema changes — only app runs alembic.
+      # This lets workers start safely even if their baked image predates
+      # the latest migration files.
+      SKIP_MIGRATIONS: "1"
     networks:
       - tickertap_net
     depends_on:

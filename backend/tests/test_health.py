@@ -13,13 +13,19 @@ from app.main import app  # noqa: E402
 client = TestClient(app)
 
 
-def test_health():
+def test_health_returns_200():
+    """GET /health should return 200 when DB and Redis are reachable."""
     r = client.get("/health")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok"}
 
 
-def test_docker_compose():
-    r = client.get("/docker-compose")
-    assert r.status_code == 200
-    assert r.json() == {"status": "ok"}
+def test_health_response_shape():
+    """GET /health response body should contain status, db, redis, and timestamp."""
+    r = client.get("/health")
+    body = r.json()
+    assert "status" in body
+    assert "db" in body
+    assert "redis" in body
+    assert "timestamp" in body
+    assert body["db"]["status"] in ("ok", "error")
+    assert body["redis"]["status"] in ("ok", "error")

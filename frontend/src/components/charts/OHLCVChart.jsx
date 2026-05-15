@@ -513,7 +513,7 @@ export default function OHLCVChart({
 
   /* ── Cursor style ────────────────────────────────────────────────────── */
   const cursor = drawInteraction === "moving" ? "move"
-    : drawInteraction === "resizing" ? "crosshair"
+    : drawInteraction === "resizing" ? "grab"
     : enableDrawingTools && activeTool ? "crosshair"
     : enableZoom && dragRef.current ? "grabbing"
     : enableZoom ? "grab"
@@ -912,15 +912,31 @@ export default function OHLCVChart({
         </svg>
 
         {/* ── Drawing context toolbar (floating delete/deselect) ── */}
-        {enableDrawingTools && selectedDrawingId && !activeTool && (
-          <DrawingContextToolbar
-            onDelete={() => {
-              setDrawings(prev => prev.filter(d => d.id !== selectedDrawingId));
-              setSelectedDrawingId(null);
-            }}
-            onDeselect={() => setSelectedDrawingId(null)}
-          />
-        )}
+        {enableDrawingTools && selectedDrawingId && !activeTool && (() => {
+          const selDrawing = drawings.find(d => d.id === selectedDrawingId);
+          if (!selDrawing || !selDrawing.anchors?.length) return null;
+          /* Compute centroid of anchor pixel positions for smart toolbar placement */
+          const anchorPixels = selDrawing.anchors.map(a => ({
+            x: resolveAnchorX(a, visibleData, visibleStart, allData, xOf),
+            y: resolveAnchorY(a.price, PAD, H, pLo, pHi),
+          }));
+          const avgX = anchorPixels.reduce((s, p) => s + p.x, 0) / anchorPixels.length;
+          const minY = Math.min(...anchorPixels.map(p => p.y));
+          /* Center toolbar above the drawing; clamp to visible area */
+          const toolbarX = Math.max(0, avgX - 60);
+          const toolbarY = Math.max(4, minY - 40);
+          return (
+            <DrawingContextToolbar
+              onDelete={() => {
+                setDrawings(prev => prev.filter(d => d.id !== selectedDrawingId));
+                setSelectedDrawingId(null);
+              }}
+              onDeselect={() => setSelectedDrawingId(null)}
+              x={toolbarX}
+              y={toolbarY}
+            />
+          );
+        })()}
 
         {/* Hover tooltip */}
         {showCrosshair && hBar && (

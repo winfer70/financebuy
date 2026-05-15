@@ -48,7 +48,8 @@
     "loadingPortfolio": "CARICAMENTO DATI PORTAFOGLIO...",
     "allTime": "TUTTO IL PERIODO",
     "today": "OGGI",
-    "viewChart": "VEDI GRAFICO"
+    "viewChart": "VEDI GRAFICO",
+    "cashBalance": "SALDO DISPONIBILE"
   },
   "portfolioManager": {
     "title": "GESTORE PORTAFOGLI",

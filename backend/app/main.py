@@ -2,26 +2,29 @@
 main.py — FastAPI application entry point for TickerTap.
 
 Configures middleware (CORS, rate limiting, security headers, request
-logging, body size enforcement), registers all route modules under the
-/api/v1 prefix, and validates critical settings on startup.
+logging, body size enforcement, correlation ID), registers all route
+modules under the /api/v1 prefix, and validates critical settings on startup.
 
 Security middleware applied (outermost → innermost):
-  1. SlowAPIMiddleware          — rate-limit enforcement (429 on breach)
-  2. CORSMiddleware             — origin restriction
-  3. SecurityHeadersMiddleware  — injects HSTS/CSP/X-Frame etc. (P6.2)
-  4. RequestBodySizeMiddleware  — rejects oversized payloads (P6.5)
-  5. RequestLoggingMiddleware   — structured access logs
+  1. CorrelationIDMiddleware    — UUID per request, binds to structlog context
+  2. RequestLoggingMiddleware   — structured access logs (sees correlation ID)
+  3. RequestBodySizeMiddleware  — rejects oversized payloads (P6.5)
+  4. SecurityHeadersMiddleware  — injects HSTS/CSP/X-Frame etc. (P6.2)
+  5. CORSMiddleware             — origin restriction
+  6. SlowAPIMiddleware          — rate-limit enforcement (429 on breach)
 
 API versioning:
   All business routes are mounted under /api/v1/ (P7.18).
-  The /health endpoint remains unversioned for monitoring tools.
+  The /health and /metrics endpoints remain unversioned for monitoring tools.
 """
 
-import logging
+import asyncio
 import os
 import time
+import uuid
 
-from fastapi import FastAPI, Request, Response
+import structlog
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
@@ -31,17 +34,38 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from .auth import validate_jwt_config
 from .limiter import limiter
-from .routes import accounts, admin, alerts, auth_routes, chart_templates, feedback, guide, holdings, market, news, orders, portfolio, portfolio_manager, reports, transactions, trading, watchlists
-from .routes.news import register_retention_task
+from .logging_config import configure_structlog
+from .observability import APP_START_TIME, check_db, check_redis, get_worker_metrics
+from .routes import (
+    accounts,
+    admin,
+    alerts,
+    auth_routes,
+    chart_templates,
+    feedback,
+    guide,
+    holdings,
+    import_routes,
+    market,
+    metrics as metrics_routes,
+    news,
+    orders,
+    portfolio,
+    portfolio_manager,
+    portfolio_rules,
+    reports,
+    scanner,
+    transactions,
+    trading,
+    watchlists,
+)
+from .routes.auth_routes import get_current_admin, register_deletion_purge
 from .routes.feedback import register_outcome_checker
-from .routes.auth_routes import register_deletion_purge
+from .routes.news import register_retention_task
 
 # ── Logging ──────────────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO").upper(),
-    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-)
-logger = logging.getLogger("tickerTap")
+configure_structlog()
+logger = structlog.get_logger("tickerTap")
 
 # ── Application ──────────────────────────────────────────────────────────────
 app = FastAPI(
@@ -68,11 +92,12 @@ async def _seed_system_strategies():
     ``is_system=True`` rows.  Skips if any system strategies already exist
     to avoid duplicates on subsequent restarts.
     """
-    import uuid
+    import uuid as _uuid
+    from sqlalchemy import select
+
     from .db import AsyncSessionLocal
     from .models import Strategy
     from .trading.templates import TEMPLATES
-    from sqlalchemy import select
 
     async with AsyncSessionLocal() as session:
         # Load existing system strategy slugs
@@ -92,7 +117,7 @@ async def _seed_system_strategies():
             if slug in existing_slugs:
                 continue
             strategy = Strategy(
-                strategy_id=uuid.uuid4(),
+                strategy_id=_uuid.uuid4(),
                 user_id=None,
                 name=tmpl["name"],
                 description=tmpl["description"],
@@ -109,9 +134,9 @@ async def _seed_system_strategies():
 
         if inserted:
             await session.commit()
-            logger.info("Seeded %d new system strategies from templates.", inserted)
+            logger.info("system_strategies_seeded", count=inserted)
         else:
-            logger.info("System strategies already seeded (%d found). Skipping.", len(existing))
+            logger.info("system_strategies_already_seeded", count=len(existing))
 
 
 @app.on_event("startup")
@@ -135,16 +160,15 @@ async def _startup_checks():
             "Set LOG_LEVEL=INFO or higher."
         )
 
-    logger.info("Startup checks passed — JWT secret validated, log level OK.")
+    logger.info("startup_checks_passed", log_level=log_level, env=_env)
 
     # Warn if INTERNAL_NEWS_KEY is weak or using a known default
     _news_key = os.getenv("INTERNAL_NEWS_KEY", "")
     _weak_keys = {"", "please-change-me", "dev_internal_news_key_not_for_production"}
     if _news_key in _weak_keys:
         logger.warning(
-            "INTERNAL_NEWS_KEY is missing or set to a known default — "
-            "the internal news ingestion endpoint is effectively unprotected. "
-            "Generate a strong key with: openssl rand -hex 32"
+            "internal_news_key_weak",
+            detail="endpoint is effectively unprotected — generate with: openssl rand -hex 32",
         )
 
     # Seed system strategies from templates on first run
@@ -163,7 +187,7 @@ app.add_middleware(
     allow_origins=[o.strip() for o in _origins.split(",")],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Correlation-ID"],
 )
 
 
@@ -263,16 +287,40 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         if any(s in path.lower() for s in self._SENSITIVE):
             path = path.split("?")[0]  # strip query string only
         logger.info(
-            "%s %s → %d (%.1fms)",
-            request.method,
-            path,
-            response.status_code,
-            duration_ms,
+            "http_request",
+            method=request.method,
+            path=path,
+            status=response.status_code,
+            duration_ms=round(duration_ms, 1),
         )
         return response
 
 
 app.add_middleware(RequestLoggingMiddleware)
+
+
+# 6. Correlation ID middleware ───────────────────────────────────────────────
+class CorrelationIDMiddleware(BaseHTTPMiddleware):
+    """Generates a UUID correlation ID per request.
+
+    Binds the ID to structlog's contextvars so all log lines within the
+    request carry it automatically.  Echoes the ID in the
+    ``X-Correlation-ID`` response header for client-side tracing.
+
+    Also clears any stale contextvars left over from previous requests on
+    the same worker greenlet.
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        structlog.contextvars.clear_contextvars()
+        correlation_id = str(uuid.uuid4())
+        structlog.contextvars.bind_contextvars(correlation_id=correlation_id)
+        response = await call_next(request)
+        response.headers["X-Correlation-ID"] = correlation_id
+        return response
+
+
+app.add_middleware(CorrelationIDMiddleware)
 
 
 # ── Routes — all under /api/v1/ prefix (P7.18) ───────────────────────────────
@@ -288,6 +336,7 @@ app.include_router(market.router, prefix=f"{_V1}/market", tags=["market"])
 app.include_router(holdings.router, prefix=f"{_V1}/holdings", tags=["holdings"])
 app.include_router(news.router, prefix=_V1)
 app.include_router(portfolio_manager.router, prefix=_V1)
+app.include_router(portfolio_rules.router, prefix=_V1)
 app.include_router(chart_templates.router, prefix=_V1)
 app.include_router(feedback.router, prefix=_V1)
 app.include_router(guide.router, prefix=_V1)
@@ -295,6 +344,9 @@ app.include_router(reports.router, prefix=_V1)
 app.include_router(watchlists.router, prefix=_V1)
 app.include_router(trading.router, prefix=_V1)
 app.include_router(alerts.router, prefix=_V1)
+app.include_router(import_routes.router, prefix=_V1)
+app.include_router(scanner.router, prefix=_V1)
+app.include_router(metrics_routes.router, prefix=_V1)
 
 # Register the 30-day news retention cleanup background task (Phase 9).
 register_retention_task(app)
@@ -306,14 +358,52 @@ register_outcome_checker(app)
 register_deletion_purge(app)
 
 
+# ── Health & observability endpoints ─────────────────────────────────────────
+
 @app.get("/health", tags=["health"])
 async def health():
-    """Lightweight health check for load balancers and monitoring.
+    """Deep health check — probes DB and Redis concurrently.
 
-    Intentionally unversioned so monitoring tools need no configuration
-    changes between API versions.
+    Returns HTTP 200 if at least one dependency is reachable, 503 only
+    when both DB and Redis are unreachable.  Monitoring tools should alert
+    on 503 or on individual component failures in the body.
 
     Returns:
-        dict: {"status": "ok"}
+        dict: {status, db, redis, timestamp}
     """
-    return {"status": "ok"}
+    db_result, redis_result = await asyncio.gather(check_db(), check_redis())
+    db_ok = db_result["ok"]
+    redis_ok = redis_result["ok"]
+    all_down = not db_ok and not redis_ok
+    body = {
+        "status": "ok" if not all_down else "degraded",
+        "db": {
+            "status": "ok" if db_ok else "error",
+            "latency_ms": db_result["latency_ms"],
+            "error": db_result.get("error"),
+        },
+        "redis": {
+            "status": "ok" if redis_ok else "error",
+            "latency_ms": redis_result["latency_ms"],
+            "error": redis_result.get("error"),
+        },
+        "timestamp": time.time(),
+    }
+    return JSONResponse(content=body, status_code=503 if all_down else 200)
+
+
+@app.get("/metrics", tags=["observability"])
+async def metrics(current_user=Depends(get_current_admin)):
+    """Worker heartbeat metrics — admin only.
+
+    Returns uptime, per-worker last-seen timestamps, jobs processed,
+    and last error strings sourced from Redis heartbeat keys.
+
+    Returns:
+        dict: {uptime_seconds, workers: {name: {...}}}
+    """
+    worker_data = await get_worker_metrics()
+    return {
+        "uptime_seconds": round(time.monotonic() - APP_START_TIME, 1),
+        "workers": worker_data,
+    }

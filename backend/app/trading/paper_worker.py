@@ -21,19 +21,24 @@ so it does NOT import from ``app.db``.
 
 from __future__ import annotations
 
-import logging
 import os
 import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import List
 
+import structlog
 from arq.connections import RedisSettings, create_pool
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-logger = logging.getLogger("paper_worker")
+from ..logging_config import configure_structlog
+from .heartbeat import write_worker_heartbeat
+
+# Configure structlog before any logger is obtained — idempotent guard inside
+configure_structlog()
+logger = structlog.get_logger("paper_worker")
 
 # -- Database setup (standalone — worker runs outside FastAPI) ─────────────
 
@@ -73,6 +78,15 @@ async def evaluate_paper_trades(ctx: dict) -> None:
     Args:
         ctx: arq job context dict.
     """
+    # Bind per-job context so all log lines carry worker and job_id fields
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(
+        worker="paper-worker", job_id=str(ctx.get("job_id", ""))
+    )
+    _last_error = ""
+    # Initialise trades before the try block so it is accessible in finally
+    trades = []
+
     # Late imports to avoid circular references at module load time
     from ..models import (
         Notification,
@@ -116,15 +130,16 @@ async def evaluate_paper_trades(ctx: dict) -> None:
                 )
             except Exception as e:
                 logger.error(
-                    "Error evaluating paper trade %s: %s",
-                    trade.paper_trade_id,
-                    e,
+                    "Error evaluating paper trade",
+                    trade_id=str(trade.paper_trade_id),
+                    error=str(e),
                 )
                 continue
 
         await session.commit()
     except Exception as e:
-        logger.error("Paper trade evaluation failed: %s", e)
+        _last_error = str(e)[:300]
+        logger.error("Paper trade evaluation failed", error=str(e))
         await session.rollback()
     finally:
         await session.close()
@@ -133,10 +148,18 @@ async def evaluate_paper_trades(ctx: dict) -> None:
         # MUST be inside finally so early returns / exceptions don't break the chain.
         try:
             pool = await create_pool(RedisSettings.from_dsn(_REDIS_URL))
-            await pool.enqueue_job("evaluate_paper_trades", _defer_by=60)
+            await pool.enqueue_job("evaluate_paper_trades", _defer_by=60, _queue_name="arq:paper")
             await pool.close()
         except Exception as exc:
-            logger.error("Failed to re-enqueue paper evaluation: %s", exc)
+            logger.error("Failed to re-enqueue paper evaluation", error=str(exc))
+
+        # Write heartbeat — delta reflects number of active trades evaluated
+        await write_worker_heartbeat(
+            "paper-worker",
+            _REDIS_URL,
+            jobs_processed_delta=len(trades) if trades else 0,
+            last_error=_last_error,
+        )
 
 
 # -- Single-trade evaluation ───────────────────────────────────────────────
@@ -179,8 +202,8 @@ async def _evaluate_single_trade(
     ).scalar_one_or_none()
     if not strat:
         logger.warning(
-            "Paper trade %s has no valid strategy, stopping.",
-            trade.paper_trade_id,
+            "Paper trade has no valid strategy, stopping",
+            trade_id=str(trade.paper_trade_id),
         )
         trade.status = "stopped"
         trade.stopped_at = datetime.utcnow()
@@ -211,9 +234,9 @@ async def _evaluate_single_trade(
             strat_module = get_strategy(slug)
         except KeyError:
             logger.error(
-                "Unknown strategy slug '%s' for paper trade %s",
-                slug,
-                trade.paper_trade_id,
+                "Unknown strategy slug for paper trade",
+                slug=slug,
+                trade_id=str(trade.paper_trade_id),
             )
             return
         signal_fn = strat_module["generate_signals"]
@@ -224,7 +247,7 @@ async def _evaluate_single_trade(
     try:
         bars = await norm.get_bars(trade.symbol, "1d", lookback_start, now)
     except Exception as e:
-        logger.warning("Failed to fetch data for %s: %s", trade.symbol, e)
+        logger.warning("Failed to fetch data for symbol", symbol=trade.symbol, error=str(e))
         return
 
     if not bars or len(bars) < 10:
@@ -234,7 +257,7 @@ async def _evaluate_single_trade(
     try:
         signals = signal_fn(bars, params)
     except Exception as e:
-        logger.warning("Signal generation failed for %s: %s", trade.symbol, e)
+        logger.warning("Signal generation failed for symbol", symbol=trade.symbol, error=str(e))
         return
 
     # 5. Determine latest signal direction and current price
@@ -430,9 +453,9 @@ async def _evaluate_single_trade(
                 )
             )
             logger.info(
-                "Circuit breaker tripped for paper trade %s (%.1f%% drawdown)",
-                trade.paper_trade_id,
-                breaker.current_dd_pct,
+                "Circuit breaker tripped",
+                trade_id=str(trade.paper_trade_id),
+                drawdown_pct=breaker.current_dd_pct,
             )
 
 
@@ -495,7 +518,7 @@ async def startup(ctx: dict) -> None:
     """
     try:
         pool = await create_pool(RedisSettings.from_dsn(_REDIS_URL))
-        await pool.enqueue_job("evaluate_paper_trades", _defer_by=10)
+        await pool.enqueue_job("evaluate_paper_trades", _defer_by=10, _queue_name="arq:paper")
         await pool.close()
     except Exception:
         pass
@@ -511,6 +534,7 @@ class WorkerSettings:
     """
 
     functions = [evaluate_paper_trades]
+    queue_name = "arq:paper"
     on_startup = startup
     redis_settings = RedisSettings.from_dsn(_REDIS_URL)
     max_jobs = 5

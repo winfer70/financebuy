@@ -48,7 +48,8 @@
     "loadingPortfolio": "LADE PORTFOLIODATEN...",
     "allTime": "GESAMTZEIT",
     "today": "HEUTE",
-    "viewChart": "CHART ANZEIGEN"
+    "viewChart": "CHART ANZEIGEN",
+    "cashBalance": "KASSENBESTAND"
   },
   "portfolioManager": {
     "title": "PORTFOLIO-MANAGER",

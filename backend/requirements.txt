@@ -12,9 +12,14 @@ python-jose==3.3.0
 psycopg2-binary>=2.9
 aiosmtplib>=2.0
 yfinance>=0.2.36
+pytz>=2023.3
 slowapi>=0.1.9
 redis>=4.0
 arq>=0.25
 numpy>=1.24
 pandas>=2.0
 lark>=1.1
+pytest-cov>=4.1
+pytest-asyncio>=0.23
+structlog>=23.1
+python-multipart>=0.0.6
