@@ -1,8 +1,9 @@
 #!/bin/bash
 # entrypoint.sh — TickerTap backend container entrypoint.
 #
-# Waits for PostgreSQL to be ready, runs Alembic migrations,
-# then starts the Uvicorn application server.
+# Waits for PostgreSQL to be ready, runs Alembic migrations (unless
+# SKIP_MIGRATIONS=1 is set — workers set this since only the app service
+# is authoritative for schema changes), then starts the process.
 
 set -e
 
@@ -42,8 +43,15 @@ except Exception:
 done
 
 # ── Run Alembic migrations ───────────────────────────────────────────────────
-echo "Running database migrations..."
-alembic -c /app/alembic.ini upgrade head
+# Workers set SKIP_MIGRATIONS=1 — only the app service owns schema changes.
+# This prevents workers from failing if their baked image lags the current
+# alembic head (e.g. after a partial rebuild that updated only app).
+if [ "${SKIP_MIGRATIONS:-0}" != "1" ]; then
+  echo "Running database migrations..."
+  alembic -c /app/alembic.ini upgrade head
+else
+  echo "Skipping migrations (SKIP_MIGRATIONS=1)."
+fi
 
 # ── Start the application ────────────────────────────────────────────────────
 # If docker-compose passes a custom command (e.g. arq worker), use that;

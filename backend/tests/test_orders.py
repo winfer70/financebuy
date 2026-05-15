@@ -180,52 +180,52 @@ class TestPlaceOrderEndpoint:
             "price":       "150.00",
         }
 
-    def test_returns_400_for_zero_quantity(self, auth_client):
-        """quantity = 0 should return 400 Bad Request."""
+    def test_returns_422_for_zero_quantity(self, auth_client):
+        """quantity = 0 rejected by Pydantic schema (gt=0 constraint) → 422."""
         client, account, security, _ = auth_client
         payload = self._base_payload(account.account_id, security.security_id)
         payload["quantity"] = "0"
 
-        response = client.post("/orders", json=payload)
-        assert response.status_code == 400
-        assert "quantity" in response.json().get("detail", "").lower()
+        response = client.post("/api/v1/orders", json=payload)
+        assert response.status_code == 422
+        assert "quantity" in str(response.json().get("detail", "")).lower()
 
-    def test_returns_400_for_negative_quantity(self, auth_client):
-        """quantity < 0 should return 400 Bad Request."""
+    def test_returns_422_for_negative_quantity(self, auth_client):
+        """quantity < 0 rejected by Pydantic schema (gt=0 constraint) → 422."""
         client, account, security, _ = auth_client
         payload = self._base_payload(account.account_id, security.security_id)
         payload["quantity"] = "-1"
 
-        response = client.post("/orders", json=payload)
-        assert response.status_code == 400
+        response = client.post("/api/v1/orders", json=payload)
+        assert response.status_code == 422
 
-    def test_returns_400_for_zero_price(self, auth_client):
-        """price = 0 should return 400 Bad Request."""
+    def test_returns_422_for_zero_price(self, auth_client):
+        """price = 0 rejected by Pydantic schema (gt=0 constraint) → 422."""
         client, account, security, _ = auth_client
         payload = self._base_payload(account.account_id, security.security_id)
         payload["price"] = "0"
 
-        response = client.post("/orders", json=payload)
-        assert response.status_code == 400
-        assert "price" in response.json().get("detail", "").lower()
+        response = client.post("/api/v1/orders", json=payload)
+        assert response.status_code == 422
+        assert "price" in str(response.json().get("detail", "")).lower()
 
-    def test_returns_400_for_invalid_side(self, auth_client):
-        """Invalid side value should return 400."""
+    def test_returns_422_for_invalid_side(self, auth_client):
+        """Invalid side rejected by Pydantic Literal["buy","sell"] → 422."""
         client, account, security, _ = auth_client
         payload = self._base_payload(account.account_id, security.security_id)
         payload["side"] = "hold"
 
-        response = client.post("/orders", json=payload)
-        assert response.status_code == 400
+        response = client.post("/api/v1/orders", json=payload)
+        assert response.status_code == 422
 
-    def test_returns_400_for_invalid_order_type(self, auth_client):
-        """Invalid order_type should return 400."""
+    def test_returns_422_for_invalid_order_type(self, auth_client):
+        """Invalid order_type rejected by Pydantic Literal["market","limit"] → 422."""
         client, account, security, _ = auth_client
         payload = self._base_payload(account.account_id, security.security_id)
         payload["order_type"] = "stop"
 
-        response = client.post("/orders", json=payload)
-        assert response.status_code == 400
+        response = client.post("/api/v1/orders", json=payload)
+        assert response.status_code == 422
 
     def test_returns_404_when_account_not_found(self, auth_client):
         """If the account does not belong to the current user, return 404."""
@@ -233,14 +233,22 @@ class TestPlaceOrderEndpoint:
         from app.db import get_db
 
         async def override_no_account():
+            result = MagicMock()
+            result.scalar_one_or_none.return_value = None
             session = AsyncMock()
-            session.execute.return_value.scalar_one_or_none.return_value = None
+            session.execute = AsyncMock(return_value=result)
+            session.add = MagicMock()
+            session.commit = AsyncMock()
+            cm = MagicMock()
+            cm.__aenter__ = AsyncMock(return_value=None)
+            cm.__aexit__ = AsyncMock(return_value=False)
+            session.begin = MagicMock(return_value=cm)
             yield session
 
         client, account, security, _ = auth_client
         app.dependency_overrides[get_db] = override_no_account
 
         payload = self._base_payload(uuid.uuid4(), uuid.uuid4())
-        response = client.post("/orders", json=payload)
+        response = client.post("/api/v1/orders", json=payload)
 
         assert response.status_code == 404

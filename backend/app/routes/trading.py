@@ -50,7 +50,7 @@ from ..schemas import (
     BatchBacktestRequest,
     PaperTradeCreate, PaperTradeUpdate, PaperTradeOut, PaperTradePositionOut,
     PaperTradeEquitySnapshotOut,
-    PortfolioScoreRequest, PortfolioScoreResponse, PositionScore,
+    PortfolioItem, PortfolioScoreRequest, PortfolioScoreResponse, PositionScore,
     ExitAnalysisRequest, ExitAnalysisResponse, ExitLevel,
 )
 from ..limiter import limiter
@@ -2331,14 +2331,19 @@ def _generate_suggestion(trend, rsi_val, signal_label, volatility_pct):
     )
 
 
-async def _analyze_single_symbol(symbol: str) -> PositionScore:
+async def _analyze_single_symbol(
+    symbol: str,
+    position: Optional[PortfolioItem] = None,
+) -> PositionScore:
     """Run full technical analysis on a single symbol.
 
     Fetches daily bars, computes trend / RSI / ATR / best strategy signal,
-    and returns a ``PositionScore`` ready for serialisation.
+    and returns a ``PositionScore`` ready for serialisation.  When ``position``
+    is provided, extended P&L and stop-loss status fields are also populated.
 
     Args:
-        symbol: Upper-cased ticker symbol.
+        symbol:   Upper-cased ticker symbol.
+        position: Optional ``PortfolioItem`` with cost-basis and stop-loss data.
 
     Returns:
         ``PositionScore`` with all fields populated.
@@ -2384,6 +2389,37 @@ async def _analyze_single_symbol(symbol: str) -> PositionScore:
     # Human-readable suggestion
     suggestion = _generate_suggestion(trend, rsi_val, signal_label, volatility_pct)
 
+    # --- Extended P&L fields (populated when position detail is supplied) ---
+    cost_basis = unrealized_pnl = unrealized_pnl_pct = stop_loss_recommendation = None
+    if position is not None:
+        # Fetch a live price so unrealized P&L is accurate during market hours.
+        # Daily bars return yesterday's close until the market day ends, which
+        # makes intraday P&L stale.  Technical indicators above still use
+        # closes[-1] from the OHLCV history — only P&L pricing is overridden.
+        # Falls back to closes[-1] if the live fetch fails for any reason.
+        import yfinance as yf  # noqa: PLC0415 — local import matches existing pattern
+        pnl_price = current_price  # fallback: yesterday's close
+        try:
+            live = yf.Ticker(symbol).fast_info.last_price
+            if live and live > 0:
+                pnl_price = live
+        except Exception:
+            pass
+
+        cost_basis = float(position.purchase_price * position.quantity)
+        current_value = float(pnl_price * position.quantity)
+        unrealized_pnl = current_value - cost_basis
+        unrealized_pnl_pct = (unrealized_pnl / cost_basis * 100) if cost_basis else None
+        if position.stop_loss:
+            if pnl_price < position.stop_loss:
+                stop_loss_recommendation = "TRIGGERED: Price below stop loss"
+            elif pnl_price < position.stop_loss * 1.05:
+                stop_loss_recommendation = "WARNING: Within 5% of stop loss"
+            else:
+                stop_loss_recommendation = "OK"
+        else:
+            stop_loss_recommendation = "No stop loss set"
+
     return PositionScore(
         symbol=symbol,
         current_price=round(current_price, 4),
@@ -2394,6 +2430,10 @@ async def _analyze_single_symbol(symbol: str) -> PositionScore:
         signal_strategy=signal_strategy,
         suggestion=suggestion,
         score=score,
+        cost_basis=round(cost_basis, 2) if cost_basis is not None else None,
+        unrealized_pnl=round(unrealized_pnl, 2) if unrealized_pnl is not None else None,
+        unrealized_pnl_pct=round(unrealized_pnl_pct, 2) if unrealized_pnl_pct is not None else None,
+        stop_loss_recommendation=stop_loss_recommendation,
     )
 
 
@@ -2435,6 +2475,12 @@ async def score_portfolio(
             seen.add(upper)
             unique_symbols.append(upper)
 
+    # Build a ticker -> PortfolioItem map from the optional positions list
+    positions_map: dict = {}
+    if body.positions:
+        for pos in body.positions:
+            positions_map[pos.ticker.strip().upper()] = pos
+
     # Analyze all symbols in parallel
     async def _safe_analyze(sym: str) -> PositionScore:
         """Wrapper that returns a zero-score fallback on any failure.
@@ -2447,7 +2493,7 @@ async def score_portfolio(
             score=0 and an error suggestion on failure.
         """
         try:
-            return await _analyze_single_symbol(sym)
+            return await _analyze_single_symbol(sym, position=positions_map.get(sym))
         except Exception as exc:
             logger.warning("Portfolio score: failed to analyze %s: %s", sym, exc)
             return PositionScore(
@@ -2604,7 +2650,7 @@ async def start_paper_trade(
         from arq.connections import create_pool, RedisSettings
         _redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
         pool = await create_pool(RedisSettings.from_dsn(_redis_url))
-        await pool.enqueue_job("evaluate_paper_trades", _defer_by=5)
+        await pool.enqueue_job("evaluate_paper_trades", _defer_by=5, _queue_name="arq:paper")
         await pool.close()
     except Exception:
         pass  # Worker startup hook will eventually pick it up

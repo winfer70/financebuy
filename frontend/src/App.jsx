@@ -34,6 +34,8 @@ import {
   TickerStrip,
   useMarketStatus,
 } from "./components/common";
+import KeyboardShortcutsModal from "./components/common/KeyboardShortcutsModal";
+import useKeyboardShortcuts from "./hooks/useKeyboardShortcuts";
 
 /* ── Modal ────────────────────────────────────────────────────────────────── */
 import { TxModal } from "./components/modals/TxModal";
@@ -115,6 +117,21 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
       return prefs?.sidebar_collapsed || false;
     } catch { return false; }
   });
+
+  /* ── Keyboard shortcuts modal ─────────────────────────────────────── */
+  const [showShortcuts, setShowShortcuts] = useState(false);
+
+  /* Shortcut definitions — "g <key>" navigates to a page; "?" opens help */
+  const shortcuts = [
+    { key: ["g", "d"], description: "Go to Dashboard",         action: () => setPage("dashboard") },
+    { key: ["g", "w"], description: "Go to Watchlist",         action: () => setPage("watchlist") },
+    { key: ["g", "p"], description: "Go to Portfolio Manager", action: () => setPage("portfolio-manager") },
+    { key: ["g", "t"], description: "Go to Trading AI",        action: () => setPage("trading") },
+    { key: ["g", "n"], description: "Go to News",              action: () => setPage("news") },
+    { key: ["g", "c"], description: "Go to Charts",            action: () => setPage("charts") },
+    { key: "?",        description: "Show keyboard shortcuts", action: () => setShowShortcuts(true) },
+  ];
+  useKeyboardShortcuts(shortcuts);
 
   const toggleSidebar = useCallback(() => {
     setSidebarCollapsed(prev => {
@@ -275,12 +292,12 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
       {/* Mobile bottom navigation — hidden on desktop via CSS, shown on mobile */}
       <nav className="mobile-bottom-nav">
         {[
-          { id: "dashboard",         label: "HOME",      Icon: Ic.dashboard },
-          { id: "charts",            label: "CHARTS",    Icon: Ic.charts },
-          { id: "portfolio-manager", label: "PORT", Icon: Ic.portfolio },
-          { id: "trading",           label: "TRADE",     Icon: Ic.trading },
-          { id: "alerts",            label: "ALERTS",    Icon: Ic.bell },
-          { id: "news",              label: "NEWS",      Icon: Ic.news },
+          { id: "dashboard",         label: "HOME",   Icon: Ic.dashboard },
+          { id: "charts",            label: "CHARTS", Icon: Ic.charts },
+          { id: "portfolio-manager", label: "PORT",   Icon: Ic.portfolio },
+          { id: "trading",           label: "TRADE",  Icon: Ic.trading },
+          { id: "watchlist",         label: "WATCH",  Icon: Ic.watchlist },
+          { id: "news",              label: "NEWS",   Icon: Ic.news },
         ].map(({ id, label, Icon }) => (
           <button
             key={id}
@@ -342,6 +359,16 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
             </div>
             <NotificationBell token={authToken} />
             <Clock />
+            {/* Keyboard shortcuts help button */}
+            <button
+              onClick={() => setShowShortcuts(true)}
+              title="Keyboard shortcuts (?)"
+              style={{
+                background: "none", border: "1px solid var(--c-border)", borderRadius: 3,
+                color: "var(--c-muted)", cursor: "pointer", fontFamily: "var(--font-mono)",
+                fontSize: 11, padding: "2px 7px", lineHeight: 1.4, letterSpacing: ".05em",
+              }}
+            >?</button>
           </div>
         </div>
 
@@ -467,6 +494,13 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
           onSubmit={handleTxSubmit}
         />
       )}
+
+      {/* Keyboard shortcuts modal */}
+      <KeyboardShortcutsModal
+        isOpen={showShortcuts}
+        shortcuts={shortcuts}
+        onClose={() => setShowShortcuts(false)}
+      />
     </div>
   );
 }

@@ -240,11 +240,24 @@ def client():
     from app.db import get_db
 
     async def override_get_db():
+        import uuid as _uuid
+        result = MagicMock()
+        # scalar_one_or_none() returns None by default (no existing user)
+        result.scalar_one_or_none.return_value = None
         session = AsyncMock()
-        # execute().scalar_one_or_none() returns None by default (no existing user)
-        session.execute.return_value.scalar_one_or_none.return_value = None
+        session.execute = AsyncMock(return_value=result)
         session.commit = AsyncMock()
-        session.refresh = AsyncMock()
+
+        async def _refresh(obj):
+            # Simulate DB populating server defaults after commit
+            if getattr(obj, "user_id", None) is None:
+                obj.user_id = _uuid.uuid4()
+            if getattr(obj, "kyc_status", None) is None:
+                obj.kyc_status = "not_verified"
+            if getattr(obj, "is_active", None) is None:
+                obj.is_active = True
+
+        session.refresh = AsyncMock(side_effect=_refresh)
         yield session
 
     app.dependency_overrides[get_db] = override_get_db
@@ -266,23 +279,25 @@ class TestRegisterEndpoint:
         }
 
         # ACT
-        response = client.post("/auth/register", json=payload)
+        response = client.post("/api/v1/auth/register", json=payload)
 
         # ASSERT
         assert response.status_code == 201, (
             f"Expected 201, got {response.status_code}: {response.text}"
         )
 
-    def test_register_returns_400_for_duplicate_email(self, client):
-        """If an existing user is found, /register should return 400."""
+    def test_register_returns_201_for_duplicate_email(self, client):
+        """Duplicate email returns 201 to prevent email enumeration (anti-fingerprinting)."""
         # ARRANGE — mock returns an existing user
         from app.models import User
         mock_user = MagicMock(spec=User)
 
         from app.db import get_db
         async def override_with_existing():
+            result = MagicMock()
+            result.scalar_one_or_none.return_value = mock_user
             session = AsyncMock()
-            session.execute.return_value.scalar_one_or_none.return_value = mock_user
+            session.execute = AsyncMock(return_value=result)
             yield session
 
         from app.main import app
@@ -294,18 +309,21 @@ class TestRegisterEndpoint:
         }
 
         # ACT
-        response = client.post("/auth/register", json=payload)
+        response = client.post("/api/v1/auth/register", json=payload)
 
-        # ASSERT
-        assert response.status_code == 400
-        assert "already exists" in response.json().get("detail", "")
+        # ASSERT — returns 201 (same as success) to prevent email enumeration
+        assert response.status_code == 201
+        assert "email" in response.json().get("message", "")
 
         # restore
         from app.db import get_db as _get_db
 
         async def _default():
+            import uuid as _uuid
+            result = MagicMock()
+            result.scalar_one_or_none.return_value = None
             session = AsyncMock()
-            session.execute.return_value.scalar_one_or_none.return_value = None
+            session.execute = AsyncMock(return_value=result)
             session.commit = AsyncMock()
             session.refresh = AsyncMock()
             yield session
@@ -314,7 +332,7 @@ class TestRegisterEndpoint:
 
     def test_register_requires_email_field(self, client):
         """Missing email should trigger a 422 Unprocessable Entity."""
-        response = client.post("/auth/register", json={"password": "pass"})
+        response = client.post("/api/v1/auth/register", json={"password": "pass"})
         assert response.status_code == 422
 
 
@@ -341,10 +359,17 @@ class TestLoginEndpoint:
         mock_user.last_name  = "User"
         mock_user.is_active  = True
         mock_user.password_hash = _hash("GoodPassword123!")
+        # Explicitly clear fields checked by login endpoint
+        mock_user.locked_until           = None
+        mock_user.deactivated_at         = None
+        mock_user.deletion_scheduled_at  = None
+        mock_user.failed_login_attempts  = 0
 
         async def override():
+            result = MagicMock()
+            result.scalar_one_or_none.return_value = mock_user
             session = AsyncMock()
-            session.execute.return_value.scalar_one_or_none.return_value = mock_user
+            session.execute = AsyncMock(return_value=result)
             session.commit = AsyncMock()
             yield session
 
@@ -358,7 +383,7 @@ class TestLoginEndpoint:
     def test_login_returns_200_and_access_token_for_valid_credentials(self):
         """Correct credentials should return 200 with an access_token."""
         tc       = TestClient(self._app)
-        response = tc.post("/auth/login", json={
+        response = tc.post("/api/v1/auth/login", json={
             "email":    "login@example.com",
             "password": "GoodPassword123!",
         })
@@ -370,7 +395,7 @@ class TestLoginEndpoint:
     def test_login_returns_401_for_wrong_password(self):
         """Wrong password should return 401 Unauthorized."""
         tc       = TestClient(self._app)
-        response = tc.post("/auth/login", json={
+        response = tc.post("/api/v1/auth/login", json={
             "email":    "login@example.com",
             "password": "WrongPassword!",
         })
@@ -383,15 +408,17 @@ class TestLoginEndpoint:
         self._user.is_active = False
 
         async def override_inactive():
+            result = MagicMock()
+            result.scalar_one_or_none.return_value = self._user
             session = AsyncMock()
-            session.execute.return_value.scalar_one_or_none.return_value = self._user
+            session.execute = AsyncMock(return_value=result)
             session.commit = AsyncMock()
             yield session
 
         self._app.dependency_overrides[get_db] = override_inactive
 
         tc       = TestClient(self._app)
-        response = tc.post("/auth/login", json={
+        response = tc.post("/api/v1/auth/login", json={
             "email":    "login@example.com",
             "password": "GoodPassword123!",
         })
@@ -400,5 +427,5 @@ class TestLoginEndpoint:
     def test_login_returns_422_for_missing_fields(self):
         """Missing email/password fields should return 422."""
         tc       = TestClient(self._app)
-        response = tc.post("/auth/login", json={"email": "only@email.com"})
+        response = tc.post("/api/v1/auth/login", json={"email": "only@email.com"})
         assert response.status_code == 422

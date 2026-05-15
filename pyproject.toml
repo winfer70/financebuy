@@ -12,3 +12,8 @@ line-length = 88
 #   UP    — pyupgrade: enforce modern Python 3.11+ syntax
 extend-select = ["E", "F", "W", "C90", "I", "B", "UP"]
 exclude = [".git", "__pycache__", "build", "dist", "venv"]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+pythonpath = ["backend"]
+asyncio_mode = "auto"

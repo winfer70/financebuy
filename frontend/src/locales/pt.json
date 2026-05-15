@@ -48,7 +48,8 @@
     "loadingPortfolio": "CARREGANDO DADOS DO PORTFÓLIO...",
     "allTime": "TODO O PERÍODO",
     "today": "HOJE",
-    "viewChart": "VER GRÁFICO"
+    "viewChart": "VER GRÁFICO",
+    "cashBalance": "SALDO EM DINHEIRO"
   },
   "portfolioManager": {
     "title": "GERENCIADOR DE PORTFÓLIOS",

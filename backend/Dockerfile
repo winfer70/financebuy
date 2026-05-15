@@ -27,6 +27,9 @@ RUN python -m pip install --no-index --find-links=/wheels -r /app/requirements.t
 # copy application code
 COPY backend/app /app/app
 
+# copy test suite (available for `docker compose exec app pytest tests/`)
+COPY backend/tests /app/tests
+
 # copy alembic migrations and docker-specific config
 COPY backend/alembic /app/alembic
 COPY backend/alembic.docker.ini /app/alembic.ini

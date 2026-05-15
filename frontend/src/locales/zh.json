@@ -48,7 +48,8 @@
     "loadingPortfolio": "正在加载投资组合数据...",
     "allTime": "所有时间",
     "today": "今日",
-    "viewChart": "查看图表"
+    "viewChart": "查看图表",
+    "cashBalance": "现金余额"
   },
   "portfolioManager": {
     "title": "投资组合管理",

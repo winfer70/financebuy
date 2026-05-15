@@ -19,6 +19,7 @@ import os
 import secrets
 from datetime import datetime, timedelta, timezone
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordBearer
@@ -129,6 +130,9 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="user not found or inactive",
         )
+    # Bind user_id to structlog context vars so all downstream log lines
+    # within this request carry the authenticated user's identity.
+    structlog.contextvars.bind_contextvars(user_id=str(user.user_id))
     return user
 
 

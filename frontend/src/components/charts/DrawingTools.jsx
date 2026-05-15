@@ -32,7 +32,7 @@ export const DRAWING_TOOLS_BASE = {
   text:           { anchors: 1, icon: "textTool",        labelKey: "charts.text" },
   arrow:          { anchors: 2, icon: "arrowTool",       labelKey: "charts.arrow" },
   ruler:          { anchors: 2, icon: "ruler",            labelKey: "charts.ruler" },
-  parallelChannel:    { anchors: 2, icon: "parallelCh",  labelKey: "charts.parallelChannel" },
+  parallelChannel:    { anchors: 3, icon: "parallelCh",  labelKey: "charts.parallelChannel" },
   extHorizontalLine:  { anchors: 1, icon: "extHLine",    labelKey: "charts.extHorizontalLine" },
   priceRange:         { anchors: 2, icon: "priceRange",  labelKey: "charts.priceRange" },
   callout:            { anchors: 1, icon: "callout",     labelKey: "charts.callout" },
@@ -54,7 +54,7 @@ export const DRAWING_TOOLS = {
   text:           { anchors: 1, icon: "textTool",     label: "TEXT" },
   arrow:          { anchors: 2, icon: "arrowTool",    label: "ARROW" },
   ruler:          { anchors: 2, icon: "ruler",         label: "RULER" },
-  parallelChannel:    { anchors: 2, icon: "parallelCh",  label: "CHANNEL" },
+  parallelChannel:    { anchors: 3, icon: "parallelCh",  label: "CHANNEL" },
   extHorizontalLine:  { anchors: 1, icon: "extHLine",    label: "EXT H-LINE" },
   priceRange:         { anchors: 2, icon: "priceRange",  label: "PRICE RANGE" },
   callout:            { anchors: 1, icon: "callout",     label: "CALLOUT" },
@@ -258,23 +258,36 @@ export function hitTestDrawing(drawings, mx, my, visibleData, visibleStart, allD
         if (anchors.length >= 2) {
           const x1 = ax(anchors[0]), y1 = ay(anchors[0]);
           const x2 = ax(anchors[1]), y2 = ay(anchors[1]);
-          const offset = Math.abs(y2 - y1);              // vertical offset for the parallel line
-          const sign = y2 > y1 ? -1 : 1;                 // opposite direction to the slope endpoint
+          /* Compute perpendicular offset — use anchor[2] when placed, else vertical distance */
+          let nx, ny;
+          if (anchors.length >= 3) {
+            const x3 = ax(anchors[2]), y3 = ay(anchors[2]);
+            const ddx = x2 - x1, ddy = y2 - y1;
+            const len2 = ddx*ddx + ddy*ddy;
+            if (len2 > 0) {
+              const offX = x3 - x1, offY = y3 - y1;
+              const proj = (offX*ddx + offY*ddy) / len2;
+              nx = offX - proj*ddx;
+              ny = offY - proj*ddy;
+            } else { nx = 0; ny = 0; }
+          } else {
+            const offset = Math.abs(y2 - y1);
+            const sign = y2 > y1 ? -1 : 1;
+            const dx = x2 - x1, dy = y2 - y1;
+            const len = Math.hypot(dx, dy) || 1;
+            nx = -dy / len * offset * sign;
+            ny =  dx / len * offset * sign;
+          }
           /* Main line hit */
           const distMain = pointToSegmentDist(mx, my, x1, y1, x2, y2);
           if (distMain < threshold) return dr.id;
-          /* Parallel line hit (offset perpendicular) */
-          const dx = x2 - x1, dy = y2 - y1;
-          const len = Math.hypot(dx, dy) || 1;
-          const nx = -dy / len * offset * sign;
-          const ny = dx / len * offset * sign;
+          /* Parallel line hit */
           const distPar = pointToSegmentDist(mx, my, x1 + nx, y1 + ny, x2 + nx, y2 + ny);
           if (distPar < threshold) return dr.id;
-          /* Inside the channel area (between the two lines) */
-          const distBetween = distMain + distPar;
-          const channelWidth = Math.abs(offset);
+          /* Inside the channel area */
+          const channelWidth = Math.hypot(nx, ny);
           if (distMain < channelWidth + threshold && distPar < channelWidth + threshold &&
-              distBetween < channelWidth + threshold * 2) return dr.id;
+              distMain + distPar < channelWidth + threshold * 2) return dr.id;
         }
         break;
 
@@ -362,7 +375,7 @@ export function renderAnchorHandles(drawing, chartParams) {
         fill="var(--amber)"
         stroke="var(--bg0)"
         strokeWidth={1.5}
-        cursor="crosshair"
+        cursor="grab"
         data-anchor-idx={i}
         style={{ pointerEvents: "visiblePainted" }}
       />
@@ -445,13 +458,13 @@ export function moveOneAnchor(drawing, anchorIdx, px, py, chartParams) {
  * @param {Function} props.onDeselect - Called to clear the selection
  * @returns {JSX.Element}
  */
-export function DrawingContextToolbar({ onDelete, onDeselect }) {
+export function DrawingContextToolbar({ onDelete, onDeselect, x = 10, y = 10 }) {
   return (
     <div
       style={{
         position: "absolute",
-        top: 8,
-        right: 80,
+        left: x,
+        top: y,
         background: "rgba(0,0,0,0.85)",
         border: "1px solid var(--border)",
         borderRadius: 3,
@@ -538,6 +551,23 @@ export function DrawingContextToolbar({ onDelete, onDeselect }) {
       </button>
     </div>
   );
+}
+
+/* ── Ruler Interval Helper ───────────────────────────────────────────────── */
+
+/**
+ * Convert an interval string to milliseconds.
+ * Used by the ruler tool to calculate bar count.
+ * @param {string} interval - e.g. "1d", "1h", "5m"
+ * @returns {number} Milliseconds per bar
+ */
+function parseIntervalToMs(interval) {
+  const map = {
+    "1m":  60000,    "5m":  300000,   "15m": 900000,
+    "1h":  3600000,  "4h":  14400000, "1d":  86400000,
+    "1w":  604800000,"1wk": 604800000,
+  };
+  return map[interval] || 86400000;
 }
 
 /* ── SVG Renderers ───────────────────────────────────────────────────────── */
@@ -645,7 +675,17 @@ export function renderDrawing(drawing, visibleData, visibleStart, allData, xOf, 
       const diff = price2 - price1;
       const pct = price1 !== 0 ? (diff / price1) * 100 : 0;
       const midX = (x1 + x2) / 2, midY = (y1 + y2) / 2;
-      const labelText = `${diff >= 0 ? "+" : ""}${diff.toFixed(2)} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
+      /* Bar count + time span */
+      const timeDiff = Math.abs(new Date(anchors[1].time).getTime() - new Date(anchors[0].time).getTime());
+      const estIntervalMs = allData && allData.length >= 2
+        ? Math.abs(new Date(allData[1].date).getTime() - new Date(allData[0].date).getTime())
+        : 86400000;
+      const barCount = Math.max(1, Math.round(timeDiff / estIntervalMs));
+      const days = Math.floor(timeDiff / 86400000);
+      const hours = Math.floor((timeDiff % 86400000) / 3600000);
+      const timeSpan = days > 0 ? `${days}d ${hours}h` : `${hours}h`;
+      const labelLine1 = `${diff >= 0 ? "+" : ""}${diff.toFixed(2)} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
+      const labelLine2 = `${barCount} bar${barCount !== 1 ? "s" : ""} · ${timeSpan}`;
       const labelColor = diff >= 0 ? "#00d97e" : "#f04438";
       return (
         <g key={drawing.id}>
@@ -655,9 +695,13 @@ export function renderDrawing(drawing, visibleData, visibleStart, allData, xOf, 
           <circle cx={x2} cy={y2} r={3} fill={col} opacity="0.7" />
           <line x1={x1} y1={y1} x2={x1} y2={y2} stroke={col} strokeWidth={0.5} strokeDasharray="3,3" opacity="0.4" />
           <line x1={x1} y1={y2} x2={x2} y2={y2} stroke={col} strokeWidth={0.5} strokeDasharray="3,3" opacity="0.4" />
-          <rect x={midX - 60} y={midY - 10} width={120} height={16} rx={2} fill="var(--bg2, #1a1a2e)" fillOpacity="0.9" stroke={labelColor} strokeWidth="0.5" />
-          <text x={midX} y={midY + 3} textAnchor="middle" fontFamily="IBM Plex Mono" fontSize="9" fontWeight="600" fill={labelColor}>
-            {labelText}
+          {/* Label box — two lines: price delta + bar count/time span */}
+          <rect x={midX - 70} y={midY - 14} width={140} height={28} rx={2} fill="var(--bg2, #1a1a2e)" fillOpacity="0.9" stroke={labelColor} strokeWidth="0.5" />
+          <text x={midX} y={midY - 1} textAnchor="middle" fontFamily="IBM Plex Mono" fontSize="9" fontWeight="600" fill={labelColor}>
+            {labelLine1}
+          </text>
+          <text x={midX} y={midY + 11} textAnchor="middle" fontFamily="IBM Plex Mono" fontSize="8" fontWeight="400" fill="var(--muted, #888)">
+            {labelLine2}
           </text>
         </g>
       );
@@ -741,36 +785,51 @@ export function renderDrawing(drawing, visibleData, visibleStart, allData, xOf, 
     /* ── Parallel Channel — two parallel trend lines with semi-transparent fill ── */
     case "parallelChannel": {
       if (anchors.length < 2) return null;
-      const x1 = ax(0), y1 = ay(0), x2 = ax(1), y2 = ay(1);
-      /* Compute perpendicular offset equal to vertical distance between anchors */
-      const offset = Math.abs(y2 - y1);
-      const sign = y2 > y1 ? -1 : 1;  // offset in opposite vertical direction
-      const dx = x2 - x1, dy = y2 - y1;
-      const len = Math.hypot(dx, dy) || 1;
-      /* Normal vector scaled by offset */
-      const nx = (-dy / len) * offset * sign;
-      const ny = (dx / len) * offset * sign;
+      const p0 = { x: ax(0), y: ay(0) };
+      const p1 = { x: ax(1), y: ay(1) };
+      /* Compute perpendicular offset: use anchor[2] when placed (3-anchor mode), else vertical fallback */
+      let perpX, perpY;
+      if (anchors.length >= 3) {
+        const p2 = { x: ax(2), y: ay(2) };
+        const ddx = p1.x - p0.x, ddy = p1.y - p0.y;
+        const len2 = ddx*ddx + ddy*ddy;
+        if (len2 > 0) {
+          const offX = p2.x - p0.x, offY = p2.y - p0.y;
+          const proj = (offX*ddx + offY*ddy) / len2;
+          perpX = offX - proj*ddx;
+          perpY = offY - proj*ddy;
+        } else { perpX = 0; perpY = 0; }
+      } else {
+        /* 2-anchor fallback: offset perpendicular by the vertical distance between anchors */
+        const offset = Math.abs(p1.y - p0.y);
+        const sign = p1.y > p0.y ? -1 : 1;
+        const ddx = p1.x - p0.x, ddy = p1.y - p0.y;
+        const len = Math.hypot(ddx, ddy) || 1;
+        perpX = (-ddy / len) * offset * sign;
+        perpY = (ddx / len) * offset * sign;
+      }
       /* Parallel line endpoints */
-      const px1 = x1 + nx, py1 = y1 + ny;
-      const px2 = x2 + nx, py2 = y2 + ny;
+      const px1 = p0.x + perpX, py1 = p0.y + perpY;
+      const px2 = p1.x + perpX, py2 = p1.y + perpY;
       /* Polygon fill between the two lines */
-      const fillPts = `${x1},${y1} ${x2},${y2} ${px2},${py2} ${px1},${py1}`;
+      const fillPts = `${p0.x},${p0.y} ${p1.x},${p1.y} ${px2},${py2} ${px1},${py1}`;
       return (
         <g key={drawing.id}>
           <polygon points={fillPts} fill={col} fillOpacity="0.08" stroke="none" />
           {isSelected && (
             <>
-              <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#fff" strokeWidth={lw + 2} opacity="0.3" />
+              <line x1={p0.x} y1={p0.y} x2={p1.x} y2={p1.y} stroke="#fff" strokeWidth={lw + 2} opacity="0.3" />
               <line x1={px1} y1={py1} x2={px2} y2={py2} stroke="#fff" strokeWidth={lw + 2} opacity="0.3" />
             </>
           )}
-          <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={col} strokeWidth={lw} strokeDasharray={dash} />
+          <line x1={p0.x} y1={p0.y} x2={p1.x} y2={p1.y} stroke={col} strokeWidth={lw} strokeDasharray={dash} />
           <line x1={px1} y1={py1} x2={px2} y2={py2} stroke={col} strokeWidth={lw} strokeDasharray={dash} />
           {/* Midline (dashed, half opacity) */}
-          <line x1={(x1 + px1) / 2} y1={(y1 + py1) / 2} x2={(x2 + px2) / 2} y2={(y2 + py2) / 2}
+          <line x1={(p0.x + px1) / 2} y1={(p0.y + py1) / 2} x2={(p1.x + px2) / 2} y2={(p1.y + py2) / 2}
             stroke={col} strokeWidth={lw * 0.5} strokeDasharray="4,4" opacity="0.4" />
-          <circle cx={x1} cy={y1} r={3} fill={col} opacity="0.7" />
-          <circle cx={x2} cy={y2} r={3} fill={col} opacity="0.7" />
+          <circle cx={p0.x} cy={p0.y} r={3} fill={col} opacity="0.7" />
+          <circle cx={p1.x} cy={p1.y} r={3} fill={col} opacity="0.7" />
+          {anchors.length >= 3 && <circle cx={px1} cy={py1} r={3} fill={col} opacity="0.5" />}
         </g>
       );
     }
@@ -982,6 +1041,34 @@ export function renderPreview(toolType, anchors, previewPoint, visibleData, visi
             <line x1={x1} y1={y1} x2={px} y2={py} stroke={col} strokeWidth={lw} strokeDasharray="4,4" />
             <line x1={x1 + nx} y1={y1 + ny} x2={px + nx} y2={py + ny} stroke={col} strokeWidth={lw} strokeDasharray="4,4" />
             <polygon points={`${x1},${y1} ${px},${py} ${px + nx},${py + ny} ${x1 + nx},${y1 + ny}`} fill={col} fillOpacity="0.06" stroke="none" />
+          </g>
+        );
+      }
+      if (anchors.length === 2) {
+        /* Third anchor: show committed line plus preview of offset parallel line */
+        const x0 = ax(anchors[0]), y0 = ay(anchors[0]);
+        const x1 = ax(anchors[1]), y1 = ay(anchors[1]);
+        const ddx = x1 - x0, ddy = y1 - y0;
+        const len2 = ddx*ddx + ddy*ddy;
+        let perpX = 0, perpY = 0;
+        if (len2 > 0) {
+          const offX = px - x0, offY = py - y0;
+          const proj = (offX*ddx + offY*ddy) / len2;
+          perpX = offX - proj*ddx;
+          perpY = offY - proj*ddy;
+        }
+        return (
+          <g opacity="0.7">
+            {/* Committed first line (solid) */}
+            <line x1={x0} y1={y0} x2={x1} y2={y1} stroke={col} strokeWidth={lw} />
+            {/* Preview parallel line (dashed) */}
+            <line x1={x0 + perpX} y1={y0 + perpY} x2={x1 + perpX} y2={y1 + perpY}
+              stroke={col} strokeWidth={lw} strokeDasharray="4,4" />
+            {/* Fill between lines */}
+            <polygon points={`${x0},${y0} ${x1},${y1} ${x1 + perpX},${y1 + perpY} ${x0 + perpX},${y0 + perpY}`}
+              fill={col} fillOpacity="0.06" stroke="none" />
+            {/* Cursor dot at preview position (channel width anchor) */}
+            <circle cx={px} cy={py} r={3} fill={col} opacity="0.5" />
           </g>
         );
       }
