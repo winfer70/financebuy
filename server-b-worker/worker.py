@@ -81,8 +81,8 @@ _POST_BATCH_SIZE = 10
 # Maximum articles to process per cycle to avoid overloading Ollama.
 _MAX_ARTICLES_PER_CYCLE = 50
 
-# Ollama generation timeout (LLM can be slow on large prompts).
-_OLLAMA_TIMEOUT = 120  # seconds
+# Ollama generation timeout — qwen3.5:9b needs ~50s warm, longer cold.
+_OLLAMA_TIMEOUT = 180  # seconds
 
 
 # ---------------------------------------------------------------------------
@@ -276,6 +276,7 @@ def _score_with_ollama(title: str, summary: str) -> dict:
         "model": OLLAMA_MODEL,
         "prompt": prompt,
         "stream": False,
+        "think": False,          # disable thinking tokens (qwen3.5 native thinking mode)
         "options": {
             "temperature": 0.1,   # Low temperature for deterministic scoring
             "num_predict": 512,   # Cap output length
