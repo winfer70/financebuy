@@ -26,3 +26,7 @@ db_data/
 *.swp
 *.swo
 .DS_Store
+
+# graphify
+graphify-out/cache/
+graphify-out/*.html
