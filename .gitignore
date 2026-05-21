@@ -26,3 +26,14 @@ db_data/
 *.swp
 *.swo
 .DS_Store
+
+# Claude internals
+.claude/
+
+# Binary artifacts
+PortfolioTracker.zip
+PortfolioTracker/
+
+# Graphify generated
+graphify-out/cache/
+graphify-out/*.html
