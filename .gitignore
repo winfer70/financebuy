@@ -30,3 +30,4 @@ db_data/
 # graphify
 graphify-out/cache/
 graphify-out/*.html
+.graphify_*
