@@ -4,6 +4,10 @@ Internal portfolio API — machine-to-machine only.
 Exposes portfolio positions, summary, and watchlist to trusted internal
 services (e.g. swarm-api) using the shared X-Internal-Key secret.
 No JWT auth; no user scope. Returns aggregate data across all users.
+
+Queries portfolio_positions (portfolio-manager module) — this is the table
+that actually contains user holdings. The accounts/holdings tables are empty
+in production; all real positions live in PortfolioPosition.
 """
 import hmac
 import logging
@@ -17,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..models import Account, Holding, Security, Watchlist, WatchlistItem
+from ..models import Portfolio, PortfolioPosition, WatchlistItem
 
 router = APIRouter(prefix="/internal/portfolio", tags=["internal"])
 
@@ -47,26 +51,24 @@ def _verify_internal_auth(request: Request) -> None:
 
 class InternalPositionOut(BaseModel):
     symbol: str
-    name: str
+    name: Optional[str] = None
     quantity: Decimal
-    average_cost: Optional[Decimal] = None
-    current_price: Optional[Decimal] = None
-    market_value: Decimal
-    unrealized_pnl: Optional[Decimal] = None
-    unrealized_pnl_pct: Optional[Decimal] = None
-    currency: str
-    security_type: str
+    purchase_price: Decimal
+    stop_loss: Optional[Decimal] = None
+    profit_taking: Optional[Decimal] = None
+    sector: Optional[str] = None
+    asset_type: str = "stock"
+    is_excluded: bool = False
 
     class Config:
         orm_mode = True
 
 
 class InternalPortfolioSummaryOut(BaseModel):
-    total_portfolio_value: Decimal
-    total_positions_value: Decimal
     total_cash_balance: Decimal
     currency: str = "USD"
     position_count: int
+    portfolio_count: int
 
 
 class InternalWatchlistSymbolOut(BaseModel):
@@ -83,46 +85,30 @@ async def internal_portfolio_positions(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """All held positions across all users with live prices and P&L."""
+    """All active portfolio positions across all users."""
     _verify_internal_auth(request)
 
     result = await db.execute(
-        select(Holding, Security).join(
-            Security, Holding.security_id == Security.security_id
-        )
+        select(PortfolioPosition)
+        .where(PortfolioPosition.is_excluded == False)  # noqa: E712
+        .order_by(PortfolioPosition.ticker.asc())
     )
+    positions = result.scalars().all()
 
-    positions: List[InternalPositionOut] = []
-    for holding, security in result.all():
-        qty = holding.quantity or Decimal("0")
-        price = holding.current_price or Decimal("0")
-        market_value = qty * price
-
-        unrealized_pnl: Optional[Decimal] = None
-        unrealized_pnl_pct: Optional[Decimal] = None
-        if holding.average_cost and price:
-            unrealized_pnl = (price - holding.average_cost) * qty
-            if holding.average_cost != 0:
-                unrealized_pnl_pct = (
-                    (price - holding.average_cost) / holding.average_cost * 100
-                )
-
-        positions.append(
-            InternalPositionOut(
-                symbol=security.symbol,
-                name=security.name,
-                quantity=qty,
-                average_cost=holding.average_cost,
-                current_price=holding.current_price,
-                market_value=market_value,
-                unrealized_pnl=unrealized_pnl,
-                unrealized_pnl_pct=unrealized_pnl_pct,
-                currency=security.currency,
-                security_type=security.security_type,
-            )
+    return [
+        InternalPositionOut(
+            symbol=p.ticker,
+            name=p.name,
+            quantity=p.quantity,
+            purchase_price=p.purchase_price,
+            stop_loss=p.stop_loss,
+            profit_taking=p.profit_taking,
+            sector=p.sector,
+            asset_type=p.asset_type,
+            is_excluded=p.is_excluded,
         )
-
-    return positions
+        for p in positions
+    ]
 
 
 @router.get("/summary", response_model=InternalPortfolioSummaryOut)
@@ -130,31 +116,25 @@ async def internal_portfolio_summary(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Aggregate portfolio value across all accounts."""
+    """Aggregate portfolio summary across all portfolios."""
     _verify_internal_auth(request)
 
-    accounts_result = await db.execute(select(Account))
-    accounts = accounts_result.scalars().all()
-    total_cash = sum(a.balance or Decimal("0") for a in accounts)
+    portfolios_result = await db.execute(select(Portfolio))
+    portfolios = portfolios_result.scalars().all()
+    total_cash = sum(p.cash_balance or Decimal("0") for p in portfolios)
 
-    holdings_result = await db.execute(
-        select(Holding, Security).join(
-            Security, Holding.security_id == Security.security_id
+    positions_result = await db.execute(
+        select(PortfolioPosition).where(
+            PortfolioPosition.is_excluded == False  # noqa: E712
         )
     )
-    rows = holdings_result.all()
-
-    total_positions = sum(
-        (h.quantity or Decimal("0")) * (h.current_price or Decimal("0"))
-        for h, _ in rows
-    )
+    positions = positions_result.scalars().all()
 
     return InternalPortfolioSummaryOut(
-        total_portfolio_value=total_cash + total_positions,
-        total_positions_value=total_positions,
         total_cash_balance=total_cash,
         currency="USD",
-        position_count=len(rows),
+        position_count=len(positions),
+        portfolio_count=len(portfolios),
     )
 
 
