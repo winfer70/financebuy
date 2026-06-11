@@ -36,6 +36,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from ..logging_config import configure_structlog
 from .heartbeat import write_worker_heartbeat
 from .scanner_worker import run_scanner  # noqa: F401 — registered in WorkerSettings
+from ..services.degiro_sync import sync_degiro_portfolio  # noqa: F401 — registered in WorkerSettings
 
 # Configure structlog before any logger is obtained — idempotent guard inside
 configure_structlog()
@@ -817,9 +818,12 @@ class WorkerSettings:
 
     Run with: ``arq app.trading.worker.WorkerSettings``
     """
-    functions = [run_backtest, run_scanner, run_portfolio_rules]
+    functions = [run_backtest, run_scanner, run_portfolio_rules, sync_degiro_portfolio]
     queue_name = "arq:trading"
-    cron_jobs = [cron(_periodic_heartbeat, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55})]
+    cron_jobs = [
+        cron(_periodic_heartbeat, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
+        cron(sync_degiro_portfolio, hour=2, minute=0),
+    ]
     on_startup = _worker_startup
     redis_settings = RedisSettings.from_dsn(_REDIS_URL)
     max_jobs = 10

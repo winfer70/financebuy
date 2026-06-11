@@ -42,6 +42,7 @@ from .routes import (
     alerts,
     auth_routes,
     chart_templates,
+    degiro_routes,
     feedback,
     guide,
     holdings,
@@ -346,6 +347,7 @@ app.include_router(watchlists.router, prefix=_V1)
 app.include_router(trading.router, prefix=_V1)
 app.include_router(alerts.router, prefix=_V1)
 app.include_router(import_routes.router, prefix=_V1)
+app.include_router(degiro_routes.router, prefix=_V1)
 app.include_router(scanner.router, prefix=_V1)
 app.include_router(metrics_routes.router, prefix=_V1)
 app.include_router(internal_portfolio.router, prefix=_V1)
