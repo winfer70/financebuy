@@ -36,10 +36,7 @@ from ..models import PortfolioPosition
 configure_structlog()
 logger = structlog.get_logger("degiro_sync")
 
-_DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+asyncpg://postgres:postgres@db:5432/tickerTap",
-)
+_DATABASE_URL = os.environ["DATABASE_URL"]
 _engine = create_async_engine(
     _DATABASE_URL, echo=False, pool_size=3, max_overflow=1, pool_pre_ping=True
 )
@@ -158,7 +155,7 @@ async def sync_degiro_portfolio(ctx: dict) -> dict:
         return {"status": "error", "reason": "DEGIRO_PORTFOLIO_ID is not a valid UUID"}
 
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
             log.info("degiro_connecting")
             session_id = await _login(client, username, password, totp_secret)
             if not session_id:
@@ -174,7 +171,7 @@ async def sync_degiro_portfolio(ctx: dict) -> dict:
                 log.error("degiro_sync_error", reason="could not resolve int_account")
                 return {"status": "error", "reason": "could not resolve int_account"}
 
-            log.info("degiro_fetching_portfolio", int_account=int_account)
+            log.info("degiro_fetching_portfolio")
             positions_raw = await _get_portfolio(client, session_id, int_account)
             product_positions = [
                 p for p in positions_raw

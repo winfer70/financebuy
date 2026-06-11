@@ -44,10 +44,7 @@ logger = structlog.get_logger("trading.worker")
 
 # -- Database setup (standalone — worker runs outside FastAPI) ─────────────
 
-_DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+asyncpg://postgres:postgres@db:5432/tickerTap",
-)
+_DATABASE_URL = os.environ["DATABASE_URL"]
 _REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 
 _engine = create_async_engine(_DATABASE_URL, echo=False, pool_size=5, max_overflow=2, pool_pre_ping=True)
