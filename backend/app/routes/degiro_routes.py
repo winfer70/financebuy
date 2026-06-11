@@ -20,7 +20,7 @@ router = APIRouter(prefix="/degiro", tags=["degiro"])
 async def trigger_degiro_sync(current_user: User = Depends(get_current_user)):
     """Enqueue an immediate DeGiro portfolio sync job."""
     pool = await create_pool(RedisSettings.from_dsn(_REDIS_URL))
-    job = await pool.enqueue_job("sync_degiro_portfolio", _queue_name="arq:trading")
+    job = await pool.enqueue_job("sync_degiro_portfolio", _queue_name="arq:alert")
     await pool.close()
     return {"job_id": job.job_id, "status": "queued"}
 
