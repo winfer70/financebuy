@@ -18,6 +18,7 @@ from decimal import Decimal
 import structlog
 import yfinance as yf
 from arq.connections import RedisSettings, create_pool
+from arq.cron import cron
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
@@ -25,6 +26,7 @@ from sqlalchemy.orm import sessionmaker
 from ..logging_config import configure_structlog
 from ..models import Notification, PriceAlert
 from .heartbeat import write_worker_heartbeat
+from ..services.degiro_sync import sync_degiro_portfolio  # noqa: F401
 
 # Configure structlog before any logger is obtained — idempotent guard inside
 configure_structlog()
@@ -282,7 +284,8 @@ class WorkerSettings:
     Run with: ``arq app.trading.alert_worker.WorkerSettings``
     """
 
-    functions = [evaluate_price_alerts]
+    functions = [evaluate_price_alerts, sync_degiro_portfolio]
+    cron_jobs = [cron(sync_degiro_portfolio, hour=2, minute=0)]
     queue_name = "arq:alert"
     on_startup = startup
     redis_settings = RedisSettings.from_dsn(_REDIS_URL)
