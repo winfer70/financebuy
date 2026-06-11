@@ -23,4 +23,4 @@ pytest-cov>=4.1
 pytest-asyncio>=0.23
 structlog>=23.1
 python-multipart>=0.0.6
-degiro-connector>=3.0.36
+pyotp>=2.9.0
