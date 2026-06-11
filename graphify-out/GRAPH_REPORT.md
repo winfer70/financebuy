@@ -1,7 +1,7 @@
 # Graph Report - /home/kamilo420/projects/finance/tickerTap  (2026-06-11)
 
 ## Corpus Check
-- 206 files · ~755,916 words
+- 206 files · ~757,868 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -292,14 +292,14 @@
 ## Surprising Connections (you probably didn't know these)
 - `Strategy` --uses--> `main.py — FastAPI application entry point for TickerTap.  Configures middlewar`  [INFERRED]
   /home/kamilo420/projects/finance/tickerTap/backend/app/models.py → /home/kamilo420/projects/finance/tickerTap/backend/app/main.py
-- `Insert system strategy templates if the strategies table is empty.      Reads te` --uses--> `Strategy`  [INFERRED]
-  /home/kamilo420/projects/finance/tickerTap/backend/app/main.py → /home/kamilo420/projects/finance/tickerTap/backend/app/models.py
-- `Validate critical configuration on startup.      Performs the following checks a` --uses--> `Strategy`  [INFERRED]
-  /home/kamilo420/projects/finance/tickerTap/backend/app/main.py → /home/kamilo420/projects/finance/tickerTap/backend/app/models.py
-- `Injects security headers on every response.      Provides a defence-in-depth lay` --uses--> `Strategy`  [INFERRED]
-  /home/kamilo420/projects/finance/tickerTap/backend/app/main.py → /home/kamilo420/projects/finance/tickerTap/backend/app/models.py
-- `Reject requests whose Content-Length exceeds MAX_REQUEST_BODY_BYTES.      Preven` --uses--> `Strategy`  [INFERRED]
-  /home/kamilo420/projects/finance/tickerTap/backend/app/main.py → /home/kamilo420/projects/finance/tickerTap/backend/app/models.py
+- `Strategy` --uses--> `Insert system strategy templates if the strategies table is empty.      Reads te`  [INFERRED]
+  /home/kamilo420/projects/finance/tickerTap/backend/app/models.py → /home/kamilo420/projects/finance/tickerTap/backend/app/main.py
+- `Strategy` --uses--> `Validate critical configuration on startup.      Performs the following checks a`  [INFERRED]
+  /home/kamilo420/projects/finance/tickerTap/backend/app/models.py → /home/kamilo420/projects/finance/tickerTap/backend/app/main.py
+- `Strategy` --uses--> `Injects security headers on every response.      Provides a defence-in-depth lay`  [INFERRED]
+  /home/kamilo420/projects/finance/tickerTap/backend/app/models.py → /home/kamilo420/projects/finance/tickerTap/backend/app/main.py
+- `Strategy` --uses--> `Reject requests whose Content-Length exceeds MAX_REQUEST_BODY_BYTES.      Preven`  [INFERRED]
+  /home/kamilo420/projects/finance/tickerTap/backend/app/models.py → /home/kamilo420/projects/finance/tickerTap/backend/app/main.py
 
 ## Communities
 
@@ -1777,11 +1777,11 @@ Nodes (1): Submit a question to the TickerTap AI guide.      Proxies the questio
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `PineScript Parser & Transpiler — converts PineScript source to executable strat` connect `Community 1` to `Community 0`, `Community 7`, `Community 9`, `Community 10`, `Community 12`, `Community 13`?**
-  _High betweenness centrality (0.113) - this node is a cross-community bridge._
-- **Why does `RuleContext` connect `Community 1` to `Community 4`?**
-  _High betweenness centrality (0.098) - this node is a cross-community bridge._
+  _High betweenness centrality (0.104) - this node is a cross-community bridge._
 - **Why does `LLMTranspileError` connect `Community 0` to `Community 1`, `Community 4`, `Community 15`?**
-  _High betweenness centrality (0.081) - this node is a cross-community bridge._
+  _High betweenness centrality (0.079) - this node is a cross-community bridge._
+- **Why does `run_portfolio_rules()` connect `Community 4` to `Community 0`, `Community 1`, `Community 7`?**
+  _High betweenness centrality (0.075) - this node is a cross-community bridge._
 - **Are the 222 inferred relationships involving `User` (e.g. with `TestPasswordHashing` and `TestJwtUtilities`) actually correct?**
   _`User` has 222 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 178 inferred relationships involving `AuditLog` (e.g. with `WorkerSettings` and `Trading Worker — arq background worker for async backtest execution.  Runs as a`) actually correct?**
