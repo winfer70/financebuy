@@ -341,6 +341,11 @@ class PortfolioPosition(Base):
     bucket = Column(SmallInteger, nullable=True)
     # Timestamp when the position was soft-closed
     closed_at = Column(DateTime(timezone=True), nullable=True)
+    # DeGiro sync fields (added migration 0026) --------------------------------
+    # ISIN code for DeGiro-synced positions (e.g. "US0378331005")
+    isin = Column(String(12), nullable=True)
+    # DeGiro internal product ID for upsert deduplication
+    degiro_product_id = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
