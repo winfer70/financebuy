@@ -4,10 +4,10 @@ import os
 
 import structlog
 from arq.connections import RedisSettings, create_pool
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
-from ..auth import get_current_user
 from ..models import User
+from .auth_routes import get_current_user
 
 logger = structlog.get_logger("degiro_routes")
 
