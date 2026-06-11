@@ -26,7 +26,7 @@ from typing import Any
 import httpx
 import pyotp
 import structlog
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -253,17 +253,21 @@ async def sync_degiro_portfolio(ctx: dict) -> dict:
                 )
             synced += 1
 
-        # Remove stale DEGIRO_SYNC positions no longer held in DeGiro
-        delete_result = await db.execute(
-            delete(PortfolioPosition)
-            .where(
+        # Soft-close stale DEGIRO_SYNC positions no longer held in DeGiro
+        stale_result = await db.execute(
+            select(PortfolioPosition).where(
                 PortfolioPosition.portfolio_id == portfolio_id,
                 PortfolioPosition.group_tag == "DEGIRO_SYNC",
                 PortfolioPosition.isin.notin_(current_isins),
+                PortfolioPosition.closed_at.is_(None),
             )
-            .returning(PortfolioPosition.position_id)
         )
-        deleted = len(delete_result.fetchall())
+        stale = stale_result.scalars().all()
+        now = datetime.now(timezone.utc)
+        for pos in stale:
+            pos.closed_at = now
+            pos.sold_reason = f"DEGIRO_SYNC: not in holdings as of {now.date().isoformat()}"
+        deleted = len(stale)
         await db.commit()
 
     log.info("degiro_sync_complete", synced=synced, skipped=skipped, deleted=deleted)
