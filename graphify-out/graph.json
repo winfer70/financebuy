@@ -12995,72 +12995,72 @@
       "file_type": "rationale",
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/main.py",
       "source_location": "L90",
-      "id": "main_rationale_90",
       "community": 19,
-      "norm_label": "insert system strategy templates if the strategies table is empty.      reads te"
+      "norm_label": "insert system strategy templates if the strategies table is empty.      reads te",
+      "id": "main_rationale_90"
     },
     {
       "label": "Validate critical configuration on startup.      Performs the following checks a",
       "file_type": "rationale",
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/main.py",
       "source_location": "L145",
-      "id": "main_rationale_145",
       "community": 19,
-      "norm_label": "validate critical configuration on startup.      performs the following checks a"
+      "norm_label": "validate critical configuration on startup.      performs the following checks a",
+      "id": "main_rationale_145"
     },
     {
       "label": "Injects security headers on every response.      Provides a defence-in-depth lay",
       "file_type": "rationale",
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/main.py",
       "source_location": "L197",
-      "id": "main_rationale_197",
       "community": 19,
-      "norm_label": "injects security headers on every response.      provides a defence-in-depth lay"
+      "norm_label": "injects security headers on every response.      provides a defence-in-depth lay",
+      "id": "main_rationale_197"
     },
     {
       "label": "Reject requests whose Content-Length exceeds MAX_REQUEST_BODY_BYTES.      Preven",
       "file_type": "rationale",
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/main.py",
       "source_location": "L245",
-      "id": "main_rationale_245",
       "community": 19,
-      "norm_label": "reject requests whose content-length exceeds max_request_body_bytes.      preven"
+      "norm_label": "reject requests whose content-length exceeds max_request_body_bytes.      preven",
+      "id": "main_rationale_245"
     },
     {
       "label": "Logs every request with method, path, status code, and duration.      Paths cont",
       "file_type": "rationale",
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/main.py",
       "source_location": "L274",
-      "id": "main_rationale_274",
       "community": 19,
-      "norm_label": "logs every request with method, path, status code, and duration.      paths cont"
+      "norm_label": "logs every request with method, path, status code, and duration.      paths cont",
+      "id": "main_rationale_274"
     },
     {
       "label": "Generates a UUID correlation ID per request.      Binds the ID to structlog's co",
       "file_type": "rationale",
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/main.py",
       "source_location": "L305",
-      "id": "main_rationale_305",
       "community": 19,
-      "norm_label": "generates a uuid correlation id per request.      binds the id to structlog's co"
+      "norm_label": "generates a uuid correlation id per request.      binds the id to structlog's co",
+      "id": "main_rationale_305"
     },
     {
       "label": "Deep health check \u2014 probes DB and Redis concurrently.      Returns HTTP 200 if a",
       "file_type": "rationale",
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/main.py",
       "source_location": "L367",
-      "id": "main_rationale_367",
       "community": 19,
-      "norm_label": "deep health check \u2014 probes db and redis concurrently.      returns http 200 if a"
+      "norm_label": "deep health check \u2014 probes db and redis concurrently.      returns http 200 if a",
+      "id": "main_rationale_367"
     },
     {
       "label": "Worker heartbeat metrics \u2014 admin only.      Returns uptime, per-worker last-seen",
       "file_type": "rationale",
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/main.py",
       "source_location": "L399",
-      "id": "main_rationale_399",
       "community": 19,
-      "norm_label": "worker heartbeat metrics \u2014 admin only.      returns uptime, per-worker last-seen"
+      "norm_label": "worker heartbeat metrics \u2014 admin only.      returns uptime, per-worker last-seen",
+      "id": "main_rationale_399"
     },
     {
       "label": "observability.py",
@@ -19673,36 +19673,36 @@
       "file_type": "rationale",
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L1",
-      "id": "internal_portfolio_rationale_1",
       "community": 5,
-      "norm_label": "internal portfolio api \u2014 machine-to-machine only.  exposes portfolio positions,"
+      "norm_label": "internal portfolio api \u2014 machine-to-machine only.  exposes portfolio positions,",
+      "id": "internal_portfolio_rationale_1"
     },
     {
       "label": "All active portfolio positions across all users.",
       "file_type": "rationale",
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L88",
-      "id": "internal_portfolio_rationale_88",
       "community": 5,
-      "norm_label": "all active portfolio positions across all users."
+      "norm_label": "all active portfolio positions across all users.",
+      "id": "internal_portfolio_rationale_88"
     },
     {
       "label": "Aggregate portfolio summary across all portfolios.",
       "file_type": "rationale",
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L119",
-      "id": "internal_portfolio_rationale_119",
       "community": 5,
-      "norm_label": "aggregate portfolio summary across all portfolios."
+      "norm_label": "aggregate portfolio summary across all portfolios.",
+      "id": "internal_portfolio_rationale_119"
     },
     {
       "label": "All watchlist items across all users.",
       "file_type": "rationale",
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L146",
-      "id": "internal_portfolio_rationale_146",
       "community": 5,
-      "norm_label": "all watchlist items across all users."
+      "norm_label": "all watchlist items across all users.",
+      "id": "internal_portfolio_rationale_146"
     },
     {
       "label": "import_routes.py",
@@ -116771,11 +116771,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_internalpositionout",
-      "_tgt": "models_portfolio",
+      "_src": "models_portfolio",
+      "_tgt": "internal_portfolio_internalpositionout",
+      "confidence_score": 0.5,
       "source": "models_portfolio",
-      "target": "internal_portfolio_internalpositionout",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_internalpositionout"
     },
     {
       "relation": "uses",
@@ -116783,11 +116783,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_config",
-      "_tgt": "models_portfolio",
+      "_src": "models_portfolio",
+      "_tgt": "internal_portfolio_config",
+      "confidence_score": 0.5,
       "source": "models_portfolio",
-      "target": "internal_portfolio_config",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_config"
     },
     {
       "relation": "uses",
@@ -116795,11 +116795,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_internalportfoliosummaryout",
-      "_tgt": "models_portfolio",
+      "_src": "models_portfolio",
+      "_tgt": "internal_portfolio_internalportfoliosummaryout",
+      "confidence_score": 0.5,
       "source": "models_portfolio",
-      "target": "internal_portfolio_internalportfoliosummaryout",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_internalportfoliosummaryout"
     },
     {
       "relation": "uses",
@@ -116807,11 +116807,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_internalwatchlistsymbolout",
-      "_tgt": "models_portfolio",
+      "_src": "models_portfolio",
+      "_tgt": "internal_portfolio_internalwatchlistsymbolout",
+      "confidence_score": 0.5,
       "source": "models_portfolio",
-      "target": "internal_portfolio_internalwatchlistsymbolout",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_internalwatchlistsymbolout"
     },
     {
       "relation": "uses",
@@ -116819,11 +116819,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_rationale_1",
-      "_tgt": "models_portfolio",
+      "_src": "models_portfolio",
+      "_tgt": "internal_portfolio_rationale_1",
+      "confidence_score": 0.5,
       "source": "models_portfolio",
-      "target": "internal_portfolio_rationale_1",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_rationale_1"
     },
     {
       "relation": "uses",
@@ -116831,11 +116831,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_rationale_88",
-      "_tgt": "models_portfolio",
+      "_src": "models_portfolio",
+      "_tgt": "internal_portfolio_rationale_88",
+      "confidence_score": 0.5,
       "source": "models_portfolio",
-      "target": "internal_portfolio_rationale_88",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_rationale_88"
     },
     {
       "relation": "uses",
@@ -116843,11 +116843,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_rationale_119",
-      "_tgt": "models_portfolio",
+      "_src": "models_portfolio",
+      "_tgt": "internal_portfolio_rationale_119",
+      "confidence_score": 0.5,
       "source": "models_portfolio",
-      "target": "internal_portfolio_rationale_119",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_rationale_119"
     },
     {
       "relation": "uses",
@@ -116855,11 +116855,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_rationale_146",
-      "_tgt": "models_portfolio",
+      "_src": "models_portfolio",
+      "_tgt": "internal_portfolio_rationale_146",
+      "confidence_score": 0.5,
       "source": "models_portfolio",
-      "target": "internal_portfolio_rationale_146",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_rationale_146"
     },
     {
       "relation": "uses",
@@ -117863,11 +117863,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_internalpositionout",
-      "_tgt": "models_portfolioposition",
+      "_src": "models_portfolioposition",
+      "_tgt": "internal_portfolio_internalpositionout",
+      "confidence_score": 0.5,
       "source": "models_portfolioposition",
-      "target": "internal_portfolio_internalpositionout",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_internalpositionout"
     },
     {
       "relation": "uses",
@@ -117875,11 +117875,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_config",
-      "_tgt": "models_portfolioposition",
+      "_src": "models_portfolioposition",
+      "_tgt": "internal_portfolio_config",
+      "confidence_score": 0.5,
       "source": "models_portfolioposition",
-      "target": "internal_portfolio_config",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_config"
     },
     {
       "relation": "uses",
@@ -117887,11 +117887,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_internalportfoliosummaryout",
-      "_tgt": "models_portfolioposition",
+      "_src": "models_portfolioposition",
+      "_tgt": "internal_portfolio_internalportfoliosummaryout",
+      "confidence_score": 0.5,
       "source": "models_portfolioposition",
-      "target": "internal_portfolio_internalportfoliosummaryout",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_internalportfoliosummaryout"
     },
     {
       "relation": "uses",
@@ -117899,11 +117899,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_internalwatchlistsymbolout",
-      "_tgt": "models_portfolioposition",
+      "_src": "models_portfolioposition",
+      "_tgt": "internal_portfolio_internalwatchlistsymbolout",
+      "confidence_score": 0.5,
       "source": "models_portfolioposition",
-      "target": "internal_portfolio_internalwatchlistsymbolout",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_internalwatchlistsymbolout"
     },
     {
       "relation": "uses",
@@ -117911,11 +117911,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_rationale_1",
-      "_tgt": "models_portfolioposition",
+      "_src": "models_portfolioposition",
+      "_tgt": "internal_portfolio_rationale_1",
+      "confidence_score": 0.5,
       "source": "models_portfolioposition",
-      "target": "internal_portfolio_rationale_1",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_rationale_1"
     },
     {
       "relation": "uses",
@@ -117923,11 +117923,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_rationale_88",
-      "_tgt": "models_portfolioposition",
+      "_src": "models_portfolioposition",
+      "_tgt": "internal_portfolio_rationale_88",
+      "confidence_score": 0.5,
       "source": "models_portfolioposition",
-      "target": "internal_portfolio_rationale_88",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_rationale_88"
     },
     {
       "relation": "uses",
@@ -117935,11 +117935,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_rationale_119",
-      "_tgt": "models_portfolioposition",
+      "_src": "models_portfolioposition",
+      "_tgt": "internal_portfolio_rationale_119",
+      "confidence_score": 0.5,
       "source": "models_portfolioposition",
-      "target": "internal_portfolio_rationale_119",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_rationale_119"
     },
     {
       "relation": "uses",
@@ -117947,11 +117947,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_rationale_146",
-      "_tgt": "models_portfolioposition",
+      "_src": "models_portfolioposition",
+      "_tgt": "internal_portfolio_rationale_146",
+      "confidence_score": 0.5,
       "source": "models_portfolioposition",
-      "target": "internal_portfolio_rationale_146",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_rationale_146"
     },
     {
       "relation": "uses",
@@ -122231,11 +122231,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_internalpositionout",
-      "_tgt": "models_watchlistitem",
+      "_src": "models_watchlistitem",
+      "_tgt": "internal_portfolio_internalpositionout",
+      "confidence_score": 0.5,
       "source": "models_watchlistitem",
-      "target": "internal_portfolio_internalpositionout",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_internalpositionout"
     },
     {
       "relation": "uses",
@@ -122243,11 +122243,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_config",
-      "_tgt": "models_watchlistitem",
+      "_src": "models_watchlistitem",
+      "_tgt": "internal_portfolio_config",
+      "confidence_score": 0.5,
       "source": "models_watchlistitem",
-      "target": "internal_portfolio_config",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_config"
     },
     {
       "relation": "uses",
@@ -122255,11 +122255,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_internalportfoliosummaryout",
-      "_tgt": "models_watchlistitem",
+      "_src": "models_watchlistitem",
+      "_tgt": "internal_portfolio_internalportfoliosummaryout",
+      "confidence_score": 0.5,
       "source": "models_watchlistitem",
-      "target": "internal_portfolio_internalportfoliosummaryout",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_internalportfoliosummaryout"
     },
     {
       "relation": "uses",
@@ -122267,11 +122267,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_internalwatchlistsymbolout",
-      "_tgt": "models_watchlistitem",
+      "_src": "models_watchlistitem",
+      "_tgt": "internal_portfolio_internalwatchlistsymbolout",
+      "confidence_score": 0.5,
       "source": "models_watchlistitem",
-      "target": "internal_portfolio_internalwatchlistsymbolout",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_internalwatchlistsymbolout"
     },
     {
       "relation": "uses",
@@ -122279,11 +122279,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_rationale_1",
-      "_tgt": "models_watchlistitem",
+      "_src": "models_watchlistitem",
+      "_tgt": "internal_portfolio_rationale_1",
+      "confidence_score": 0.5,
       "source": "models_watchlistitem",
-      "target": "internal_portfolio_rationale_1",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_rationale_1"
     },
     {
       "relation": "uses",
@@ -122291,11 +122291,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_rationale_88",
-      "_tgt": "models_watchlistitem",
+      "_src": "models_watchlistitem",
+      "_tgt": "internal_portfolio_rationale_88",
+      "confidence_score": 0.5,
       "source": "models_watchlistitem",
-      "target": "internal_portfolio_rationale_88",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_rationale_88"
     },
     {
       "relation": "uses",
@@ -122303,11 +122303,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_rationale_119",
-      "_tgt": "models_watchlistitem",
+      "_src": "models_watchlistitem",
+      "_tgt": "internal_portfolio_rationale_119",
+      "confidence_score": 0.5,
       "source": "models_watchlistitem",
-      "target": "internal_portfolio_rationale_119",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_rationale_119"
     },
     {
       "relation": "uses",
@@ -122315,11 +122315,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/routes/internal_portfolio.py",
       "source_location": "L24",
       "weight": 0.8,
-      "_src": "internal_portfolio_rationale_146",
-      "_tgt": "models_watchlistitem",
+      "_src": "models_watchlistitem",
+      "_tgt": "internal_portfolio_rationale_146",
+      "confidence_score": 0.5,
       "source": "models_watchlistitem",
-      "target": "internal_portfolio_rationale_146",
-      "confidence_score": 0.5
+      "target": "internal_portfolio_rationale_146"
     },
     {
       "relation": "uses",
@@ -122567,11 +122567,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/main.py",
       "source_location": "L100",
       "weight": 0.8,
-      "_src": "main_rationale_90",
-      "_tgt": "models_strategy",
+      "_src": "models_strategy",
+      "_tgt": "main_rationale_90",
+      "confidence_score": 0.5,
       "source": "models_strategy",
-      "target": "main_rationale_90",
-      "confidence_score": 0.5
+      "target": "main_rationale_90"
     },
     {
       "relation": "uses",
@@ -122579,11 +122579,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/main.py",
       "source_location": "L100",
       "weight": 0.8,
-      "_src": "main_rationale_145",
-      "_tgt": "models_strategy",
+      "_src": "models_strategy",
+      "_tgt": "main_rationale_145",
+      "confidence_score": 0.5,
       "source": "models_strategy",
-      "target": "main_rationale_145",
-      "confidence_score": 0.5
+      "target": "main_rationale_145"
     },
     {
       "relation": "uses",
@@ -122591,11 +122591,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/main.py",
       "source_location": "L100",
       "weight": 0.8,
-      "_src": "main_rationale_197",
-      "_tgt": "models_strategy",
+      "_src": "models_strategy",
+      "_tgt": "main_rationale_197",
+      "confidence_score": 0.5,
       "source": "models_strategy",
-      "target": "main_rationale_197",
-      "confidence_score": 0.5
+      "target": "main_rationale_197"
     },
     {
       "relation": "uses",
@@ -122603,11 +122603,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/main.py",
       "source_location": "L100",
       "weight": 0.8,
-      "_src": "main_rationale_245",
-      "_tgt": "models_strategy",
+      "_src": "models_strategy",
+      "_tgt": "main_rationale_245",
+      "confidence_score": 0.5,
       "source": "models_strategy",
-      "target": "main_rationale_245",
-      "confidence_score": 0.5
+      "target": "main_rationale_245"
     },
     {
       "relation": "uses",
@@ -122615,11 +122615,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/main.py",
       "source_location": "L100",
       "weight": 0.8,
-      "_src": "main_rationale_274",
-      "_tgt": "models_strategy",
+      "_src": "models_strategy",
+      "_tgt": "main_rationale_274",
+      "confidence_score": 0.5,
       "source": "models_strategy",
-      "target": "main_rationale_274",
-      "confidence_score": 0.5
+      "target": "main_rationale_274"
     },
     {
       "relation": "uses",
@@ -122627,11 +122627,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/main.py",
       "source_location": "L100",
       "weight": 0.8,
-      "_src": "main_rationale_305",
-      "_tgt": "models_strategy",
+      "_src": "models_strategy",
+      "_tgt": "main_rationale_305",
+      "confidence_score": 0.5,
       "source": "models_strategy",
-      "target": "main_rationale_305",
-      "confidence_score": 0.5
+      "target": "main_rationale_305"
     },
     {
       "relation": "uses",
@@ -122639,11 +122639,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/main.py",
       "source_location": "L100",
       "weight": 0.8,
-      "_src": "main_rationale_367",
-      "_tgt": "models_strategy",
+      "_src": "models_strategy",
+      "_tgt": "main_rationale_367",
+      "confidence_score": 0.5,
       "source": "models_strategy",
-      "target": "main_rationale_367",
-      "confidence_score": 0.5
+      "target": "main_rationale_367"
     },
     {
       "relation": "uses",
@@ -122651,11 +122651,11 @@
       "source_file": "/home/REDACTED420/projects/finance/tickerTap/backend/app/main.py",
       "source_location": "L100",
       "weight": 0.8,
-      "_src": "main_rationale_399",
-      "_tgt": "models_strategy",
+      "_src": "models_strategy",
+      "_tgt": "main_rationale_399",
+      "confidence_score": 0.5,
       "source": "models_strategy",
-      "target": "main_rationale_399",
-      "confidence_score": 0.5
+      "target": "main_rationale_399"
     },
     {
       "relation": "uses",
