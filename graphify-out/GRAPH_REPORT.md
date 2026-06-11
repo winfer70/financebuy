@@ -1,12 +1,12 @@
-# Graph Report - /home/kamilo420/projects/finance/tickerTap  (2026-05-15)
+# Graph Report - /home/kamilo420/projects/finance/tickerTap  (2026-06-11)
 
 ## Corpus Check
-- 205 files · ~754,603 words
+- 206 files · ~755,916 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 3020 nodes · 11467 edges · 258 communities detected
-- Extraction: 32% EXTRACTED · 68% INFERRED · 0% AMBIGUOUS · INFERRED: 7808 edges (avg confidence: 0.52)
+- 3048 nodes · 11522 edges · 266 communities detected
+- Extraction: 32% EXTRACTED · 68% INFERRED · 0% AMBIGUOUS · INFERRED: 7840 edges (avg confidence: 0.52)
 - Token cost: 0 input · 0 output
 
 ## Community Hubs (Navigation)
@@ -268,11 +268,19 @@
 - [[_COMMUNITY_Community 255|Community 255]]
 - [[_COMMUNITY_Community 256|Community 256]]
 - [[_COMMUNITY_Community 257|Community 257]]
+- [[_COMMUNITY_Community 258|Community 258]]
+- [[_COMMUNITY_Community 259|Community 259]]
+- [[_COMMUNITY_Community 260|Community 260]]
+- [[_COMMUNITY_Community 261|Community 261]]
+- [[_COMMUNITY_Community 262|Community 262]]
+- [[_COMMUNITY_Community 263|Community 263]]
+- [[_COMMUNITY_Community 264|Community 264]]
+- [[_COMMUNITY_Community 265|Community 265]]
 
 ## God Nodes (most connected - your core abstractions)
 1. `User` - 225 edges
 2. `AuditLog` - 181 edges
-3. `Strategy` - 155 edges
+3. `Strategy` - 163 edges
 4. `Notification` - 139 edges
 5. `YFinanceProvider` - 134 edges
 6. `NormalizedDataService` - 131 edges
@@ -284,48 +292,48 @@
 ## Surprising Connections (you probably didn't know these)
 - `Strategy` --uses--> `main.py — FastAPI application entry point for TickerTap.  Configures middlewar`  [INFERRED]
   /home/kamilo420/projects/finance/tickerTap/backend/app/models.py → /home/kamilo420/projects/finance/tickerTap/backend/app/main.py
-- `Strategy` --uses--> `Insert system strategy templates if the strategies table is empty.      Reads te`  [INFERRED]
-  /home/kamilo420/projects/finance/tickerTap/backend/app/models.py → /home/kamilo420/projects/finance/tickerTap/backend/app/main.py
-- `Strategy` --uses--> `Validate critical configuration on startup.      Performs the following checks a`  [INFERRED]
-  /home/kamilo420/projects/finance/tickerTap/backend/app/models.py → /home/kamilo420/projects/finance/tickerTap/backend/app/main.py
-- `Strategy` --uses--> `Injects security headers on every response.      Provides a defence-in-depth lay`  [INFERRED]
-  /home/kamilo420/projects/finance/tickerTap/backend/app/models.py → /home/kamilo420/projects/finance/tickerTap/backend/app/main.py
-- `Strategy` --uses--> `Reject requests whose Content-Length exceeds MAX_REQUEST_BODY_BYTES.      Preven`  [INFERRED]
-  /home/kamilo420/projects/finance/tickerTap/backend/app/models.py → /home/kamilo420/projects/finance/tickerTap/backend/app/main.py
+- `Insert system strategy templates if the strategies table is empty.      Reads te` --uses--> `Strategy`  [INFERRED]
+  /home/kamilo420/projects/finance/tickerTap/backend/app/main.py → /home/kamilo420/projects/finance/tickerTap/backend/app/models.py
+- `Validate critical configuration on startup.      Performs the following checks a` --uses--> `Strategy`  [INFERRED]
+  /home/kamilo420/projects/finance/tickerTap/backend/app/main.py → /home/kamilo420/projects/finance/tickerTap/backend/app/models.py
+- `Injects security headers on every response.      Provides a defence-in-depth lay` --uses--> `Strategy`  [INFERRED]
+  /home/kamilo420/projects/finance/tickerTap/backend/app/main.py → /home/kamilo420/projects/finance/tickerTap/backend/app/models.py
+- `Reject requests whose Content-Length exceeds MAX_REQUEST_BODY_BYTES.      Preven` --uses--> `Strategy`  [INFERRED]
+  /home/kamilo420/projects/finance/tickerTap/backend/app/main.py → /home/kamilo420/projects/finance/tickerTap/backend/app/models.py
 
 ## Communities
 
 ### Community 0 - "Community 0"
-Cohesion: 0.05
-Nodes (221): create_account(), admin_check(), list_audit_logs(), list_users(), lock_account(), lock_user(), admin.py — Admin-only routes for TickerTap.  Provides endpoints for user and a, Lock or unlock a brokerage account atomically.      Eliminates duplication bet (+213 more)
+Cohesion: 0.15
+Nodes (242): LLMTranspileError, Raised when LLM translation or validation fails., Validate critical configuration on startup.      Performs the following checks, Validate critical configuration on startup.      Performs the following checks a, Validate critical configuration on startup.      Performs the following checks a, Injects security headers on every response.      Provides a defence-in-depth l, Injects security headers on every response.      Provides a defence-in-depth lay, Injects security headers on every response.      Provides a defence-in-depth lay (+234 more)
 
 ### Community 1 - "Community 1"
 Cohesion: 0.02
 Nodes (161): check_analyst_consensus(), analyst.py — Analyst consensus rule checker.  Fires when current price is signif, Check if price is above analyst consensus target.      Args:         ctx:, check_buckets(), buckets.py — Rule 13: Bucket allocation checker.  Fires when any bucket deviates, Check bucket allocation vs targets.      Args:         ctx: RuleContext with buc, check_fundamentals_health(), fundamentals.py — Fundamental health rule checker.  Checks debt-to-equity stress (+153 more)
 
 ### Community 2 - "Community 2"
-Cohesion: 0.17
-Nodes (227): LLMTranspileError, Raised when LLM translation or validation fails., Validate critical configuration on startup.      Performs the following checks, Validate critical configuration on startup.      Performs the following checks a, Injects security headers on every response.      Provides a defence-in-depth l, Injects security headers on every response.      Provides a defence-in-depth lay, Reject requests whose Content-Length exceeds MAX_REQUEST_BODY_BYTES.      Prev, Reject requests whose Content-Length exceeds MAX_REQUEST_BODY_BYTES.      Preven (+219 more)
+Cohesion: 0.06
+Nodes (183): AuthOut, create_access_token(), decode_access_token(), hash_password(), login(), LoginIn, auth.py — Core authentication utilities for TickerTap.  Provides password hash, Raise on startup if the JWT secret is still the insecure default.      Called (+175 more)
 
 ### Community 3 - "Community 3"
 Cohesion: 0.03
-Nodes (197): _check_condition(), evaluate_price_alerts(), _fetch_price(), _is_market_open(), alert_worker.py — arq background worker for evaluating price alerts.  Polls acti, Evaluate whether the alert condition is met.      Args:         condition: "abov, Main worker job: check all active alerts against current prices.      Groups ale, Main worker job: check all active alerts against current prices.      Groups ale (+189 more)
+Nodes (159): create_account(), create_alert(), delete_alert(), list_alerts(), alerts.py — Price alert CRUD endpoints.  Lets users create, list, update, and de, Update an existing price alert.      Args:         alert_id: UUID of the alert t, Delete a price alert.      Args:         alert_id: UUID of the alert to delete., Create a new price alert for the current user.      Args:         body: PriceAle (+151 more)
 
 ### Community 4 - "Community 4"
-Cohesion: 0.04
-Nodes (164): arq worker configuration for the alert evaluation loop.      Run with: ``arq app, WorkerSettings, DegiroCSVParser, DegiroRow, ParseResult, degiro_csv_parser.py — DeGiro transaction CSV parser.  Parses exported transacti, Parses DeGiro transaction history CSV exports into structured DegiroRow objects., Parse raw CSV bytes and return a ParseResult with trade rows.          Args: (+156 more)
+Cohesion: 0.02
+Nodes (160): _check_condition(), evaluate_price_alerts(), _fetch_price(), _is_market_open(), alert_worker.py — arq background worker for evaluating price alerts.  Polls acti, Evaluate whether the alert condition is met.      Args:         condition: "abov, Main worker job: check all active alerts against current prices.      Groups ale, Main worker job: check all active alerts against current prices.      Groups ale (+152 more)
 
 ### Community 5 - "Community 5"
-Cohesion: 0.04
-Nodes (143): FeatureResponse, health(), LSTMResponse, OHLCVRow, PatternResponse, predict_features(), predict_lstm(), predict_pattern() (+135 more)
+Cohesion: 0.06
+Nodes (149): DegiroCSVParser, DegiroRow, ParseResult, degiro_csv_parser.py — DeGiro transaction CSV parser.  Parses exported transacti, Parses DeGiro transaction history CSV exports into structured DegiroRow objects., Parse raw CSV bytes and return a ParseResult with trade rows.          Args:, Attempt to decode bytes using common encodings.          Args:             conte, Parse a single normalised CSV row dict into a DegiroRow.          Skips non-trad (+141 more)
 
 ### Community 6 - "Community 6"
 Cohesion: 0.02
-Nodes (125): BreakerStatus, check_circuit_breaker(), check_drawdown(), engine/circuit_breaker.py — Drawdown circuit breaker for strategy risk control., Check and enforce the circuit breaker for a strategy.      Loads recent backte, Execute circuit breaker trip: deactivate signals, notify, and log.      Args:, Result of a circuit breaker check.      Attributes:         tripped:        T, Check if the equity curve's drawdown exceeds the threshold.      Computes the (+117 more)
+Nodes (58): AlertsPage(), fmtDate(), AppShell(), PageRouter(), useAuth(), ChartsPage(), PortfolioSidePanel(), StockChart() (+50 more)
 
 ### Community 7 - "Community 7"
-Cohesion: 0.02
-Nodes (58): AlertsPage(), fmtDate(), AppShell(), PageRouter(), useAuth(), ChartsPage(), PortfolioSidePanel(), StockChart() (+50 more)
+Cohesion: 0.04
+Nodes (132): FeatureResponse, health(), LSTMResponse, OHLCVRow, PatternResponse, predict_features(), predict_lstm(), predict_pattern() (+124 more)
 
 ### Community 8 - "Community 8"
 Cohesion: 0.02
@@ -337,119 +345,119 @@ Nodes (124): generate_signals(), indicator_outputs(), ADX Trend Strategy — ent
 
 ### Community 10 - "Community 10"
 Cohesion: 0.03
-Nodes (80): _get_parser(), parse(), _preprocess_kwargs(), PineScript Grammar — lark EBNF grammar for the supported PineScript subset.  D, Lazily create and return the lark parser (cached singleton).      Returns:, Result from PineScript validation.      Attributes:         valid:  True if s, Convert keyword arguments into marker-pair positional arguments.      Transfor, Parse PineScript source into a lark parse tree.      Args:         source: Ra (+72 more)
+Nodes (84): get_max_history(), MarketDataProvider, OHLCVBar, Quote, Single OHLCV candle in normalised form.      Fields:         timestamp: Bar o, Real-time (or last-available) quote snapshot.      Fields:         symbol:, Minimal symbol metadata returned by search.      Fields:         symbol:    T, Abstract interface that every market-data adapter must implement.      Concret (+76 more)
 
 ### Community 11 - "Community 11"
-Cohesion: 0.03
-Nodes (90): cleanup_dead_letters(), _connect(), enqueue(), enqueue_batch(), get_pending(), increment_retries(), init_db(), mark_done() (+82 more)
+Cohesion: 0.05
+Nodes (77): admin_check(), list_audit_logs(), list_users(), lock_account(), lock_user(), admin.py — Admin-only routes for TickerTap.  Provides endpoints for user and a, Lock or unlock a brokerage account atomically.      Eliminates duplication bet, List all registered users, ordered newest-first.      Args:         db: Async (+69 more)
 
 ### Community 12 - "Community 12"
 Cohesion: 0.03
 Nodes (66): _load_models(), Instantiate all model singletons at startup., _adx(), _atr(), _bollinger_pctb(), _build_train_data(), _ema(), _engineer_features() (+58 more)
 
 ### Community 13 - "Community 13"
-Cohesion: 0.06
-Nodes (50): _assert_account_owner(), Config, HoldingOut, list_holdings(), holdings.py — Holdings (portfolio positions) routes for TickerTap.  Exposes a, Output schema for a single holding position.      Attributes:         holding, Verify the account belongs to the given user. Raises HTTP 403 if not.      Use, List holdings for the given account with pagination (P7.3).      Ownership of (+42 more)
+Cohesion: 0.03
+Nodes (62): _get_parser(), parse(), _preprocess_kwargs(), PineScript Grammar — lark EBNF grammar for the supported PineScript subset.  D, Lazily create and return the lark parser (cached singleton).      Returns:, Result from PineScript validation.      Attributes:         valid:  True if s, Convert keyword arguments into marker-pair positional arguments.      Transfor, Parse PineScript source into a lark parse tree.      Args:         source: Ra (+54 more)
 
 ### Community 14 - "Community 14"
-Cohesion: 0.06
-Nodes (59): _call_indicator(), Dispatch indicator computation to the shared library.      Args:         fn_n, _call_indicator(), _check_stop_loss(), _compute_indicators(), _eval_comparison(), _eval_condition(), _eval_logical() (+51 more)
+Cohesion: 0.05
+Nodes (72): _call_indicator(), _compute_composed_indicators(), _eval_expression(), _eval_node(), _generate_composed_signals(), Strategy Composition Engine — evaluates a graph of indicator nodes and boolean, Recursively validate every node in the expression AST.      Args:         nod, Evaluate a pre-validated expression against a variable namespace.      Args: (+64 more)
 
 ### Community 15 - "Community 15"
-Cohesion: 0.07
-Nodes (58): _et(), TEST SUITE: Scanner Session Detection MODULE UNDER TEST: app.trading.scanner_ses, 4:00 PM ET is at/after the regular close; elapsed weight must be 1.0., project_daily_volume must return intraday_vol unchanged when elapsed_weight == 0, At 50% session elapsed, projected volume should be double the intraday volume., Build a timezone-aware datetime in US/Eastern for use in tests.      Args:, Saturday noon ET must yield 'closed' regardless of time., Monday 8:00 AM ET is within pre-market hours (4:00–9:30 AM). (+50 more)
+Cohesion: 0.04
+Nodes (64): search(), analyse_with_ollama(), build_analysis_prompt(), compute_statistics(), fetch_outcomes(), main(), _parse_analysis_json(), post_rules() (+56 more)
 
 ### Community 16 - "Community 16"
 Cohesion: 0.07
-Nodes (48): Queued or completed Volume Flow Scanner job with full results.      Stores the, ScanResult, get_latest_scan(), get_scan_result(), routes/scanner.py — Volume Flow Scanner endpoints.  Exposes three routes under /, Start a Volume Flow Scan in the background.      Creates a pending ScanResult ro, Return the most recent scan result for the current user.      Args:         db:, Return the most recent scan result for the current user.      Args:         db: (+40 more)
+Nodes (58): _et(), TEST SUITE: Scanner Session Detection MODULE UNDER TEST: app.trading.scanner_ses, 4:00 PM ET is at/after the regular close; elapsed weight must be 1.0., project_daily_volume must return intraday_vol unchanged when elapsed_weight == 0, At 50% session elapsed, projected volume should be double the intraday volume., Build a timezone-aware datetime in US/Eastern for use in tests.      Args:, Saturday noon ET must yield 'closed' regardless of time., Monday 8:00 AM ET is within pre-market hours (4:00–9:30 AM). (+50 more)
 
 ### Community 17 - "Community 17"
+Cohesion: 0.07
+Nodes (43): cleanup_dead_letters(), _connect(), enqueue(), enqueue_batch(), get_pending(), increment_retries(), init_db(), mark_done() (+35 more)
+
+### Community 18 - "Community 18"
 Cohesion: 0.1
 Nodes (43): _bar(), _c(), check_analyst_consensus(), check_buckets(), check_earnings_calendar(), check_house_money(), check_semi_cap(), check_stop_proximity() (+35 more)
 
-### Community 18 - "Community 18"
-Cohesion: 0.06
-Nodes (34): BaseHTTPMiddleware, limiter.py — Shared SlowAPI rate-limiter instance for TickerTap.  Centralised he, configure_structlog(), logging_config.py — Centralized structlog configuration for TickerTap.  Used by, Configure structlog with JSON renderer in production, console in dev.      Reads, CorrelationIDMiddleware, health(), metrics() (+26 more)
-
 ### Community 19 - "Community 19"
+Cohesion: 0.06
+Nodes (31): BaseHTTPMiddleware, limiter.py — Shared SlowAPI rate-limiter instance for TickerTap.  Centralised he, CorrelationIDMiddleware, health(), metrics(), main.py — FastAPI application entry point for TickerTap.  Configures middlewar, Validate critical configuration on startup.      Performs the following checks a, Injects security headers on every response.      Provides a defence-in-depth lay (+23 more)
+
+### Community 20 - "Community 20"
 Cohesion: 0.12
 Nodes (38): _bar(), _c(), check_analyst_consensus(), check_buckets(), check_earnings_calendar(), check_house_money(), check_semi_cap(), check_stop_proximity() (+30 more)
 
-### Community 20 - "Community 20"
+### Community 21 - "Community 21"
 Cohesion: 0.11
 Nodes (28): _action_button(), email.py — Email sending utilities for TickerTap.  Provides a generic send_ema, Generate a styled call-to-action button for emails.      Args:         url: T, Send an email via the configured SMTP server.      Args:         to_email: Re, Send a password reset email with a one-time link.      Args:         to_email, Send a verification email to the NEW email address for an email change.      A, Send an account reactivation email with a one-time link.      Args:         t, Send an email to cancel a scheduled account deletion.      Args:         to_e (+20 more)
 
-### Community 21 - "Community 21"
+### Community 22 - "Community 22"
 Cohesion: 0.11
 Nodes (12): apiFetch(), _tryRefreshToken(), uploadFile(), useApi(), EMPTY_ENTRY(), handleDegiroUpload(), handleDrop(), handleFileInput() (+4 more)
 
-### Community 22 - "Community 22"
+### Community 23 - "Community 23"
 Cohesion: 0.11
 Nodes (21): _aggregate_5min(), archive_intraday(), _daily_downsample(), downsample_daily(), _fetch_and_store_bars(), _get_active_symbols(), _is_market_open(), trading/archiver.py — Intraday data archiver worker.  Background worker that: (+13 more)
 
-### Community 23 - "Community 23"
+### Community 24 - "Community 24"
 Cohesion: 0.15
 Nodes (19): _get_dividend_zones(), _get_earnings_zones(), _get_fomc_zones(), get_no_trade_zones(), _get_opex_dates(), _get_opex_zones(), is_in_no_trade_zone(), NoTradeZone (+11 more)
 
-### Community 24 - "Community 24"
+### Community 25 - "Community 25"
 Cohesion: 0.19
 Nodes (13): _make_redis_mock(), TEST SUITE: Worker Metrics Endpoint MODULE UNDER TEST: app.routes.metrics TEST T, Workers should report 'no_heartbeat' when the Redis key does not exist.      Red, Endpoint should return {error: ...} gracefully when Redis is down.      aioredis, Response must contain exactly the three known arq workers as top-level keys., Build a mock aioredis client with pre-configured async methods.      Args:, All workers should report 'healthy' when their heartbeat is recent.      A heart, All workers should report 'stale' when their heartbeat is 2000 s old.      2000 (+5 more)
 
-### Community 25 - "Community 25"
+### Community 26 - "Community 26"
 Cohesion: 0.22
 Nodes (11): atr_based(), fixed_dollar(), fixed_percentage(), fractional_kelly(), kelly(), PositionSizer, engine/risk.py — Position sizing and risk management models.  Provides the ``P, Automatically choose and apply the best sizing model.          Prefers ATR-bas (+3 more)
 
-### Community 26 - "Community 26"
+### Community 27 - "Community 27"
 Cohesion: 0.27
 Nodes (9): DecayResult, detect_decay(), detect_decay_for_strategy(), engine/decay.py — Strategy performance decay detection.  Monitors rolling stra, Load recent backtest results for a strategy and check for decay.      Queries, Compute rolling annualised Sharpe ratios.      Args:         returns:       B, Result of a strategy decay check.      Attributes:         is_decaying:    Tr, Detect performance decay from an equity curve.      Computes rolling Sharpe ra (+1 more)
 
-### Community 27 - "Community 27"
+### Community 28 - "Community 28"
 Cohesion: 0.25
 Nodes (0): 
 
-### Community 28 - "Community 28"
-Cohesion: 0.29
-Nodes (0): 
-
 ### Community 29 - "Community 29"
-Cohesion: 0.33
+Cohesion: 0.29
 Nodes (0): 
 
 ### Community 30 - "Community 30"
 Cohesion: 0.33
-Nodes (5): env.py — Alembic migration environment for TickerTap.  DATABASE_URL environmen, Run migrations in 'offline' mode (no live DB connection required).      Genera, Run migrations against a live database connection., run_migrations_offline(), run_migrations_online()
+Nodes (0): 
 
 ### Community 31 - "Community 31"
 Cohesion: 0.33
-Nodes (5): downgrade(), 0011_user_preferences — Add JSONB preferences column to users table.  Stores use, Add preferences JSONB column to users table., Remove preferences column from users table., upgrade()
+Nodes (5): env.py — Alembic migration environment for TickerTap.  DATABASE_URL environmen, Run migrations in 'offline' mode (no live DB connection required).      Genera, Run migrations against a live database connection., run_migrations_offline(), run_migrations_online()
 
 ### Community 32 - "Community 32"
 Cohesion: 0.33
-Nodes (5): downgrade(), 0015_trading_strategies — Trading AI core tables.  Creates four tables required, Drop trading AI core tables in reverse dependency order., Create trading AI core tables., upgrade()
+Nodes (5): downgrade(), 0011_user_preferences — Add JSONB preferences column to users table.  Stores use, Add preferences JSONB column to users table., Remove preferences column from users table., upgrade()
 
 ### Community 33 - "Community 33"
 Cohesion: 0.33
-Nodes (5): downgrade(), 0013_watchlists_account_lockout — Add account lockout columns and watchlist/wat, Remove watchlist_items, watchlists tables, and lockout columns from users., Add lockout columns to users, create watchlists and watchlist_items tables., upgrade()
+Nodes (5): downgrade(), 0015_trading_strategies — Trading AI core tables.  Creates four tables required, Drop trading AI core tables in reverse dependency order., Create trading AI core tables., upgrade()
 
 ### Community 34 - "Community 34"
 Cohesion: 0.33
-Nodes (5): downgrade(), 0012_reports_email_verify — Add email verification, account management, and user, Remove email_verification_tokens, user_reports, and user account columns., Add email verification columns, user_reports table, and email_verification_token, upgrade()
+Nodes (5): downgrade(), 0013_watchlists_account_lockout — Add account lockout columns and watchlist/wat, Remove watchlist_items, watchlists tables, and lockout columns from users., Add lockout columns to users, create watchlists and watchlist_items tables., upgrade()
 
 ### Community 35 - "Community 35"
 Cohesion: 0.33
-Nodes (5): downgrade(), 0014_profit_taking — Add profit-taking target price column to portfolio position, Add profit_taking column to portfolio_positions., Remove profit_taking column from portfolio_positions., upgrade()
+Nodes (5): downgrade(), 0012_reports_email_verify — Add email verification, account management, and user, Remove email_verification_tokens, user_reports, and user account columns., Add email verification columns, user_reports table, and email_verification_token, upgrade()
 
 ### Community 36 - "Community 36"
-Cohesion: 0.4
-Nodes (5): _get_avg_sentiment(), engine/filters.py — Signal filters that gate entry/exit signals.  Provides com, Filter a trading signal based on recent news sentiment scores.      Looks up t, Compute average sentiment score for *symbol* over recent articles.      Querie, sentiment_filter()
+Cohesion: 0.33
+Nodes (5): downgrade(), 0014_profit_taking — Add profit-taking target price column to portfolio position, Add profit_taking column to portfolio_positions., Remove profit_taking column from portfolio_positions., upgrade()
 
 ### Community 37 - "Community 37"
 Cohesion: 0.4
-Nodes (4): GET /health should return 200 when DB and Redis are reachable., GET /health response body should contain status, db, redis, and timestamp., test_health_response_shape(), test_health_returns_200()
+Nodes (5): _get_avg_sentiment(), engine/filters.py — Signal filters that gate entry/exit signals.  Provides com, Filter a trading signal based on recent news sentiment scores.      Looks up t, Compute average sentiment score for *symbol* over recent articles.      Querie, sentiment_filter()
 
 ### Community 38 - "Community 38"
-Cohesion: 0.5
-Nodes (0): 
+Cohesion: 0.4
+Nodes (4): GET /health should return 200 when DB and Redis are reachable., GET /health response body should contain status, db, redis, and timestamp., test_health_response_shape(), test_health_returns_200()
 
 ### Community 39 - "Community 39"
 Cohesion: 0.5
@@ -457,102 +465,102 @@ Nodes (0):
 
 ### Community 40 - "Community 40"
 Cohesion: 0.5
-Nodes (1): add scan_results table  Revision ID: a1b2 Revises: 0021 Create Date: 2026-05-13
+Nodes (0): 
 
 ### Community 41 - "Community 41"
 Cohesion: 0.5
-Nodes (1): add portfolios and portfolio_positions tables  Adds the portfolios and portfol
+Nodes (1): add scan_results table  Revision ID: a1b2 Revises: 0021 Create Date: 2026-05-13
 
 ### Community 42 - "Community 42"
 Cohesion: 0.5
-Nodes (1): Add stop_loss to portfolio_positions.  Revision ID: 0007_stop_loss Revises: 0
+Nodes (1): add portfolios and portfolio_positions tables  Adds the portfolios and portfol
 
 ### Community 43 - "Community 43"
 Cohesion: 0.5
-Nodes (1): Create score_outcomes and scoring_rules tables for the feedback loop.  Adds th
+Nodes (1): Add stop_loss to portfolio_positions.  Revision ID: 0007_stop_loss Revises: 0
 
 ### Community 44 - "Community 44"
 Cohesion: 0.5
-Nodes (1): Create chart_templates table.  Revision ID: 0008_chart_templates Revises: 000
+Nodes (1): Create score_outcomes and scoring_rules tables for the feedback loop.  Adds th
 
 ### Community 45 - "Community 45"
 Cohesion: 0.5
-Nodes (1): 0016_intraday_bars — TimescaleDB hypertable for intraday OHLCV data.  Creates
+Nodes (1): Create chart_templates table.  Revision ID: 0008_chart_templates Revises: 000
 
 ### Community 46 - "Community 46"
 Cohesion: 0.5
-Nodes (1): Add rule-engine columns to portfolio_positions  Adds six columns that the portfo
+Nodes (1): 0016_intraday_bars — TimescaleDB hypertable for intraday OHLCV data.  Creates
 
 ### Community 47 - "Community 47"
 Cohesion: 0.5
-Nodes (1): integrity fixes  Fix malformed server_defaults (nested quotes), add CASCADE dele
+Nodes (1): Add rule-engine columns to portfolio_positions  Adds six columns that the portfo
 
 ### Community 48 - "Community 48"
 Cohesion: 0.5
-Nodes (1): Add asset_type and physical_type to portfolio_positions.  Revision ID: 0006_as
+Nodes (1): integrity fixes  Fix malformed server_defaults (nested quotes), add CASCADE dele
 
 ### Community 49 - "Community 49"
 Cohesion: 0.5
-Nodes (1): Portfolio cash tracking  Adds a cash_balance column to the portfolios table and
+Nodes (1): Add asset_type and physical_type to portfolio_positions.  Revision ID: 0006_as
 
 ### Community 50 - "Community 50"
 Cohesion: 0.5
-Nodes (1): 0017_notifications — Notification and webhook tables.  Creates:   - notificat
+Nodes (1): Portfolio cash tracking  Adds a cash_balance column to the portfolios table and
 
 ### Community 51 - "Community 51"
 Cohesion: 0.5
-Nodes (1): 0018_social_strategies — Strategy ratings and usage tracking tables.  Creates:
+Nodes (1): 0017_notifications — Notification and webhook tables.  Creates:   - notificat
 
 ### Community 52 - "Community 52"
 Cohesion: 0.5
-Nodes (1): initial  Revision ID: 0001_initial Revises: Create Date: 2026-01-09 00:00:00.000
+Nodes (1): 0018_social_strategies — Strategy ratings and usage tracking tables.  Creates:
 
 ### Community 53 - "Community 53"
 Cohesion: 0.5
-Nodes (1): 0019_paper_trading — Paper trading simulation tables.  Creates:   - paper_tra
+Nodes (1): initial  Revision ID: 0001_initial Revises: Create Date: 2026-01-09 00:00:00.000
 
 ### Community 54 - "Community 54"
 Cohesion: 0.5
-Nodes (1): Create news_articles and news_article_tickers tables.  Adds the two tables req
+Nodes (1): 0019_paper_trading — Paper trading simulation tables.  Creates:   - paper_tra
 
 ### Community 55 - "Community 55"
 Cohesion: 0.5
-Nodes (1): Add mode column to scan_results  Adds a mode column to distinguish how a scan wa
+Nodes (1): Create news_articles and news_article_tickers tables.  Adds the two tables req
 
 ### Community 56 - "Community 56"
 Cohesion: 0.5
-Nodes (1): Create rule_alerts table  Stores rule-engine alerts triggered by portfolio posit
+Nodes (1): Add mode column to scan_results  Adds a mode column to distinguish how a scan wa
 
 ### Community 57 - "Community 57"
 Cohesion: 0.5
-Nodes (1): Add cost_basis to portfolio_trades for realized P&L tracking  Records the averag
+Nodes (1): Create rule_alerts table  Stores rule-engine alerts triggered by portfolio posit
 
 ### Community 58 - "Community 58"
 Cohesion: 0.5
-Nodes (3): main(), worker_healthcheck.py — Docker HEALTHCHECK script for TickerTap arq workers.  Re, Entry point: parse args, query Redis, print status, exit with code.      Reads R
+Nodes (1): Add cost_basis to portfolio_trades for realized P&L tracking  Records the averag
 
 ### Community 59 - "Community 59"
-Cohesion: 0.67
-Nodes (0): 
+Cohesion: 0.5
+Nodes (3): main(), worker_healthcheck.py — Docker HEALTHCHECK script for TickerTap arq workers.  Re, Entry point: parse args, query Redis, print status, exit with code.      Reads R
 
 ### Community 60 - "Community 60"
-Cohesion: 1.0
-Nodes (2): highlight(), PineScriptEditor()
+Cohesion: 0.67
+Nodes (0): 
 
 ### Community 61 - "Community 61"
 Cohesion: 1.0
-Nodes (2): btnStyle(), Pagination()
+Nodes (2): highlight(), PineScriptEditor()
 
 ### Community 62 - "Community 62"
-Cohesion: 0.67
-Nodes (0): 
+Cohesion: 1.0
+Nodes (2): btnStyle(), Pagination()
 
 ### Community 63 - "Community 63"
 Cohesion: 0.67
 Nodes (0): 
 
 ### Community 64 - "Community 64"
-Cohesion: 1.0
+Cohesion: 0.67
 Nodes (0): 
 
 ### Community 65 - "Community 65"
@@ -617,27 +625,27 @@ Nodes (0):
 
 ### Community 80 - "Community 80"
 Cohesion: 1.0
-Nodes (1): Strategy Templates — pre-built system strategies seeded into the database.  Thes
+Nodes (0): 
 
 ### Community 81 - "Community 81"
 Cohesion: 1.0
-Nodes (1): Return the list of candle intervals this provider supports.          Returns:
+Nodes (1): Strategy Templates — pre-built system strategies seeded into the database.  Thes
 
 ### Community 82 - "Community 82"
 Cohesion: 1.0
-Nodes (1): Return maximum lookback for *interval*.          Args:             interval:
+Nodes (1): Return the list of candle intervals this provider supports.          Returns:
 
 ### Community 83 - "Community 83"
 Cohesion: 1.0
-Nodes (1): Fetch the latest quote for *symbol*.          Args:             symbol: Ticker s
+Nodes (1): Return maximum lookback for *interval*.          Args:             interval:
 
 ### Community 84 - "Community 84"
 Cohesion: 1.0
-Nodes (1): Return the provider's supported interval list.          Returns:             Lis
+Nodes (1): Fetch the latest quote for *symbol*.          Args:             symbol: Ticker s
 
 ### Community 85 - "Community 85"
 Cohesion: 1.0
-Nodes (0): 
+Nodes (1): Return the provider's supported interval list.          Returns:             Lis
 
 ### Community 86 - "Community 86"
 Cohesion: 1.0
@@ -673,7 +681,7 @@ Nodes (0):
 
 ### Community 94 - "Community 94"
 Cohesion: 1.0
-Nodes (1): Enforce at least 1 uppercase, 1 lowercase, 1 digit, and 1 special character.
+Nodes (0): 
 
 ### Community 95 - "Community 95"
 Cohesion: 1.0
@@ -681,1058 +689,1104 @@ Nodes (1): Enforce at least 1 uppercase, 1 lowercase, 1 digit, and 1 special cha
 
 ### Community 96 - "Community 96"
 Cohesion: 1.0
-Nodes (1): Reject non-positive portfolio values.
+Nodes (1): Enforce at least 1 uppercase, 1 lowercase, 1 digit, and 1 special character.
 
 ### Community 97 - "Community 97"
 Cohesion: 1.0
-Nodes (1): Allow only known mode values.
+Nodes (1): Reject non-positive portfolio values.
 
 ### Community 98 - "Community 98"
 Cohesion: 1.0
-Nodes (1): Reject state values outside the allowed set.
+Nodes (1): Allow only known mode values.
 
 ### Community 99 - "Community 99"
 Cohesion: 1.0
-Nodes (1): Reject schedule values outside the allowed set.
+Nodes (1): Reject state values outside the allowed set.
 
 ### Community 100 - "Community 100"
 Cohesion: 1.0
-Nodes (0): 
+Nodes (1): Reject schedule values outside the allowed set.
 
 ### Community 101 - "Community 101"
 Cohesion: 1.0
-Nodes (1): Check if NYSE is in regular trading hours.
+Nodes (0): 
 
 ### Community 102 - "Community 102"
 Cohesion: 1.0
-Nodes (1): Return a numeric sort key so intervals order from shortest to longest.
+Nodes (1): Check if NYSE is in regular trading hours.
 
 ### Community 103 - "Community 103"
 Cohesion: 1.0
-Nodes (1): Remove duplicate timestamps and sort chronologically.          Args:
+Nodes (1): Return a numeric sort key so intervals order from shortest to longest.
 
 ### Community 104 - "Community 104"
 Cohesion: 1.0
-Nodes (1): Fetch the latest quote for *symbol*.          Args:             symbol: Ticke
+Nodes (1): Remove duplicate timestamps and sort chronologically.          Args:
 
 ### Community 105 - "Community 105"
 Cohesion: 1.0
-Nodes (1): Return the list of bar intervals this provider supports.          Returns:
+Nodes (1): Fetch the latest quote for *symbol*.          Args:             symbol: Ticke
 
 ### Community 106 - "Community 106"
 Cohesion: 1.0
-Nodes (1): Return the maximum historical lookback for *interval*.          Args:
+Nodes (1): Return the list of bar intervals this provider supports.          Returns:
 
 ### Community 107 - "Community 107"
 Cohesion: 1.0
-Nodes (1): Adjust price for slippage.          Entries slip against you (buy higher, sell-s
+Nodes (1): Return the maximum historical lookback for *interval*.          Args:
 
 ### Community 108 - "Community 108"
 Cohesion: 1.0
-Nodes (1): Build a TradeRecord from an open position and its exit.          Args:
+Nodes (1): Adjust price for slippage.          Entries slip against you (buy higher, sell-s
 
 ### Community 109 - "Community 109"
 Cohesion: 1.0
-Nodes (1): Size a position by risking a fixed percentage of the account.          The num
+Nodes (1): Build a TradeRecord from an open position and its exit.          Args:
 
 ### Community 110 - "Community 110"
 Cohesion: 1.0
-Nodes (1): Size a position by risking a fixed dollar amount.          Args:
+Nodes (1): Size a position by risking a fixed percentage of the account.          The num
 
 ### Community 111 - "Community 111"
 Cohesion: 1.0
-Nodes (1): Full Kelly criterion — optimal fraction of account to wager.          Formula:
+Nodes (1): Size a position by risking a fixed dollar amount.          Args:
 
 ### Community 112 - "Community 112"
 Cohesion: 1.0
-Nodes (1): Fractional Kelly — conservative variant.          Multiplies the full Kelly fr
+Nodes (1): Full Kelly criterion — optimal fraction of account to wager.          Formula:
 
 ### Community 113 - "Community 113"
 Cohesion: 1.0
-Nodes (1): ATR-based position sizing.          Uses Average True Range to set a volatilit
+Nodes (1): Fractional Kelly — conservative variant.          Multiplies the full Kelly fr
 
 ### Community 114 - "Community 114"
 Cohesion: 1.0
-Nodes (0): 
+Nodes (1): ATR-based position sizing.          Uses Average True Range to set a volatilit
 
 ### Community 115 - "Community 115"
 Cohesion: 1.0
-Nodes (1): Reject non-positive portfolio values.
+Nodes (0): 
 
 ### Community 116 - "Community 116"
 Cohesion: 1.0
-Nodes (1): Serialized scan result returned by the API.      Attributes:         result_i
+Nodes (1): Extract and parse a JSON object from raw LLM output.      Handles common LLM q
 
 ### Community 117 - "Community 117"
 Cohesion: 1.0
-Nodes (1): Registered platform user.
+Nodes (1): Validate and sanitise the parsed LLM scoring output.      Ensures scores are c
 
 ### Community 118 - "Community 118"
 Cohesion: 1.0
-Nodes (1): Brokerage account owned by a user.
+Nodes (1): Combine a raw article dict with LLM scores into an ingestion payload.      The
 
 ### Community 119 - "Community 119"
 Cohesion: 1.0
-Nodes (1): Monetary transaction (deposit/withdrawal) on an account.
+Nodes (1): POST a batch of scored articles to Server A's ingestion endpoint.      Args:
 
 ### Community 120 - "Community 120"
 Cohesion: 1.0
-Nodes (1): Tradeable security (stock, ETF, etc.).
+Nodes (1): Attempt to deliver all pending articles from the local SQLite queue.      Retr
 
 ### Community 121 - "Community 121"
 Cohesion: 1.0
-Nodes (1): Position in a security held within an account.
+Nodes (1): Execute one complete worker cycle: rules refresh → flush → fetch → score → post.
 
 ### Community 122 - "Community 122"
 Cohesion: 1.0
-Nodes (1): Buy/sell order placed against an account.
+Nodes (1): Entry point: initialise the queue DB and run the worker loop forever.      The
 
 ### Community 123 - "Community 123"
 Cohesion: 1.0
-Nodes (1): One-time password reset token linked to a user.
+Nodes (1): Reject non-positive portfolio values.
 
 ### Community 124 - "Community 124"
 Cohesion: 1.0
-Nodes (1): Long-lived refresh token linked to a user session (P6.3).      The raw token v
+Nodes (1): Serialized scan result returned by the API.      Attributes:         result_i
 
 ### Community 125 - "Community 125"
 Cohesion: 1.0
-Nodes (1): One-time token for email verification, email changes, reactivation,     and del
+Nodes (1): Registered platform user.
 
 ### Community 126 - "Community 126"
 Cohesion: 1.0
-Nodes (1): User-submitted bug report or feature suggestion.
+Nodes (1): Brokerage account owned by a user.
 
 ### Community 127 - "Community 127"
 Cohesion: 1.0
-Nodes (1): Named portfolio owned by a user for tracking custom positions.
+Nodes (1): Monetary transaction (deposit/withdrawal) on an account.
 
 ### Community 128 - "Community 128"
 Cohesion: 1.0
-Nodes (1): A single holding within a Portfolio.
+Nodes (1): Tradeable security (stock, ETF, etc.).
 
 ### Community 129 - "Community 129"
 Cohesion: 1.0
-Nodes (1): A recorded buy or sell trade within a Portfolio, created automatically     when
+Nodes (1): Position in a security held within an account.
 
 ### Community 130 - "Community 130"
 Cohesion: 1.0
-Nodes (1): Immutable audit trail for all user-initiated actions.
+Nodes (1): Buy/sell order placed against an account.
 
 ### Community 131 - "Community 131"
 Cohesion: 1.0
-Nodes (1): Saved chart template with drawings and overlay configuration.
+Nodes (1): One-time password reset token linked to a user.
 
 ### Community 132 - "Community 132"
 Cohesion: 1.0
-Nodes (1): Pre-scored news article ingested by the background LLM worker.      Articles a
+Nodes (1): Long-lived refresh token linked to a user session (P6.3).      The raw token v
 
 ### Community 133 - "Community 133"
 Cohesion: 1.0
-Nodes (1): Per-ticker impact score for a news article.      Junction table linking news_a
+Nodes (1): One-time token for email verification, email changes, reactivation,     and del
 
 ### Community 134 - "Community 134"
 Cohesion: 1.0
-Nodes (1): Recorded outcome comparing an LLM prediction against actual price movement.
+Nodes (1): User-submitted bug report or feature suggestion.
 
 ### Community 135 - "Community 135"
 Cohesion: 1.0
-Nodes (1): Versioned set of calibration rules generated by the learner.      Only one rul
+Nodes (1): Named portfolio owned by a user for tracking custom positions.
 
 ### Community 136 - "Community 136"
 Cohesion: 1.0
-Nodes (1): Named watchlist owned by a user for tracking assets without positions.
+Nodes (1): A single holding within a Portfolio.
 
 ### Community 137 - "Community 137"
 Cohesion: 1.0
-Nodes (1): A single asset tracked within a Watchlist.
+Nodes (1): A recorded buy or sell trade within a Portfolio, created automatically     when
 
 ### Community 138 - "Community 138"
 Cohesion: 1.0
-Nodes (1): Trading strategy definition (user-created, system built-in, or AI-learned).
+Nodes (1): Immutable audit trail for all user-initiated actions.
 
 ### Community 139 - "Community 139"
 Cohesion: 1.0
-Nodes (1): Immutable snapshot of a strategy definition at a specific version.
+Nodes (1): Saved chart template with drawings and overlay configuration.
 
 ### Community 140 - "Community 140"
 Cohesion: 1.0
-Nodes (1): Queued or completed backtest job with full results and metrics.
+Nodes (1): Pre-scored news article ingested by the background LLM worker.      Articles a
 
 ### Community 141 - "Community 141"
 Cohesion: 1.0
-Nodes (1): Forward-looking entry/exit/stop-loss signal generated by a strategy.
+Nodes (1): Per-ticker impact score for a news article.      Junction table linking news_a
 
 ### Community 142 - "Community 142"
 Cohesion: 1.0
-Nodes (1): User rating (1–5 stars) and optional review for a public strategy.
+Nodes (1): Recorded outcome comparing an LLM prediction against actual price movement.
 
 ### Community 143 - "Community 143"
 Cohesion: 1.0
-Nodes (1): Tracks when a user clones a strategy from the marketplace.
+Nodes (1): Versioned set of calibration rules generated by the learner.      Only one rul
 
 ### Community 144 - "Community 144"
 Cohesion: 1.0
-Nodes (1): User-defined price alert. Triggers a notification when the target     price con
+Nodes (1): Named watchlist owned by a user for tracking assets without positions.
 
 ### Community 145 - "Community 145"
 Cohesion: 1.0
-Nodes (1): In-app notification delivered to a user (signal alerts, backtest results, etc.).
+Nodes (1): A single asset tracked within a Watchlist.
 
 ### Community 146 - "Community 146"
 Cohesion: 1.0
-Nodes (1): User-configured webhook URL for outbound notification delivery.
+Nodes (1): Trading strategy definition (user-created, system built-in, or AI-learned).
 
 ### Community 147 - "Community 147"
 Cohesion: 1.0
-Nodes (1): Virtual paper trading session tracking simulated positions and equity.
+Nodes (1): Immutable snapshot of a strategy definition at a specific version.
 
 ### Community 148 - "Community 148"
 Cohesion: 1.0
-Nodes (1): Individual position (open or closed) within a paper trade session.
+Nodes (1): Queued or completed backtest job with full results and metrics.
 
 ### Community 149 - "Community 149"
 Cohesion: 1.0
-Nodes (1): Point-in-time equity snapshot for charting paper trade performance.
+Nodes (1): Forward-looking entry/exit/stop-loss signal generated by a strategy.
 
 ### Community 150 - "Community 150"
 Cohesion: 1.0
-Nodes (1): Queued or completed Volume Flow Scanner job with full results.      Stores the
+Nodes (1): User rating (1–5 stars) and optional review for a public strategy.
 
 ### Community 151 - "Community 151"
 Cohesion: 1.0
-Nodes (1): Schema for a user question submitted to the guide endpoint.      Attributes:
+Nodes (1): Tracks when a user clones a strategy from the marketplace.
 
 ### Community 152 - "Community 152"
 Cohesion: 1.0
-Nodes (1): Schema for the guide endpoint response.      Attributes:         answer: The LLM
+Nodes (1): User-defined price alert. Triggers a notification when the target     price con
 
 ### Community 153 - "Community 153"
 Cohesion: 1.0
-Nodes (1): Submit a question to the TickerTap AI guide.      Proxies the question to the Ol
+Nodes (1): In-app notification delivered to a user (signal alerts, backtest results, etc.).
 
 ### Community 154 - "Community 154"
 Cohesion: 1.0
-Nodes (1): Payload to add a single position to a portfolio.
+Nodes (1): User-configured webhook URL for outbound notification delivery.
 
 ### Community 155 - "Community 155"
 Cohesion: 1.0
-Nodes (1): Serialised position returned by the API.
+Nodes (1): Virtual paper trading session tracking simulated positions and equity.
 
 ### Community 156 - "Community 156"
 Cohesion: 1.0
-Nodes (1): Payload for partial position update — all fields optional.
+Nodes (1): Individual position (open or closed) within a paper trade session.
 
 ### Community 157 - "Community 157"
 Cohesion: 1.0
-Nodes (1): Payload for a partial sell — reduces quantity; deletes if fully sold.
+Nodes (1): Point-in-time equity snapshot for charting paper trade performance.
 
 ### Community 158 - "Community 158"
 Cohesion: 1.0
-Nodes (1): A single financial event (earnings, dividend, split) for a symbol.
+Nodes (1): Queued or completed Volume Flow Scanner job with full results.      Stores the
 
 ### Community 159 - "Community 159"
 Cohesion: 1.0
-Nodes (1): Response from the market events endpoint.
+Nodes (1): Schema for a user question submitted to the guide endpoint.      Attributes:
 
 ### Community 160 - "Community 160"
 Cohesion: 1.0
-Nodes (1): Payload to save a chart template.
+Nodes (1): Schema for the guide endpoint response.      Attributes:         answer: The LLM
 
 ### Community 161 - "Community 161"
 Cohesion: 1.0
-Nodes (1): Serialised chart template returned by the API.
+Nodes (1): Submit a question to the TickerTap AI guide.      Proxies the question to the Ol
 
 ### Community 162 - "Community 162"
 Cohesion: 1.0
-Nodes (1): Payload for partial chart template update.
+Nodes (1): Payload to add a single position to a portfolio.
 
 ### Community 163 - "Community 163"
 Cohesion: 1.0
-Nodes (1): Per-ticker impact score returned alongside a news article.
+Nodes (1): Serialised position returned by the API.
 
 ### Community 164 - "Community 164"
 Cohesion: 1.0
-Nodes (1): Per-ticker score submitted by the LLM worker via the internal API.
+Nodes (1): Payload for partial position update — all fields optional.
 
 ### Community 165 - "Community 165"
 Cohesion: 1.0
-Nodes (1): Single article submitted by the LLM worker via POST /api/v1/internal/news.
+Nodes (1): Payload for a partial sell — reduces quantity; deletes if fully sold.
 
 ### Community 166 - "Community 166"
 Cohesion: 1.0
-Nodes (1): Serialised news article returned by the news feed endpoints.      Each article
+Nodes (1): A single financial event (earnings, dividend, split) for a symbol.
 
 ### Community 167 - "Community 167"
 Cohesion: 1.0
-Nodes (1): Paginated wrapper for news feed responses.      Wraps a page of NewsArticleOut
+Nodes (1): Response from the market events endpoint.
 
 ### Community 168 - "Community 168"
 Cohesion: 1.0
-Nodes (1): Serialised score outcome returned by the feedback data endpoint.      Includes
+Nodes (1): Payload to save a chart template.
 
 ### Community 169 - "Community 169"
 Cohesion: 1.0
-Nodes (1): Payload from the learner to submit new calibration rules.
+Nodes (1): Serialised chart template returned by the API.
 
 ### Community 170 - "Community 170"
 Cohesion: 1.0
-Nodes (1): Serialised scoring rule returned by the rules endpoint.
+Nodes (1): Payload for partial chart template update.
 
 ### Community 171 - "Community 171"
 Cohesion: 1.0
-Nodes (1): Create a new watchlist.
+Nodes (1): Per-ticker impact score returned alongside a news article.
 
 ### Community 172 - "Community 172"
 Cohesion: 1.0
-Nodes (1): Serialised watchlist item.
+Nodes (1): Per-ticker score submitted by the LLM worker via the internal API.
 
 ### Community 173 - "Community 173"
 Cohesion: 1.0
-Nodes (1): Serialised watchlist (without items).
+Nodes (1): Single article submitted by the LLM worker via POST /api/v1/internal/news.
 
 ### Community 174 - "Community 174"
 Cohesion: 1.0
-Nodes (1): Serialised watchlist with items.
+Nodes (1): Serialised news article returned by the news feed endpoints.      Each article
 
 ### Community 175 - "Community 175"
 Cohesion: 1.0
-Nodes (1): Add an item to a watchlist.
+Nodes (1): Paginated wrapper for news feed responses.      Wraps a page of NewsArticleOut
 
 ### Community 176 - "Community 176"
 Cohesion: 1.0
-Nodes (1): Update a watchlist item.
+Nodes (1): Serialised score outcome returned by the feedback data endpoint.      Includes
 
 ### Community 177 - "Community 177"
 Cohesion: 1.0
-Nodes (1): Buy an asset from watchlist into a portfolio.
+Nodes (1): Payload from the learner to submit new calibration rules.
 
 ### Community 178 - "Community 178"
 Cohesion: 1.0
-Nodes (1): Single data point in a portfolio performance time series.      Attributes:
+Nodes (1): Serialised scoring rule returned by the rules endpoint.
 
 ### Community 179 - "Community 179"
 Cohesion: 1.0
-Nodes (1): Create a new trading strategy.
+Nodes (1): Create a new watchlist.
 
 ### Community 180 - "Community 180"
 Cohesion: 1.0
-Nodes (1): Serialised strategy for API responses.
+Nodes (1): Serialised watchlist item.
 
 ### Community 181 - "Community 181"
 Cohesion: 1.0
-Nodes (1): Partial update payload for a strategy.
+Nodes (1): Serialised watchlist (without items).
 
 ### Community 182 - "Community 182"
 Cohesion: 1.0
-Nodes (1): Queue a backtest job.      Accepts either ``strategy_id`` (UUID) or ``strategy
+Nodes (1): Serialised watchlist with items.
 
 ### Community 183 - "Community 183"
 Cohesion: 1.0
-Nodes (1): Performance metrics from a completed backtest.
+Nodes (1): Add an item to a watchlist.
 
 ### Community 184 - "Community 184"
 Cohesion: 1.0
-Nodes (1): Serialised backtest result for API responses.
+Nodes (1): Update a watchlist item.
 
 ### Community 185 - "Community 185"
 Cohesion: 1.0
-Nodes (1): Serialised trading signal for API responses.
+Nodes (1): Buy an asset from watchlist into a portfolio.
 
 ### Community 186 - "Community 186"
 Cohesion: 1.0
-Nodes (1): Create or update a strategy rating.
+Nodes (1): Single data point in a portfolio performance time series.      Attributes:
 
 ### Community 187 - "Community 187"
 Cohesion: 1.0
-Nodes (1): Serialised strategy rating for API responses.
+Nodes (1): Create a new trading strategy.
 
 ### Community 188 - "Community 188"
 Cohesion: 1.0
-Nodes (1): Aggregate statistics for a strategy.
+Nodes (1): Serialised strategy for API responses.
 
 ### Community 189 - "Community 189"
 Cohesion: 1.0
-Nodes (1): Strategy listing for the marketplace browse endpoint.
+Nodes (1): Partial update payload for a strategy.
 
 ### Community 190 - "Community 190"
 Cohesion: 1.0
-Nodes (1): Queue backtests for multiple symbols.
+Nodes (1): Queue a backtest job.      Accepts either ``strategy_id`` (UUID) or ``strategy
 
 ### Community 191 - "Community 191"
 Cohesion: 1.0
-Nodes (1): Serialised in-app notification.
+Nodes (1): Performance metrics from a completed backtest.
 
 ### Community 192 - "Community 192"
 Cohesion: 1.0
-Nodes (1): Paginated notifications wrapper.
+Nodes (1): Serialised backtest result for API responses.
 
 ### Community 193 - "Community 193"
 Cohesion: 1.0
-Nodes (1): Payload to register a new webhook URL.
+Nodes (1): Serialised trading signal for API responses.
 
 ### Community 194 - "Community 194"
 Cohesion: 1.0
-Nodes (1): Serialised webhook returned by the API.
+Nodes (1): Create or update a strategy rating.
 
 ### Community 195 - "Community 195"
 Cohesion: 1.0
-Nodes (1): Partial update payload for a webhook.
+Nodes (1): Serialised strategy rating for API responses.
 
 ### Community 196 - "Community 196"
 Cohesion: 1.0
-Nodes (1): Payload to create a new price alert.
+Nodes (1): Aggregate statistics for a strategy.
 
 ### Community 197 - "Community 197"
 Cohesion: 1.0
-Nodes (1): Serialised price alert.
+Nodes (1): Strategy listing for the marketplace browse endpoint.
 
 ### Community 198 - "Community 198"
 Cohesion: 1.0
-Nodes (1): Payload to update an existing price alert.
+Nodes (1): Queue backtests for multiple symbols.
 
 ### Community 199 - "Community 199"
 Cohesion: 1.0
-Nodes (1): Input for the market regime detection endpoint.
+Nodes (1): Serialised in-app notification.
 
 ### Community 200 - "Community 200"
 Cohesion: 1.0
-Nodes (1): Market regime detection result.
+Nodes (1): Paginated notifications wrapper.
 
 ### Community 201 - "Community 201"
 Cohesion: 1.0
-Nodes (1): PineScript syntax validation request.
+Nodes (1): Payload to register a new webhook URL.
 
 ### Community 202 - "Community 202"
 Cohesion: 1.0
-Nodes (1): PineScript syntax validation result.
+Nodes (1): Serialised webhook returned by the API.
 
 ### Community 203 - "Community 203"
 Cohesion: 1.0
-Nodes (1): PineScript transpilation request — creates a strategy from PineScript code.
+Nodes (1): Partial update payload for a webhook.
 
 ### Community 204 - "Community 204"
 Cohesion: 1.0
-Nodes (1): Transpilation result with compiled IR and strategy metadata.
+Nodes (1): Payload to create a new price alert.
 
 ### Community 205 - "Community 205"
 Cohesion: 1.0
-Nodes (1): A single version in the strategy version history.
+Nodes (1): Serialised price alert.
 
 ### Community 206 - "Community 206"
 Cohesion: 1.0
-Nodes (1): Create a composed strategy from indicator nodes and expressions.
+Nodes (1): Payload to update an existing price alert.
 
 ### Community 207 - "Community 207"
 Cohesion: 1.0
-Nodes (1): Start a new paper trade.
+Nodes (1): Input for the market regime detection endpoint.
 
 ### Community 208 - "Community 208"
 Cohesion: 1.0
-Nodes (1): Fields allowed for paper trade edits (capital and strategy parameters).
+Nodes (1): Market regime detection result.
 
 ### Community 209 - "Community 209"
 Cohesion: 1.0
-Nodes (1): Serialised paper trade.
+Nodes (1): PineScript syntax validation request.
 
 ### Community 210 - "Community 210"
 Cohesion: 1.0
-Nodes (1): Serialised paper trade position.
+Nodes (1): PineScript syntax validation result.
 
 ### Community 211 - "Community 211"
 Cohesion: 1.0
-Nodes (1): Serialised equity snapshot.
+Nodes (1): PineScript transpilation request — creates a strategy from PineScript code.
 
 ### Community 212 - "Community 212"
 Cohesion: 1.0
-Nodes (1): Request to score a set of positions.      The caller supplies up to 30 ticker
+Nodes (1): Transpilation result with compiled IR and strategy metadata.
 
 ### Community 213 - "Community 213"
 Cohesion: 1.0
-Nodes (1): Analysis result for a single position.      Combines technical indicators (tre
+Nodes (1): A single version in the strategy version history.
 
 ### Community 214 - "Community 214"
 Cohesion: 1.0
-Nodes (1): Aggregated portfolio scoring response.      Contains per-position analysis and
+Nodes (1): Create a composed strategy from indicator nodes and expressions.
 
 ### Community 215 - "Community 215"
 Cohesion: 1.0
-Nodes (1): Fundamental data for a single security.      Aggregates company info, valuatio
+Nodes (1): Start a new paper trade.
 
 ### Community 216 - "Community 216"
 Cohesion: 1.0
-Nodes (1): Request for exit point analysis on a single symbol.
+Nodes (1): Fields allowed for paper trade edits (capital and strategy parameters).
 
 ### Community 217 - "Community 217"
 Cohesion: 1.0
-Nodes (1): Single price level with type and rationale.
+Nodes (1): Serialised paper trade.
 
 ### Community 218 - "Community 218"
 Cohesion: 1.0
-Nodes (1): Comprehensive exit analysis for a symbol.
+Nodes (1): Serialised paper trade position.
 
 ### Community 219 - "Community 219"
 Cohesion: 1.0
-Nodes (1): Single sector ETF performance snapshot.      Attributes:         symbol:
+Nodes (1): Serialised equity snapshot.
 
 ### Community 220 - "Community 220"
 Cohesion: 1.0
-Nodes (1): Sector performance overview — list of sector ETF snapshots.
+Nodes (1): Request to score a set of positions.      The caller supplies up to 30 ticker
 
 ### Community 221 - "Community 221"
 Cohesion: 1.0
-Nodes (1): Single stock in screener results.      Attributes:         symbol:     Ticker
+Nodes (1): Analysis result for a single position.      Combines technical indicators (tre
 
 ### Community 222 - "Community 222"
 Cohesion: 1.0
-Nodes (1): Stock screener results with filter metadata.
+Nodes (1): Aggregated portfolio scoring response.      Contains per-position analysis and
 
 ### Community 223 - "Community 223"
 Cohesion: 1.0
-Nodes (1): Registered platform user.
+Nodes (1): Fundamental data for a single security.      Aggregates company info, valuatio
 
 ### Community 224 - "Community 224"
 Cohesion: 1.0
-Nodes (1): Brokerage account owned by a user.
+Nodes (1): Request for exit point analysis on a single symbol.
 
 ### Community 225 - "Community 225"
 Cohesion: 1.0
-Nodes (1): Monetary transaction (deposit/withdrawal) on an account.
+Nodes (1): Single price level with type and rationale.
 
 ### Community 226 - "Community 226"
 Cohesion: 1.0
-Nodes (1): Tradeable security (stock, ETF, etc.).
+Nodes (1): Comprehensive exit analysis for a symbol.
 
 ### Community 227 - "Community 227"
 Cohesion: 1.0
-Nodes (1): Position in a security held within an account.
+Nodes (1): Single sector ETF performance snapshot.      Attributes:         symbol:
 
 ### Community 228 - "Community 228"
 Cohesion: 1.0
-Nodes (1): Buy/sell order placed against an account.
+Nodes (1): Sector performance overview — list of sector ETF snapshots.
 
 ### Community 229 - "Community 229"
 Cohesion: 1.0
-Nodes (1): One-time password reset token linked to a user.
+Nodes (1): Single stock in screener results.      Attributes:         symbol:     Ticker
 
 ### Community 230 - "Community 230"
 Cohesion: 1.0
-Nodes (1): Long-lived refresh token linked to a user session (P6.3).      The raw token v
+Nodes (1): Stock screener results with filter metadata.
 
 ### Community 231 - "Community 231"
 Cohesion: 1.0
-Nodes (1): One-time token for email verification, email changes, reactivation,     and del
+Nodes (1): Registered platform user.
 
 ### Community 232 - "Community 232"
 Cohesion: 1.0
-Nodes (1): User-submitted bug report or feature suggestion.
+Nodes (1): Brokerage account owned by a user.
 
 ### Community 233 - "Community 233"
 Cohesion: 1.0
-Nodes (1): Named portfolio owned by a user for tracking custom positions.
+Nodes (1): Monetary transaction (deposit/withdrawal) on an account.
 
 ### Community 234 - "Community 234"
 Cohesion: 1.0
-Nodes (1): A single holding within a Portfolio.
+Nodes (1): Tradeable security (stock, ETF, etc.).
 
 ### Community 235 - "Community 235"
 Cohesion: 1.0
-Nodes (1): Immutable audit trail for all user-initiated actions.
+Nodes (1): Position in a security held within an account.
 
 ### Community 236 - "Community 236"
 Cohesion: 1.0
-Nodes (1): Saved chart template with drawings and overlay configuration.
+Nodes (1): Buy/sell order placed against an account.
 
 ### Community 237 - "Community 237"
 Cohesion: 1.0
-Nodes (1): Pre-scored news article ingested by the background LLM worker.      Articles a
+Nodes (1): One-time password reset token linked to a user.
 
 ### Community 238 - "Community 238"
 Cohesion: 1.0
-Nodes (1): Per-ticker impact score for a news article.      Junction table linking news_a
+Nodes (1): Long-lived refresh token linked to a user session (P6.3).      The raw token v
 
 ### Community 239 - "Community 239"
 Cohesion: 1.0
-Nodes (1): Recorded outcome comparing an LLM prediction against actual price movement.
+Nodes (1): One-time token for email verification, email changes, reactivation,     and del
 
 ### Community 240 - "Community 240"
 Cohesion: 1.0
-Nodes (1): Versioned set of calibration rules generated by the learner.      Only one rul
+Nodes (1): User-submitted bug report or feature suggestion.
 
 ### Community 241 - "Community 241"
 Cohesion: 1.0
-Nodes (1): Named watchlist owned by a user for tracking assets without positions.
+Nodes (1): Named portfolio owned by a user for tracking custom positions.
 
 ### Community 242 - "Community 242"
 Cohesion: 1.0
-Nodes (1): A single asset tracked within a Watchlist.
+Nodes (1): A single holding within a Portfolio.
 
 ### Community 243 - "Community 243"
 Cohesion: 1.0
-Nodes (1): Trading strategy definition (user-created, system built-in, or AI-learned).
+Nodes (1): Immutable audit trail for all user-initiated actions.
 
 ### Community 244 - "Community 244"
 Cohesion: 1.0
-Nodes (1): Immutable snapshot of a strategy definition at a specific version.
+Nodes (1): Saved chart template with drawings and overlay configuration.
 
 ### Community 245 - "Community 245"
 Cohesion: 1.0
-Nodes (1): Queued or completed backtest job with full results and metrics.
+Nodes (1): Pre-scored news article ingested by the background LLM worker.      Articles a
 
 ### Community 246 - "Community 246"
 Cohesion: 1.0
-Nodes (1): Forward-looking entry/exit/stop-loss signal generated by a strategy.
+Nodes (1): Per-ticker impact score for a news article.      Junction table linking news_a
 
 ### Community 247 - "Community 247"
 Cohesion: 1.0
-Nodes (1): User rating (1–5 stars) and optional review for a public strategy.
+Nodes (1): Recorded outcome comparing an LLM prediction against actual price movement.
 
 ### Community 248 - "Community 248"
 Cohesion: 1.0
-Nodes (1): Tracks when a user clones a strategy from the marketplace.
+Nodes (1): Versioned set of calibration rules generated by the learner.      Only one rul
 
 ### Community 249 - "Community 249"
 Cohesion: 1.0
-Nodes (1): User-defined price alert. Triggers a notification when the target     price con
+Nodes (1): Named watchlist owned by a user for tracking assets without positions.
 
 ### Community 250 - "Community 250"
 Cohesion: 1.0
-Nodes (1): In-app notification delivered to a user (signal alerts, backtest results, etc.).
+Nodes (1): A single asset tracked within a Watchlist.
 
 ### Community 251 - "Community 251"
 Cohesion: 1.0
-Nodes (1): User-configured webhook URL for outbound notification delivery.
+Nodes (1): Trading strategy definition (user-created, system built-in, or AI-learned).
 
 ### Community 252 - "Community 252"
 Cohesion: 1.0
-Nodes (1): Virtual paper trading session tracking simulated positions and equity.
+Nodes (1): Immutable snapshot of a strategy definition at a specific version.
 
 ### Community 253 - "Community 253"
 Cohesion: 1.0
-Nodes (1): Individual position (open or closed) within a paper trade session.
+Nodes (1): Queued or completed backtest job with full results and metrics.
 
 ### Community 254 - "Community 254"
 Cohesion: 1.0
-Nodes (1): Point-in-time equity snapshot for charting paper trade performance.
+Nodes (1): Forward-looking entry/exit/stop-loss signal generated by a strategy.
 
 ### Community 255 - "Community 255"
 Cohesion: 1.0
-Nodes (1): Schema for a user question submitted to the guide endpoint.      Attributes:
+Nodes (1): User rating (1–5 stars) and optional review for a public strategy.
 
 ### Community 256 - "Community 256"
 Cohesion: 1.0
-Nodes (1): Schema for the guide endpoint response.      Attributes:         answer: The LLM
+Nodes (1): Tracks when a user clones a strategy from the marketplace.
 
 ### Community 257 - "Community 257"
+Cohesion: 1.0
+Nodes (1): User-defined price alert. Triggers a notification when the target     price con
+
+### Community 258 - "Community 258"
+Cohesion: 1.0
+Nodes (1): In-app notification delivered to a user (signal alerts, backtest results, etc.).
+
+### Community 259 - "Community 259"
+Cohesion: 1.0
+Nodes (1): User-configured webhook URL for outbound notification delivery.
+
+### Community 260 - "Community 260"
+Cohesion: 1.0
+Nodes (1): Virtual paper trading session tracking simulated positions and equity.
+
+### Community 261 - "Community 261"
+Cohesion: 1.0
+Nodes (1): Individual position (open or closed) within a paper trade session.
+
+### Community 262 - "Community 262"
+Cohesion: 1.0
+Nodes (1): Point-in-time equity snapshot for charting paper trade performance.
+
+### Community 263 - "Community 263"
+Cohesion: 1.0
+Nodes (1): Schema for a user question submitted to the guide endpoint.      Attributes:
+
+### Community 264 - "Community 264"
+Cohesion: 1.0
+Nodes (1): Schema for the guide endpoint response.      Attributes:         answer: The LLM
+
+### Community 265 - "Community 265"
 Cohesion: 1.0
 Nodes (1): Submit a question to the TickerTap AI guide.      Proxies the question to the Ol
 
 ## Knowledge Gaps
-- **909 isolated node(s):** `learner.py — TickerTap scoring accuracy analyser for Server B (Kali).  Standal`, `Fetch score outcome records from Server A.      Retrieves up to 2000 of the mo`, `Compute aggregate accuracy statistics from outcome data.      Breaks down accu`, `Build a prompt for the LLM to analyse scoring patterns and biases.      Includ`, `Call the local Ollama API to analyse scoring patterns.      Uses streaming mod` (+904 more)
+- **924 isolated node(s):** `learner.py — TickerTap scoring accuracy analyser for Server B (Kali).  Standal`, `Fetch score outcome records from Server A.      Retrieves up to 2000 of the mo`, `Compute aggregate accuracy statistics from outcome data.      Breaks down accu`, `Build a prompt for the LLM to analyse scoring patterns and biases.      Includ`, `Call the local Ollama API to analyse scoring patterns.      Uses streaming mod` (+919 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **Thin community `Community 64`** (2 nodes): `ParameterEditor.jsx`, `ParameterEditor()`
+- **Thin community `Community 65`** (2 nodes): `ParameterEditor.jsx`, `ParameterEditor()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 65`** (2 nodes): `CompositionEditor()`, `CompositionEditor.jsx`
+- **Thin community `Community 66`** (2 nodes): `CompositionEditor()`, `CompositionEditor.jsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 66`** (2 nodes): `EmptyState()`, `EmptyState.jsx`
+- **Thin community `Community 67`** (2 nodes): `EmptyState()`, `EmptyState.jsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 67`** (2 nodes): `StaleDataBanner.jsx`, `StaleDataBanner()`
+- **Thin community `Community 68`** (2 nodes): `StaleDataBanner.jsx`, `StaleDataBanner()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 68`** (2 nodes): `KeyboardShortcutsModal.jsx`, `KeyboardShortcutsModal()`
+- **Thin community `Community 69`** (2 nodes): `KeyboardShortcutsModal.jsx`, `KeyboardShortcutsModal()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 69`** (2 nodes): `FilterBar()`, `FilterBar.jsx`
+- **Thin community `Community 70`** (2 nodes): `FilterBar()`, `FilterBar.jsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 70`** (2 nodes): `QuickSellDrawer.jsx`, `QuickSellDrawer()`
+- **Thin community `Community 71`** (2 nodes): `QuickSellDrawer.jsx`, `QuickSellDrawer()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 71`** (2 nodes): `PeriodSelector.jsx`, `PeriodSelector()`
+- **Thin community `Community 72`** (2 nodes): `PeriodSelector.jsx`, `PeriodSelector()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 72`** (2 nodes): `ContextPopup()`, `ContextPopup.jsx`
+- **Thin community `Community 73`** (2 nodes): `ContextPopup()`, `ContextPopup.jsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 73`** (2 nodes): `StatBlock.jsx`, `StatBlock()`
+- **Thin community `Community 74`** (2 nodes): `StatBlock.jsx`, `StatBlock()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 74`** (2 nodes): `TxModal.jsx`, `TxModal()`
+- **Thin community `Community 75`** (2 nodes): `TxModal.jsx`, `TxModal()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 75`** (2 nodes): `UserGuidePage.jsx`, `UserGuidePage()`
+- **Thin community `Community 76`** (2 nodes): `UserGuidePage.jsx`, `UserGuidePage()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 76`** (2 nodes): `LoginPage.jsx`, `LoginPage()`
+- **Thin community `Community 77`** (2 nodes): `LoginPage.jsx`, `LoginPage()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 77`** (2 nodes): `RegisterPage.jsx`, `RegisterPage()`
+- **Thin community `Community 78`** (2 nodes): `RegisterPage.jsx`, `RegisterPage()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 78`** (2 nodes): `VerifyEmailPage.jsx`, `VerifyEmailPage()`
+- **Thin community `Community 79`** (2 nodes): `VerifyEmailPage.jsx`, `VerifyEmailPage()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 79`** (2 nodes): `DeactivatedAccountPage()`, `DeactivatedAccountPage.jsx`
+- **Thin community `Community 80`** (2 nodes): `DeactivatedAccountPage()`, `DeactivatedAccountPage.jsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 80`** (2 nodes): `templates.py`, `Strategy Templates — pre-built system strategies seeded into the database.  Thes`
+- **Thin community `Community 81`** (2 nodes): `templates.py`, `Strategy Templates — pre-built system strategies seeded into the database.  Thes`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 81`** (2 nodes): `Return the list of candle intervals this provider supports.          Returns:`, `.get_supported_intervals()`
+- **Thin community `Community 82`** (2 nodes): `Return the list of candle intervals this provider supports.          Returns:`, `.get_supported_intervals()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 82`** (2 nodes): `Return maximum lookback for *interval*.          Args:             interval:`, `.get_max_history()`
+- **Thin community `Community 83`** (2 nodes): `Return maximum lookback for *interval*.          Args:             interval:`, `.get_max_history()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 83`** (2 nodes): `.get_quote()`, `Fetch the latest quote for *symbol*.          Args:             symbol: Ticker s`
+- **Thin community `Community 84`** (2 nodes): `.get_quote()`, `Fetch the latest quote for *symbol*.          Args:             symbol: Ticker s`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 84`** (2 nodes): `.get_supported_intervals()`, `Return the provider's supported interval list.          Returns:             Lis`
+- **Thin community `Community 85`** (2 nodes): `.get_supported_intervals()`, `Return the provider's supported interval list.          Returns:             Lis`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 85`** (1 nodes): `eslint.config.js`
+- **Thin community `Community 86`** (1 nodes): `eslint.config.js`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 86`** (1 nodes): `vite.config.js`
+- **Thin community `Community 87`** (1 nodes): `vite.config.js`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 87`** (1 nodes): `main.jsx`
+- **Thin community `Community 88`** (1 nodes): `main.jsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 88`** (1 nodes): `setup.js`
+- **Thin community `Community 89`** (1 nodes): `setup.js`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 89`** (1 nodes): `shared.js`
+- **Thin community `Community 90`** (1 nodes): `shared.js`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 90`** (1 nodes): `globals.js`
+- **Thin community `Community 91`** (1 nodes): `globals.js`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 91`** (1 nodes): `chartStyles.js`
+- **Thin community `Community 92`** (1 nodes): `chartStyles.js`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 92`** (1 nodes): `Icons.jsx`
+- **Thin community `Community 93`** (1 nodes): `Icons.jsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 93`** (1 nodes): `__init__.py`
-  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 94`** (1 nodes): `Enforce at least 1 uppercase, 1 lowercase, 1 digit, and 1 special character.`
+- **Thin community `Community 94`** (1 nodes): `__init__.py`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 95`** (1 nodes): `Enforce at least 1 uppercase, 1 lowercase, 1 digit, and 1 special character.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 96`** (1 nodes): `Reject non-positive portfolio values.`
+- **Thin community `Community 96`** (1 nodes): `Enforce at least 1 uppercase, 1 lowercase, 1 digit, and 1 special character.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 97`** (1 nodes): `Allow only known mode values.`
+- **Thin community `Community 97`** (1 nodes): `Reject non-positive portfolio values.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 98`** (1 nodes): `Reject state values outside the allowed set.`
+- **Thin community `Community 98`** (1 nodes): `Allow only known mode values.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 99`** (1 nodes): `Reject schedule values outside the allowed set.`
+- **Thin community `Community 99`** (1 nodes): `Reject state values outside the allowed set.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 100`** (1 nodes): `__init__.py`
+- **Thin community `Community 100`** (1 nodes): `Reject schedule values outside the allowed set.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 101`** (1 nodes): `Check if NYSE is in regular trading hours.`
+- **Thin community `Community 101`** (1 nodes): `__init__.py`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 102`** (1 nodes): `Return a numeric sort key so intervals order from shortest to longest.`
+- **Thin community `Community 102`** (1 nodes): `Check if NYSE is in regular trading hours.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 103`** (1 nodes): `Remove duplicate timestamps and sort chronologically.          Args:`
+- **Thin community `Community 103`** (1 nodes): `Return a numeric sort key so intervals order from shortest to longest.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 104`** (1 nodes): `Fetch the latest quote for *symbol*.          Args:             symbol: Ticke`
+- **Thin community `Community 104`** (1 nodes): `Remove duplicate timestamps and sort chronologically.          Args:`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 105`** (1 nodes): `Return the list of bar intervals this provider supports.          Returns:`
+- **Thin community `Community 105`** (1 nodes): `Fetch the latest quote for *symbol*.          Args:             symbol: Ticke`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 106`** (1 nodes): `Return the maximum historical lookback for *interval*.          Args:`
+- **Thin community `Community 106`** (1 nodes): `Return the list of bar intervals this provider supports.          Returns:`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 107`** (1 nodes): `Adjust price for slippage.          Entries slip against you (buy higher, sell-s`
+- **Thin community `Community 107`** (1 nodes): `Return the maximum historical lookback for *interval*.          Args:`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 108`** (1 nodes): `Build a TradeRecord from an open position and its exit.          Args:`
+- **Thin community `Community 108`** (1 nodes): `Adjust price for slippage.          Entries slip against you (buy higher, sell-s`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 109`** (1 nodes): `Size a position by risking a fixed percentage of the account.          The num`
+- **Thin community `Community 109`** (1 nodes): `Build a TradeRecord from an open position and its exit.          Args:`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 110`** (1 nodes): `Size a position by risking a fixed dollar amount.          Args:`
+- **Thin community `Community 110`** (1 nodes): `Size a position by risking a fixed percentage of the account.          The num`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 111`** (1 nodes): `Full Kelly criterion — optimal fraction of account to wager.          Formula:`
+- **Thin community `Community 111`** (1 nodes): `Size a position by risking a fixed dollar amount.          Args:`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 112`** (1 nodes): `Fractional Kelly — conservative variant.          Multiplies the full Kelly fr`
+- **Thin community `Community 112`** (1 nodes): `Full Kelly criterion — optimal fraction of account to wager.          Formula:`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 113`** (1 nodes): `ATR-based position sizing.          Uses Average True Range to set a volatilit`
+- **Thin community `Community 113`** (1 nodes): `Fractional Kelly — conservative variant.          Multiplies the full Kelly fr`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 114`** (1 nodes): `__init__.py`
+- **Thin community `Community 114`** (1 nodes): `ATR-based position sizing.          Uses Average True Range to set a volatilit`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 115`** (1 nodes): `Reject non-positive portfolio values.`
+- **Thin community `Community 115`** (1 nodes): `__init__.py`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 116`** (1 nodes): `Serialized scan result returned by the API.      Attributes:         result_i`
+- **Thin community `Community 116`** (1 nodes): `Extract and parse a JSON object from raw LLM output.      Handles common LLM q`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 117`** (1 nodes): `Registered platform user.`
+- **Thin community `Community 117`** (1 nodes): `Validate and sanitise the parsed LLM scoring output.      Ensures scores are c`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 118`** (1 nodes): `Brokerage account owned by a user.`
+- **Thin community `Community 118`** (1 nodes): `Combine a raw article dict with LLM scores into an ingestion payload.      The`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 119`** (1 nodes): `Monetary transaction (deposit/withdrawal) on an account.`
+- **Thin community `Community 119`** (1 nodes): `POST a batch of scored articles to Server A's ingestion endpoint.      Args:`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 120`** (1 nodes): `Tradeable security (stock, ETF, etc.).`
+- **Thin community `Community 120`** (1 nodes): `Attempt to deliver all pending articles from the local SQLite queue.      Retr`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 121`** (1 nodes): `Position in a security held within an account.`
+- **Thin community `Community 121`** (1 nodes): `Execute one complete worker cycle: rules refresh → flush → fetch → score → post.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 122`** (1 nodes): `Buy/sell order placed against an account.`
+- **Thin community `Community 122`** (1 nodes): `Entry point: initialise the queue DB and run the worker loop forever.      The`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 123`** (1 nodes): `One-time password reset token linked to a user.`
+- **Thin community `Community 123`** (1 nodes): `Reject non-positive portfolio values.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 124`** (1 nodes): `Long-lived refresh token linked to a user session (P6.3).      The raw token v`
+- **Thin community `Community 124`** (1 nodes): `Serialized scan result returned by the API.      Attributes:         result_i`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 125`** (1 nodes): `One-time token for email verification, email changes, reactivation,     and del`
+- **Thin community `Community 125`** (1 nodes): `Registered platform user.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 126`** (1 nodes): `User-submitted bug report or feature suggestion.`
+- **Thin community `Community 126`** (1 nodes): `Brokerage account owned by a user.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 127`** (1 nodes): `Named portfolio owned by a user for tracking custom positions.`
+- **Thin community `Community 127`** (1 nodes): `Monetary transaction (deposit/withdrawal) on an account.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 128`** (1 nodes): `A single holding within a Portfolio.`
+- **Thin community `Community 128`** (1 nodes): `Tradeable security (stock, ETF, etc.).`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 129`** (1 nodes): `A recorded buy or sell trade within a Portfolio, created automatically     when`
+- **Thin community `Community 129`** (1 nodes): `Position in a security held within an account.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 130`** (1 nodes): `Immutable audit trail for all user-initiated actions.`
+- **Thin community `Community 130`** (1 nodes): `Buy/sell order placed against an account.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 131`** (1 nodes): `Saved chart template with drawings and overlay configuration.`
+- **Thin community `Community 131`** (1 nodes): `One-time password reset token linked to a user.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 132`** (1 nodes): `Pre-scored news article ingested by the background LLM worker.      Articles a`
+- **Thin community `Community 132`** (1 nodes): `Long-lived refresh token linked to a user session (P6.3).      The raw token v`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 133`** (1 nodes): `Per-ticker impact score for a news article.      Junction table linking news_a`
+- **Thin community `Community 133`** (1 nodes): `One-time token for email verification, email changes, reactivation,     and del`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 134`** (1 nodes): `Recorded outcome comparing an LLM prediction against actual price movement.`
+- **Thin community `Community 134`** (1 nodes): `User-submitted bug report or feature suggestion.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 135`** (1 nodes): `Versioned set of calibration rules generated by the learner.      Only one rul`
+- **Thin community `Community 135`** (1 nodes): `Named portfolio owned by a user for tracking custom positions.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 136`** (1 nodes): `Named watchlist owned by a user for tracking assets without positions.`
+- **Thin community `Community 136`** (1 nodes): `A single holding within a Portfolio.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 137`** (1 nodes): `A single asset tracked within a Watchlist.`
+- **Thin community `Community 137`** (1 nodes): `A recorded buy or sell trade within a Portfolio, created automatically     when`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 138`** (1 nodes): `Trading strategy definition (user-created, system built-in, or AI-learned).`
+- **Thin community `Community 138`** (1 nodes): `Immutable audit trail for all user-initiated actions.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 139`** (1 nodes): `Immutable snapshot of a strategy definition at a specific version.`
+- **Thin community `Community 139`** (1 nodes): `Saved chart template with drawings and overlay configuration.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 140`** (1 nodes): `Queued or completed backtest job with full results and metrics.`
+- **Thin community `Community 140`** (1 nodes): `Pre-scored news article ingested by the background LLM worker.      Articles a`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 141`** (1 nodes): `Forward-looking entry/exit/stop-loss signal generated by a strategy.`
+- **Thin community `Community 141`** (1 nodes): `Per-ticker impact score for a news article.      Junction table linking news_a`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 142`** (1 nodes): `User rating (1–5 stars) and optional review for a public strategy.`
+- **Thin community `Community 142`** (1 nodes): `Recorded outcome comparing an LLM prediction against actual price movement.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 143`** (1 nodes): `Tracks when a user clones a strategy from the marketplace.`
+- **Thin community `Community 143`** (1 nodes): `Versioned set of calibration rules generated by the learner.      Only one rul`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 144`** (1 nodes): `User-defined price alert. Triggers a notification when the target     price con`
+- **Thin community `Community 144`** (1 nodes): `Named watchlist owned by a user for tracking assets without positions.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 145`** (1 nodes): `In-app notification delivered to a user (signal alerts, backtest results, etc.).`
+- **Thin community `Community 145`** (1 nodes): `A single asset tracked within a Watchlist.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 146`** (1 nodes): `User-configured webhook URL for outbound notification delivery.`
+- **Thin community `Community 146`** (1 nodes): `Trading strategy definition (user-created, system built-in, or AI-learned).`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 147`** (1 nodes): `Virtual paper trading session tracking simulated positions and equity.`
+- **Thin community `Community 147`** (1 nodes): `Immutable snapshot of a strategy definition at a specific version.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 148`** (1 nodes): `Individual position (open or closed) within a paper trade session.`
+- **Thin community `Community 148`** (1 nodes): `Queued or completed backtest job with full results and metrics.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 149`** (1 nodes): `Point-in-time equity snapshot for charting paper trade performance.`
+- **Thin community `Community 149`** (1 nodes): `Forward-looking entry/exit/stop-loss signal generated by a strategy.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 150`** (1 nodes): `Queued or completed Volume Flow Scanner job with full results.      Stores the`
+- **Thin community `Community 150`** (1 nodes): `User rating (1–5 stars) and optional review for a public strategy.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 151`** (1 nodes): `Schema for a user question submitted to the guide endpoint.      Attributes:`
+- **Thin community `Community 151`** (1 nodes): `Tracks when a user clones a strategy from the marketplace.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 152`** (1 nodes): `Schema for the guide endpoint response.      Attributes:         answer: The LLM`
+- **Thin community `Community 152`** (1 nodes): `User-defined price alert. Triggers a notification when the target     price con`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 153`** (1 nodes): `Submit a question to the TickerTap AI guide.      Proxies the question to the Ol`
+- **Thin community `Community 153`** (1 nodes): `In-app notification delivered to a user (signal alerts, backtest results, etc.).`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 154`** (1 nodes): `Payload to add a single position to a portfolio.`
+- **Thin community `Community 154`** (1 nodes): `User-configured webhook URL for outbound notification delivery.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 155`** (1 nodes): `Serialised position returned by the API.`
+- **Thin community `Community 155`** (1 nodes): `Virtual paper trading session tracking simulated positions and equity.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 156`** (1 nodes): `Payload for partial position update — all fields optional.`
+- **Thin community `Community 156`** (1 nodes): `Individual position (open or closed) within a paper trade session.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 157`** (1 nodes): `Payload for a partial sell — reduces quantity; deletes if fully sold.`
+- **Thin community `Community 157`** (1 nodes): `Point-in-time equity snapshot for charting paper trade performance.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 158`** (1 nodes): `A single financial event (earnings, dividend, split) for a symbol.`
+- **Thin community `Community 158`** (1 nodes): `Queued or completed Volume Flow Scanner job with full results.      Stores the`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 159`** (1 nodes): `Response from the market events endpoint.`
+- **Thin community `Community 159`** (1 nodes): `Schema for a user question submitted to the guide endpoint.      Attributes:`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 160`** (1 nodes): `Payload to save a chart template.`
+- **Thin community `Community 160`** (1 nodes): `Schema for the guide endpoint response.      Attributes:         answer: The LLM`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 161`** (1 nodes): `Serialised chart template returned by the API.`
+- **Thin community `Community 161`** (1 nodes): `Submit a question to the TickerTap AI guide.      Proxies the question to the Ol`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 162`** (1 nodes): `Payload for partial chart template update.`
+- **Thin community `Community 162`** (1 nodes): `Payload to add a single position to a portfolio.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 163`** (1 nodes): `Per-ticker impact score returned alongside a news article.`
+- **Thin community `Community 163`** (1 nodes): `Serialised position returned by the API.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 164`** (1 nodes): `Per-ticker score submitted by the LLM worker via the internal API.`
+- **Thin community `Community 164`** (1 nodes): `Payload for partial position update — all fields optional.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 165`** (1 nodes): `Single article submitted by the LLM worker via POST /api/v1/internal/news.`
+- **Thin community `Community 165`** (1 nodes): `Payload for a partial sell — reduces quantity; deletes if fully sold.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 166`** (1 nodes): `Serialised news article returned by the news feed endpoints.      Each article`
+- **Thin community `Community 166`** (1 nodes): `A single financial event (earnings, dividend, split) for a symbol.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 167`** (1 nodes): `Paginated wrapper for news feed responses.      Wraps a page of NewsArticleOut`
+- **Thin community `Community 167`** (1 nodes): `Response from the market events endpoint.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 168`** (1 nodes): `Serialised score outcome returned by the feedback data endpoint.      Includes`
+- **Thin community `Community 168`** (1 nodes): `Payload to save a chart template.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 169`** (1 nodes): `Payload from the learner to submit new calibration rules.`
+- **Thin community `Community 169`** (1 nodes): `Serialised chart template returned by the API.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 170`** (1 nodes): `Serialised scoring rule returned by the rules endpoint.`
+- **Thin community `Community 170`** (1 nodes): `Payload for partial chart template update.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 171`** (1 nodes): `Create a new watchlist.`
+- **Thin community `Community 171`** (1 nodes): `Per-ticker impact score returned alongside a news article.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 172`** (1 nodes): `Serialised watchlist item.`
+- **Thin community `Community 172`** (1 nodes): `Per-ticker score submitted by the LLM worker via the internal API.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 173`** (1 nodes): `Serialised watchlist (without items).`
+- **Thin community `Community 173`** (1 nodes): `Single article submitted by the LLM worker via POST /api/v1/internal/news.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 174`** (1 nodes): `Serialised watchlist with items.`
+- **Thin community `Community 174`** (1 nodes): `Serialised news article returned by the news feed endpoints.      Each article`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 175`** (1 nodes): `Add an item to a watchlist.`
+- **Thin community `Community 175`** (1 nodes): `Paginated wrapper for news feed responses.      Wraps a page of NewsArticleOut`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 176`** (1 nodes): `Update a watchlist item.`
+- **Thin community `Community 176`** (1 nodes): `Serialised score outcome returned by the feedback data endpoint.      Includes`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 177`** (1 nodes): `Buy an asset from watchlist into a portfolio.`
+- **Thin community `Community 177`** (1 nodes): `Payload from the learner to submit new calibration rules.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 178`** (1 nodes): `Single data point in a portfolio performance time series.      Attributes:`
+- **Thin community `Community 178`** (1 nodes): `Serialised scoring rule returned by the rules endpoint.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 179`** (1 nodes): `Create a new trading strategy.`
+- **Thin community `Community 179`** (1 nodes): `Create a new watchlist.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 180`** (1 nodes): `Serialised strategy for API responses.`
+- **Thin community `Community 180`** (1 nodes): `Serialised watchlist item.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 181`** (1 nodes): `Partial update payload for a strategy.`
+- **Thin community `Community 181`** (1 nodes): `Serialised watchlist (without items).`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 182`** (1 nodes): `Queue a backtest job.      Accepts either ``strategy_id`` (UUID) or ``strategy`
+- **Thin community `Community 182`** (1 nodes): `Serialised watchlist with items.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 183`** (1 nodes): `Performance metrics from a completed backtest.`
+- **Thin community `Community 183`** (1 nodes): `Add an item to a watchlist.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 184`** (1 nodes): `Serialised backtest result for API responses.`
+- **Thin community `Community 184`** (1 nodes): `Update a watchlist item.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 185`** (1 nodes): `Serialised trading signal for API responses.`
+- **Thin community `Community 185`** (1 nodes): `Buy an asset from watchlist into a portfolio.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 186`** (1 nodes): `Create or update a strategy rating.`
+- **Thin community `Community 186`** (1 nodes): `Single data point in a portfolio performance time series.      Attributes:`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 187`** (1 nodes): `Serialised strategy rating for API responses.`
+- **Thin community `Community 187`** (1 nodes): `Create a new trading strategy.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 188`** (1 nodes): `Aggregate statistics for a strategy.`
+- **Thin community `Community 188`** (1 nodes): `Serialised strategy for API responses.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 189`** (1 nodes): `Strategy listing for the marketplace browse endpoint.`
+- **Thin community `Community 189`** (1 nodes): `Partial update payload for a strategy.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 190`** (1 nodes): `Queue backtests for multiple symbols.`
+- **Thin community `Community 190`** (1 nodes): `Queue a backtest job.      Accepts either ``strategy_id`` (UUID) or ``strategy`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 191`** (1 nodes): `Serialised in-app notification.`
+- **Thin community `Community 191`** (1 nodes): `Performance metrics from a completed backtest.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 192`** (1 nodes): `Paginated notifications wrapper.`
+- **Thin community `Community 192`** (1 nodes): `Serialised backtest result for API responses.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 193`** (1 nodes): `Payload to register a new webhook URL.`
+- **Thin community `Community 193`** (1 nodes): `Serialised trading signal for API responses.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 194`** (1 nodes): `Serialised webhook returned by the API.`
+- **Thin community `Community 194`** (1 nodes): `Create or update a strategy rating.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 195`** (1 nodes): `Partial update payload for a webhook.`
+- **Thin community `Community 195`** (1 nodes): `Serialised strategy rating for API responses.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 196`** (1 nodes): `Payload to create a new price alert.`
+- **Thin community `Community 196`** (1 nodes): `Aggregate statistics for a strategy.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 197`** (1 nodes): `Serialised price alert.`
+- **Thin community `Community 197`** (1 nodes): `Strategy listing for the marketplace browse endpoint.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 198`** (1 nodes): `Payload to update an existing price alert.`
+- **Thin community `Community 198`** (1 nodes): `Queue backtests for multiple symbols.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 199`** (1 nodes): `Input for the market regime detection endpoint.`
+- **Thin community `Community 199`** (1 nodes): `Serialised in-app notification.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 200`** (1 nodes): `Market regime detection result.`
+- **Thin community `Community 200`** (1 nodes): `Paginated notifications wrapper.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 201`** (1 nodes): `PineScript syntax validation request.`
+- **Thin community `Community 201`** (1 nodes): `Payload to register a new webhook URL.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 202`** (1 nodes): `PineScript syntax validation result.`
+- **Thin community `Community 202`** (1 nodes): `Serialised webhook returned by the API.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 203`** (1 nodes): `PineScript transpilation request — creates a strategy from PineScript code.`
+- **Thin community `Community 203`** (1 nodes): `Partial update payload for a webhook.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 204`** (1 nodes): `Transpilation result with compiled IR and strategy metadata.`
+- **Thin community `Community 204`** (1 nodes): `Payload to create a new price alert.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 205`** (1 nodes): `A single version in the strategy version history.`
+- **Thin community `Community 205`** (1 nodes): `Serialised price alert.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 206`** (1 nodes): `Create a composed strategy from indicator nodes and expressions.`
+- **Thin community `Community 206`** (1 nodes): `Payload to update an existing price alert.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 207`** (1 nodes): `Start a new paper trade.`
+- **Thin community `Community 207`** (1 nodes): `Input for the market regime detection endpoint.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 208`** (1 nodes): `Fields allowed for paper trade edits (capital and strategy parameters).`
+- **Thin community `Community 208`** (1 nodes): `Market regime detection result.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 209`** (1 nodes): `Serialised paper trade.`
+- **Thin community `Community 209`** (1 nodes): `PineScript syntax validation request.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 210`** (1 nodes): `Serialised paper trade position.`
+- **Thin community `Community 210`** (1 nodes): `PineScript syntax validation result.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 211`** (1 nodes): `Serialised equity snapshot.`
+- **Thin community `Community 211`** (1 nodes): `PineScript transpilation request — creates a strategy from PineScript code.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 212`** (1 nodes): `Request to score a set of positions.      The caller supplies up to 30 ticker`
+- **Thin community `Community 212`** (1 nodes): `Transpilation result with compiled IR and strategy metadata.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 213`** (1 nodes): `Analysis result for a single position.      Combines technical indicators (tre`
+- **Thin community `Community 213`** (1 nodes): `A single version in the strategy version history.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 214`** (1 nodes): `Aggregated portfolio scoring response.      Contains per-position analysis and`
+- **Thin community `Community 214`** (1 nodes): `Create a composed strategy from indicator nodes and expressions.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 215`** (1 nodes): `Fundamental data for a single security.      Aggregates company info, valuatio`
+- **Thin community `Community 215`** (1 nodes): `Start a new paper trade.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 216`** (1 nodes): `Request for exit point analysis on a single symbol.`
+- **Thin community `Community 216`** (1 nodes): `Fields allowed for paper trade edits (capital and strategy parameters).`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 217`** (1 nodes): `Single price level with type and rationale.`
+- **Thin community `Community 217`** (1 nodes): `Serialised paper trade.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 218`** (1 nodes): `Comprehensive exit analysis for a symbol.`
+- **Thin community `Community 218`** (1 nodes): `Serialised paper trade position.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 219`** (1 nodes): `Single sector ETF performance snapshot.      Attributes:         symbol:`
+- **Thin community `Community 219`** (1 nodes): `Serialised equity snapshot.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 220`** (1 nodes): `Sector performance overview — list of sector ETF snapshots.`
+- **Thin community `Community 220`** (1 nodes): `Request to score a set of positions.      The caller supplies up to 30 ticker`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 221`** (1 nodes): `Single stock in screener results.      Attributes:         symbol:     Ticker`
+- **Thin community `Community 221`** (1 nodes): `Analysis result for a single position.      Combines technical indicators (tre`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 222`** (1 nodes): `Stock screener results with filter metadata.`
+- **Thin community `Community 222`** (1 nodes): `Aggregated portfolio scoring response.      Contains per-position analysis and`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 223`** (1 nodes): `Registered platform user.`
+- **Thin community `Community 223`** (1 nodes): `Fundamental data for a single security.      Aggregates company info, valuatio`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 224`** (1 nodes): `Brokerage account owned by a user.`
+- **Thin community `Community 224`** (1 nodes): `Request for exit point analysis on a single symbol.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 225`** (1 nodes): `Monetary transaction (deposit/withdrawal) on an account.`
+- **Thin community `Community 225`** (1 nodes): `Single price level with type and rationale.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 226`** (1 nodes): `Tradeable security (stock, ETF, etc.).`
+- **Thin community `Community 226`** (1 nodes): `Comprehensive exit analysis for a symbol.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 227`** (1 nodes): `Position in a security held within an account.`
+- **Thin community `Community 227`** (1 nodes): `Single sector ETF performance snapshot.      Attributes:         symbol:`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 228`** (1 nodes): `Buy/sell order placed against an account.`
+- **Thin community `Community 228`** (1 nodes): `Sector performance overview — list of sector ETF snapshots.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 229`** (1 nodes): `One-time password reset token linked to a user.`
+- **Thin community `Community 229`** (1 nodes): `Single stock in screener results.      Attributes:         symbol:     Ticker`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 230`** (1 nodes): `Long-lived refresh token linked to a user session (P6.3).      The raw token v`
+- **Thin community `Community 230`** (1 nodes): `Stock screener results with filter metadata.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 231`** (1 nodes): `One-time token for email verification, email changes, reactivation,     and del`
+- **Thin community `Community 231`** (1 nodes): `Registered platform user.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 232`** (1 nodes): `User-submitted bug report or feature suggestion.`
+- **Thin community `Community 232`** (1 nodes): `Brokerage account owned by a user.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 233`** (1 nodes): `Named portfolio owned by a user for tracking custom positions.`
+- **Thin community `Community 233`** (1 nodes): `Monetary transaction (deposit/withdrawal) on an account.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 234`** (1 nodes): `A single holding within a Portfolio.`
+- **Thin community `Community 234`** (1 nodes): `Tradeable security (stock, ETF, etc.).`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 235`** (1 nodes): `Immutable audit trail for all user-initiated actions.`
+- **Thin community `Community 235`** (1 nodes): `Position in a security held within an account.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 236`** (1 nodes): `Saved chart template with drawings and overlay configuration.`
+- **Thin community `Community 236`** (1 nodes): `Buy/sell order placed against an account.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 237`** (1 nodes): `Pre-scored news article ingested by the background LLM worker.      Articles a`
+- **Thin community `Community 237`** (1 nodes): `One-time password reset token linked to a user.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 238`** (1 nodes): `Per-ticker impact score for a news article.      Junction table linking news_a`
+- **Thin community `Community 238`** (1 nodes): `Long-lived refresh token linked to a user session (P6.3).      The raw token v`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 239`** (1 nodes): `Recorded outcome comparing an LLM prediction against actual price movement.`
+- **Thin community `Community 239`** (1 nodes): `One-time token for email verification, email changes, reactivation,     and del`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 240`** (1 nodes): `Versioned set of calibration rules generated by the learner.      Only one rul`
+- **Thin community `Community 240`** (1 nodes): `User-submitted bug report or feature suggestion.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 241`** (1 nodes): `Named watchlist owned by a user for tracking assets without positions.`
+- **Thin community `Community 241`** (1 nodes): `Named portfolio owned by a user for tracking custom positions.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 242`** (1 nodes): `A single asset tracked within a Watchlist.`
+- **Thin community `Community 242`** (1 nodes): `A single holding within a Portfolio.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 243`** (1 nodes): `Trading strategy definition (user-created, system built-in, or AI-learned).`
+- **Thin community `Community 243`** (1 nodes): `Immutable audit trail for all user-initiated actions.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 244`** (1 nodes): `Immutable snapshot of a strategy definition at a specific version.`
+- **Thin community `Community 244`** (1 nodes): `Saved chart template with drawings and overlay configuration.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 245`** (1 nodes): `Queued or completed backtest job with full results and metrics.`
+- **Thin community `Community 245`** (1 nodes): `Pre-scored news article ingested by the background LLM worker.      Articles a`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 246`** (1 nodes): `Forward-looking entry/exit/stop-loss signal generated by a strategy.`
+- **Thin community `Community 246`** (1 nodes): `Per-ticker impact score for a news article.      Junction table linking news_a`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 247`** (1 nodes): `User rating (1–5 stars) and optional review for a public strategy.`
+- **Thin community `Community 247`** (1 nodes): `Recorded outcome comparing an LLM prediction against actual price movement.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 248`** (1 nodes): `Tracks when a user clones a strategy from the marketplace.`
+- **Thin community `Community 248`** (1 nodes): `Versioned set of calibration rules generated by the learner.      Only one rul`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 249`** (1 nodes): `User-defined price alert. Triggers a notification when the target     price con`
+- **Thin community `Community 249`** (1 nodes): `Named watchlist owned by a user for tracking assets without positions.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 250`** (1 nodes): `In-app notification delivered to a user (signal alerts, backtest results, etc.).`
+- **Thin community `Community 250`** (1 nodes): `A single asset tracked within a Watchlist.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 251`** (1 nodes): `User-configured webhook URL for outbound notification delivery.`
+- **Thin community `Community 251`** (1 nodes): `Trading strategy definition (user-created, system built-in, or AI-learned).`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 252`** (1 nodes): `Virtual paper trading session tracking simulated positions and equity.`
+- **Thin community `Community 252`** (1 nodes): `Immutable snapshot of a strategy definition at a specific version.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 253`** (1 nodes): `Individual position (open or closed) within a paper trade session.`
+- **Thin community `Community 253`** (1 nodes): `Queued or completed backtest job with full results and metrics.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 254`** (1 nodes): `Point-in-time equity snapshot for charting paper trade performance.`
+- **Thin community `Community 254`** (1 nodes): `Forward-looking entry/exit/stop-loss signal generated by a strategy.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 255`** (1 nodes): `Schema for a user question submitted to the guide endpoint.      Attributes:`
+- **Thin community `Community 255`** (1 nodes): `User rating (1–5 stars) and optional review for a public strategy.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 256`** (1 nodes): `Schema for the guide endpoint response.      Attributes:         answer: The LLM`
+- **Thin community `Community 256`** (1 nodes): `Tracks when a user clones a strategy from the marketplace.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 257`** (1 nodes): `Submit a question to the TickerTap AI guide.      Proxies the question to the Ol`
+- **Thin community `Community 257`** (1 nodes): `User-defined price alert. Triggers a notification when the target     price con`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 258`** (1 nodes): `In-app notification delivered to a user (signal alerts, backtest results, etc.).`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 259`** (1 nodes): `User-configured webhook URL for outbound notification delivery.`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 260`** (1 nodes): `Virtual paper trading session tracking simulated positions and equity.`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 261`** (1 nodes): `Individual position (open or closed) within a paper trade session.`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 262`** (1 nodes): `Point-in-time equity snapshot for charting paper trade performance.`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 263`** (1 nodes): `Schema for a user question submitted to the guide endpoint.      Attributes:`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 264`** (1 nodes): `Schema for the guide endpoint response.      Attributes:         answer: The LLM`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 265`** (1 nodes): `Submit a question to the TickerTap AI guide.      Proxies the question to the Ol`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `PineScript Parser & Transpiler — converts PineScript source to executable strat` connect `Community 1` to `Community 2`, `Community 5`, `Community 6`, `Community 9`, `Community 10`, `Community 12`?**
-  _High betweenness centrality (0.092) - this node is a cross-community bridge._
-- **Why does `LLMTranspileError` connect `Community 2` to `Community 1`, `Community 10`, `Community 3`?**
-  _High betweenness centrality (0.077) - this node is a cross-community bridge._
+- **Why does `PineScript Parser & Transpiler — converts PineScript source to executable strat` connect `Community 1` to `Community 0`, `Community 7`, `Community 9`, `Community 10`, `Community 12`, `Community 13`?**
+  _High betweenness centrality (0.113) - this node is a cross-community bridge._
 - **Why does `RuleContext` connect `Community 1` to `Community 4`?**
-  _High betweenness centrality (0.073) - this node is a cross-community bridge._
+  _High betweenness centrality (0.098) - this node is a cross-community bridge._
+- **Why does `LLMTranspileError` connect `Community 0` to `Community 1`, `Community 4`, `Community 15`?**
+  _High betweenness centrality (0.081) - this node is a cross-community bridge._
 - **Are the 222 inferred relationships involving `User` (e.g. with `TestPasswordHashing` and `TestJwtUtilities`) actually correct?**
   _`User` has 222 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 178 inferred relationships involving `AuditLog` (e.g. with `WorkerSettings` and `Trading Worker — arq background worker for async backtest execution.  Runs as a`) actually correct?**
   _`AuditLog` has 178 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 152 inferred relationships involving `Strategy` (e.g. with `SecurityHeadersMiddleware` and `RequestBodySizeMiddleware`) actually correct?**
-  _`Strategy` has 152 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 160 inferred relationships involving `Strategy` (e.g. with `SecurityHeadersMiddleware` and `RequestBodySizeMiddleware`) actually correct?**
+  _`Strategy` has 160 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 136 inferred relationships involving `Notification` (e.g. with `WorkerSettings` and `alert_worker.py — arq background worker for evaluating price alerts.  Polls acti`) actually correct?**
   _`Notification` has 136 INFERRED edges - model-reasoned connections that need verification._
