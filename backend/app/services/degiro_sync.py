@@ -1,28 +1,30 @@
-"""degiro_sync.py — arq job: sync DeGiro portfolio positions.
+"""degiro_sync.py — arq job: sync DeGiro portfolio positions via direct API calls.
 
-Reads credentials from environment variables only. Never logs credential values.
-Upserts positions tagged group_tag='DEGIRO_SYNC' — other positions untouched.
-Removes stale DEGIRO_SYNC positions (fully sold in DeGiro) after each sync.
-
-Run manually via POST /api/v1/degiro/sync or automatically via daily cron at 02:00.
+Uses httpx (already in requirements) to call DeGiro's internal HTTPS API.
+No third-party DeGiro library — avoids pydantic v2 dep conflict.
+Credentials come exclusively from environment variables. Never logged.
 
 Required env vars:
     DEGIRO_USERNAME      DeGiro account email
     DEGIRO_PASSWORD      DeGiro account password
     DEGIRO_TOTP_SECRET   Base32 TOTP secret (from authenticator app setup)
     DEGIRO_INT_ACCOUNT   Integer account ID (fetched automatically if missing)
-    DEGIRO_PORTFOLIO_ID  UUID of portfolio to sync into
+    DEGIRO_PORTFOLIO_ID  UUID of the portfolio to sync into
+
+Upserts positions tagged group_tag='DEGIRO_SYNC'. All other positions untouched.
+Removes stale DEGIRO_SYNC positions (fully sold in DeGiro) after each sync.
 """
 
 from __future__ import annotations
 
-import asyncio
 import os
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
+import httpx
+import pyotp
 import structlog
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -43,20 +45,93 @@ _engine = create_async_engine(
 )
 _SessionLocal = sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
 
+_BASE = "https://trader.degiro.com"
+
 
 def _map_product_type(product_type: str | None) -> str:
     if not product_type:
         return "stock"
-    pt = product_type.upper()
-    if pt == "ETF":
-        return "etf"
-    return "stock"
+    return "etf" if str(product_type).upper() == "ETF" else "stock"
 
 
-async def _run_sync(api: Any, fn, *args, **kwargs):
-    """Run a synchronous degiro-connector call in a thread executor."""
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, lambda: fn(*args, **kwargs))
+async def _login(
+    client: httpx.AsyncClient,
+    username: str,
+    password: str,
+    totp_secret: str | None,
+) -> str | None:
+    """Login to DeGiro and return sessionId, or None on failure."""
+    resp = await client.post(
+        f"{_BASE}/login/secure/login",
+        json={
+            "username": username,
+            "password": password,
+            "isPassCodeReset": False,
+            "isRedirectToMobile": False,
+        },
+    )
+    resp.raise_for_status()
+    body = resp.json()
+
+    session_id: str | None = resp.cookies.get("JSESSIONID") or (
+        body.get("data") or {}
+    ).get("sessionId")
+
+    if not session_id:
+        return None
+
+    # Send TOTP if configured — completes 2FA regardless of status code
+    if totp_secret:
+        otp_code = int(pyotp.TOTP(totp_secret).now())
+        totp_resp = await client.post(
+            f"{_BASE}/login/secure/login/totp",
+            json={"oneTimePassword": otp_code},
+            cookies={"JSESSIONID": session_id},
+        )
+        totp_resp.raise_for_status()
+        totp_body = totp_resp.json()
+        session_id = (
+            totp_resp.cookies.get("JSESSIONID")
+            or (totp_body.get("data") or {}).get("sessionId")
+            or session_id
+        )
+
+    return session_id
+
+
+async def _get_int_account(client: httpx.AsyncClient, session_id: str) -> int | None:
+    resp = await client.get(
+        f"{_BASE}/pa/secure/client",
+        params={"sessionId": session_id},
+    )
+    resp.raise_for_status()
+    return (resp.json().get("data") or {}).get("intAccount")
+
+
+async def _get_portfolio(
+    client: httpx.AsyncClient, session_id: str, int_account: int
+) -> list[dict[str, Any]]:
+    resp = await client.get(
+        f"{_BASE}/trading/secure/v5/update/{int_account};jsessionid={session_id}",
+        params={"portfolio": 0},
+    )
+    resp.raise_for_status()
+    return (resp.json().get("portfolio") or {}).get("value") or []
+
+
+async def _get_products_info(
+    client: httpx.AsyncClient,
+    session_id: str,
+    int_account: int,
+    product_ids: list[int],
+) -> dict[str, Any]:
+    resp = await client.post(
+        f"{_BASE}/product_search/secure/v5/products/info",
+        params={"intAccount": int_account, "sessionId": session_id},
+        json=product_ids,
+    )
+    resp.raise_for_status()
+    return resp.json().get("data") or {}
 
 
 async def sync_degiro_portfolio(ctx: dict) -> dict:
@@ -71,100 +146,83 @@ async def sync_degiro_portfolio(ctx: dict) -> dict:
 
     if not (username and password and portfolio_id_str):
         log.warning("degiro_sync_skipped", reason="env vars not configured")
-        return {"status": "skipped", "reason": "DEGIRO_USERNAME/DEGIRO_PASSWORD/DEGIRO_PORTFOLIO_ID not set"}
+        return {
+            "status": "skipped",
+            "reason": "DEGIRO_USERNAME / DEGIRO_PASSWORD / DEGIRO_PORTFOLIO_ID not set",
+        }
 
     try:
         portfolio_id = uuid.UUID(portfolio_id_str)
     except ValueError:
-        log.error("degiro_sync_error", reason="invalid DEGIRO_PORTFOLIO_ID uuid")
-        return {"status": "error", "reason": "invalid DEGIRO_PORTFOLIO_ID"}
+        log.error("degiro_sync_error", reason="invalid DEGIRO_PORTFOLIO_ID")
+        return {"status": "error", "reason": "DEGIRO_PORTFOLIO_ID is not a valid UUID"}
 
-    # Import here to avoid hard dep when env not configured
-    from degiro_connector.trading.api import API as TradingAPI
-    from degiro_connector.trading.models.credentials import Credentials
-    from degiro_connector.trading.models.account import UpdateOption, UpdateRequest
+    try:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            log.info("degiro_connecting")
+            session_id = await _login(client, username, password, totp_secret)
+            if not session_id:
+                log.error("degiro_login_failed")
+                return {"status": "error", "reason": "login failed — check credentials"}
 
-    cred_kwargs: dict[str, Any] = {"username": username, "password": password}
-    if totp_secret:
-        cred_kwargs["totp_secret_key"] = totp_secret
-    if int_account_env:
-        cred_kwargs["int_account"] = int(int_account_env)
+            int_account = (
+                int(int_account_env)
+                if int_account_env
+                else await _get_int_account(client, session_id)
+            )
+            if not int_account:
+                log.error("degiro_sync_error", reason="could not resolve int_account")
+                return {"status": "error", "reason": "could not resolve int_account"}
 
-    credentials = Credentials(**cred_kwargs)
-    api = TradingAPI(credentials=credentials)
+            log.info("degiro_fetching_portfolio", int_account=int_account)
+            positions_raw = await _get_portfolio(client, session_id, int_account)
+            product_positions = [
+                p for p in positions_raw
+                if p.get("positionType") == "PRODUCT" and (p.get("size") or 0) > 0
+            ]
 
-    log.info("degiro_connecting")
-    connect_result = await _run_sync(api, api.connect)
-    if connect_result is None and not getattr(api, "session_id", None):
-        log.error("degiro_connect_failed")
-        return {"status": "error", "reason": "DeGiro connect failed — check credentials"}
+            if not product_positions:
+                log.info("degiro_sync_empty")
+                return {"status": "ok", "synced": 0, "deleted": 0}
 
-    # Resolve int_account if not provided
-    if not int_account_env:
-        details = await _run_sync(api, api.get_client_details)
-        if not details:
-            log.error("degiro_sync_error", reason="get_client_details returned None")
-            return {"status": "error", "reason": "could not fetch int_account"}
-        api.credentials.int_account = details["data"]["intAccount"]
-        log.info("degiro_int_account_resolved")
+            product_ids = [p["id"] for p in product_positions]
+            products_map = await _get_products_info(
+                client, session_id, int_account, product_ids
+            )
 
-    # Fetch portfolio
-    account_update = await _run_sync(
-        api,
-        api.get_update,
-        request_list=[UpdateRequest(option=UpdateOption.PORTFOLIO, last_updated=0)],
-        raw=True,
-    )
-    if account_update is None:
-        log.error("degiro_sync_error", reason="get_update returned None")
-        return {"status": "error", "reason": "get_update returned None"}
-
-    portfolio_data = account_update.get("portfolio") or {}
-    positions_raw = [
-        p for p in (portfolio_data.get("value") or [])
-        if p.get("positionType") == "PRODUCT" and p.get("size", 0) > 0
-    ]
-
-    if not positions_raw:
-        log.info("degiro_sync_empty")
-        return {"status": "ok", "synced": 0, "deleted": 0}
-
-    # Resolve product IDs → metadata
-    product_ids = [p["id"] for p in positions_raw]
-    products_resp = await _run_sync(api, api.get_products_info, product_list=product_ids, raw=False)
-    if products_resp is None:
-        log.error("degiro_sync_error", reason="get_products_info returned None")
-        return {"status": "error", "reason": "get_products_info returned None"}
-
-    products_map: dict[int, Any] = products_resp.data or {}
+    except httpx.HTTPStatusError as exc:
+        log.error("degiro_http_error", status=exc.response.status_code)
+        return {"status": "error", "reason": f"HTTP {exc.response.status_code}"}
+    except httpx.RequestError as exc:
+        log.error("degiro_request_error", error=type(exc).__name__)
+        return {"status": "error", "reason": f"request error: {type(exc).__name__}"}
 
     synced = 0
     skipped = 0
     current_isins: set[str] = set()
 
     async with _SessionLocal() as db:
-        for raw_pos in positions_raw:
-            product = products_map.get(raw_pos["id"])
-            if not product or not getattr(product, "isin", None):
+        for raw_pos in product_positions:
+            product = products_map.get(str(raw_pos["id"]))
+            if not product or not product.get("isin"):
                 skipped += 1
-                log.debug("degiro_position_skipped", product_id=raw_pos["id"])
                 continue
 
-            isin: str = product.isin
+            isin: str = product["isin"]
             current_isins.add(isin)
 
-            quantity = Decimal(str(raw_pos.get("size", 0)))
+            quantity = Decimal(str(raw_pos.get("size") or 0))
             if quantity <= 0:
                 skipped += 1
                 continue
 
-            break_even = raw_pos.get("breakEvenPrice") or raw_pos.get("price") or 0
-            avg_price = Decimal(str(break_even))
-
-            symbol = getattr(product, "symbol", None) or ""
-            ticker = (symbol[:20] if symbol else isin[:20])
-            name = (getattr(product, "name", None) or isin)[:256]
-            asset_type = _map_product_type(getattr(product, "product_type", None))
+            avg_price = Decimal(
+                str(raw_pos.get("breakEvenPrice") or raw_pos.get("price") or 0)
+            )
+            symbol: str = product.get("symbol") or ""
+            ticker = symbol[:20] if symbol else isin[:20]
+            name = (product.get("name") or isin)[:256]
+            asset_type = _map_product_type(product.get("productType"))
 
             result = await db.execute(
                 select(PortfolioPosition).where(
@@ -198,7 +256,7 @@ async def sync_degiro_portfolio(ctx: dict) -> dict:
                 )
             synced += 1
 
-        # Remove stale DEGIRO_SYNC positions no longer in DeGiro
+        # Remove stale DEGIRO_SYNC positions no longer held in DeGiro
         delete_result = await db.execute(
             delete(PortfolioPosition)
             .where(
@@ -209,7 +267,6 @@ async def sync_degiro_portfolio(ctx: dict) -> dict:
             .returning(PortfolioPosition.position_id)
         )
         deleted = len(delete_result.fetchall())
-
         await db.commit()
 
     log.info("degiro_sync_complete", synced=synced, skipped=skipped, deleted=deleted)
