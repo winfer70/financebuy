@@ -46,6 +46,7 @@ from .routes import (
     guide,
     holdings,
     import_routes,
+    internal_portfolio,
     market,
     metrics as metrics_routes,
     news,
@@ -347,6 +348,7 @@ app.include_router(alerts.router, prefix=_V1)
 app.include_router(import_routes.router, prefix=_V1)
 app.include_router(scanner.router, prefix=_V1)
 app.include_router(metrics_routes.router, prefix=_V1)
+app.include_router(internal_portfolio.router, prefix=_V1)
 
 # Register the 30-day news retention cleanup background task (Phase 9).
 register_retention_task(app)
