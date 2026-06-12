@@ -89,32 +89,22 @@ async def _login(
     ).get("sessionId")
     login_status = body.get("status")
 
-    # status=6 means TOTP required — re-POST to same login endpoint with OTP included
+    # status=6 means TOTP required — call /login/totp with oneTimePassword (int)
     if login_status == 6 and totp_secret:
         otp_code = int(pyotp.TOTP(totp_secret).now())
         logger.info("degiro_totp_sending", otp_code=otp_code)
         totp_resp = await client.post(
-            f"{_BASE}/login/secure/login",
-            follow_redirects=True,
-            json={
-                "username": username,
-                "password": password,
-                "isPassCodeReset": False,
-                "isRedirectToMobile": False,
-                "oneTimePassword": otp_code,
-            },
+            f"{_BASE}/login/secure/login/totp",
+            json={"oneTimePassword": otp_code},
         )
         logger.info(
             "degiro_totp_result",
             status=totp_resp.status_code,
             cookie_keys=list(totp_resp.cookies.keys()),
-            got_session=bool(
-                totp_resp.cookies.get("JSESSIONID")
-                or (totp_resp.json().get("data") or {}).get("sessionId")
-                if totp_resp.text else False
-            ),
         )
-        totp_resp.raise_for_status()
+        if not totp_resp.is_success:
+            logger.info("degiro_totp_error", status=totp_resp.status_code, body=totp_resp.text[:300])
+            totp_resp.raise_for_status()
         totp_body = totp_resp.json() if totp_resp.text else {}
         session_id = (
             totp_resp.cookies.get("JSESSIONID")
