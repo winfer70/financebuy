@@ -95,7 +95,7 @@ async def _login(
         logger.info("degiro_totp_sending", otp_code=otp_code)
         totp_resp = await client.post(
             f"{_BASE}/login/secure/login/totp",
-            json={"oneTimePassword": otp_code},
+            json={"oneTimePassword": otp_code, "username": username},
         )
         logger.info(
             "degiro_totp_result",
