@@ -102,16 +102,23 @@ async def _login(
             totp_kwargs["cookies"] = {"JSESSIONID": session_id}
         totp_resp = await client.post(
             f"{_BASE}/login/secure/login/totp",
+            follow_redirects=False,  # session cookie is on the 302, not the destination
             **totp_kwargs,
         )
-        if not totp_resp.is_success:
+        logger.info(
+            "degiro_totp_response",
+            status=totp_resp.status_code,
+            cookie_keys=list(totp_resp.cookies.keys()),
+            location=totp_resp.headers.get("location", ""),
+        )
+        if not totp_resp.is_success and totp_resp.status_code not in (301, 302, 303, 307, 308):
             logger.info(
                 "degiro_totp_error",
                 status=totp_resp.status_code,
                 body=totp_resp.text[:300],
                 cookie_keys=list(totp_resp.cookies.keys()),
             )
-        totp_resp.raise_for_status()
+            totp_resp.raise_for_status()
         totp_body = totp_resp.json()
         session_id = (
             totp_resp.cookies.get("JSESSIONID")
