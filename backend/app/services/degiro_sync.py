@@ -176,15 +176,27 @@ async def _get_transactions(
     from_date: date,
     to_date: date,
 ) -> list[dict[str, Any]]:
-    resp = await client.get(
-        f"{_BASE}/account/secure/v5/transactions;jsessionid={session_id}",
-        params={
-            "fromDate": from_date.strftime("%d/%m/%Y"),
-            "toDate": to_date.strftime("%d/%m/%Y"),
-            "intAccount": int_account,
-        },
-    )
-    resp.raise_for_status()
+    # Use a separate client with follow_redirects=True — the account endpoint
+    # returns 302 when sessionId is passed as a query param; jsessionid in path
+    # also redirects in some deployments. Follow through to the final destination.
+    async with httpx.AsyncClient(
+        timeout=30.0,
+        follow_redirects=True,
+        headers=client.headers,
+        cookies=client.cookies,
+    ) as tx_client:
+        resp = await tx_client.get(
+            f"{_BASE}/account/secure/v5/transactions",
+            params={
+                "fromDate": from_date.strftime("%d/%m/%Y"),
+                "toDate": to_date.strftime("%d/%m/%Y"),
+                "intAccount": int_account,
+                "sessionId": session_id,
+            },
+        )
+    logger.info("degiro_transactions_response", status=resp.status_code, url=str(resp.url))
+    if not resp.is_success:
+        resp.raise_for_status()
     return resp.json().get("data") or []
 
 
