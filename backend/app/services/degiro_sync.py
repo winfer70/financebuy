@@ -155,7 +155,7 @@ async def sync_degiro_portfolio(ctx: dict) -> dict:
         return {"status": "error", "reason": "DEGIRO_PORTFOLIO_ID is not a valid UUID"}
 
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             log.info("degiro_connecting")
             session_id = await _login(client, username, password, totp_secret)
             if not session_id:
