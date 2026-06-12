@@ -76,6 +76,9 @@ async def _login(
         body_keys=list(body.keys()),
         data_keys=list((body.get("data") or {}).keys()),
         cookie_keys=list(resp.cookies.keys()),
+        captcha_required=body.get("captchaRequired"),
+        login_status=body.get("status"),
+        login_status_text=body.get("statusText"),
     )
 
     session_id: str | None = resp.cookies.get("JSESSIONID") or (
@@ -148,8 +151,17 @@ async def sync_degiro_portfolio(ctx: dict) -> dict:
     totp_secret = os.getenv("DEGIRO_TOTP_SECRET")
     int_account_env = os.getenv("DEGIRO_INT_ACCOUNT")
     portfolio_id_str = os.getenv("DEGIRO_PORTFOLIO_ID")
+    session_id_env = os.getenv("DEGIRO_SESSION_ID")
 
-    if not (username and password and portfolio_id_str):
+    if not (portfolio_id_str):
+        log.warning("degiro_sync_skipped", reason="env vars not configured")
+        return {
+            "status": "skipped",
+            "reason": "DEGIRO_PORTFOLIO_ID not set",
+        }
+
+    session_id_env = os.getenv("DEGIRO_SESSION_ID")
+    if not session_id_env and not (username and password):
         log.warning("degiro_sync_skipped", reason="env vars not configured")
         return {
             "status": "skipped",
@@ -177,7 +189,11 @@ async def sync_degiro_portfolio(ctx: dict) -> dict:
         }
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, headers=headers) as client:
             log.info("degiro_connecting")
-            session_id = await _login(client, username, password, totp_secret)
+            if session_id_env:
+                session_id = session_id_env
+                log.info("degiro_using_env_session")
+            else:
+                session_id = await _login(client, username, password, totp_secret)
             if not session_id:
                 log.error("degiro_login_failed")
                 return {"status": "error", "reason": "login failed — check credentials"}
