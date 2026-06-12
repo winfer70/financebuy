@@ -1874,14 +1874,9 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
                       COLUMNS ▾
                     </button>
                     {showColPicker && (
-                      <div style={{
-                        position: "absolute", top: "100%", right: 0, zIndex: 100,
-                        background: "var(--panel)", border: "1px solid var(--border)",
-                        padding: "8px 12px", minWidth: 140, display: "flex", flexDirection: "column", gap: 6,
-                        boxShadow: "0 4px 16px rgba(0,0,0,.4)",
-                      }}>
+                      <div className="col-picker-popover">
                         {OPTIONAL_COLS.map(({ id, label }) => (
-                          <label key={id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, fontFamily: "var(--font-mono)", cursor: "pointer", color: "var(--c-text)" }}>
+                          <label key={id}>
                             <input
                               type="checkbox"
                               checked={visibleCols.has(id)}
@@ -1904,7 +1899,7 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
                 onRefresh={() => { setQuotesStale(false); loadQuotes(positions); }}
               />
             )}
-            <div className="table-responsive" style={{ overflow: "auto", maxHeight: "calc(100vh - 320px)" }}>
+            <div className="table-responsive" style={{ overflow: "auto", maxHeight: "calc(100vh - 320px)", position: "relative", zIndex: 1 }}>
               <table className="data-table">
                 <thead>
                   <tr>
