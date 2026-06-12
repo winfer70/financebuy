@@ -70,6 +70,14 @@ async def _login(
     resp.raise_for_status()
     body = resp.json()
 
+    logger.info(
+        "degiro_login_response",
+        status=resp.status_code,
+        body_keys=list(body.keys()),
+        data_keys=list((body.get("data") or {}).keys()),
+        cookie_keys=list(resp.cookies.keys()),
+    )
+
     session_id: str | None = resp.cookies.get("JSESSIONID") or (
         body.get("data") or {}
     ).get("sessionId")
