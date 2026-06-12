@@ -2,6 +2,7 @@
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 revision = "0028"
 down_revision = "0027"
@@ -15,7 +16,7 @@ def upgrade() -> None:
         sa.Column("transaction_id", sa.BigInteger, primary_key=True),
         sa.Column(
             "portfolio_id",
-            sa.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True),
             sa.ForeignKey("portfolios.portfolio_id", ondelete="CASCADE"),
             nullable=False,
         ),
