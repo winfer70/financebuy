@@ -107,7 +107,15 @@ async def _login(
     return session_id
 
 
-async def _get_int_account(client: httpx.AsyncClient, session_id: str) -> int | None:
+def _flatten_position(raw: dict) -> dict:
+    """Convert DeGiro's [{name, value}] position structure to a flat dict."""
+    result = {}
+    for item in raw.get("value") or []:
+        result[item["name"]] = item.get("value")
+    return result
+
+
+
     resp = await client.get(
         f"{_BASE}/pa/secure/client",
         params={"sessionId": session_id},
@@ -209,8 +217,9 @@ async def sync_degiro_portfolio(ctx: dict) -> dict:
 
             log.info("degiro_fetching_portfolio")
             positions_raw = await _get_portfolio(client, session_id, int_account)
+            all_flat = [_flatten_position(p) for p in positions_raw]
             product_positions = [
-                p for p in positions_raw
+                p for p in all_flat
                 if p.get("positionType") == "PRODUCT" and (p.get("size") or 0) > 0
             ]
 
