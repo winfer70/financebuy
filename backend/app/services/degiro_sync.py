@@ -186,7 +186,7 @@ async def _get_transactions(
         cookies=client.cookies,
     ) as tx_client:
         resp = await tx_client.get(
-            f"{_BASE}/account/secure/v5/transactions",
+            "https://trader.degiro.nl/portfolio-reports/secure/v4/transactions",
             params={
                 "fromDate": from_date.strftime("%d/%m/%Y"),
                 "toDate": to_date.strftime("%d/%m/%Y"),
