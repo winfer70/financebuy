@@ -84,17 +84,22 @@ async def _login(
     session_id: str | None = resp.cookies.get("JSESSIONID") or (
         body.get("data") or {}
     ).get("sessionId")
+    login_status = body.get("status")
 
-    if not session_id:
+    # status=6 means TOTP required — server holds state, no session issued yet
+    totp_needed = login_status == 6
+    if not session_id and not totp_needed:
         return None
 
-    # Send TOTP if configured — completes 2FA regardless of status code
-    if totp_secret:
+    # Send TOTP if configured or required
+    if totp_secret and (totp_needed or session_id):
         otp_code = int(pyotp.TOTP(totp_secret).now())
+        totp_kwargs: dict = {"json": {"oneTimePassword": otp_code}}
+        if session_id:
+            totp_kwargs["cookies"] = {"JSESSIONID": session_id}
         totp_resp = await client.post(
             f"{_BASE}/login/secure/login/totp",
-            json={"oneTimePassword": otp_code},
-            cookies={"JSESSIONID": session_id},
+            **totp_kwargs,
         )
         totp_resp.raise_for_status()
         totp_body = totp_resp.json()
