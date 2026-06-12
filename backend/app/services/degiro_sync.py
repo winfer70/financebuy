@@ -115,7 +115,7 @@ def _flatten_position(raw: dict) -> dict:
     return result
 
 
-
+async def _get_int_account(client: httpx.AsyncClient, session_id: str) -> int | None:
     resp = await client.get(
         f"{_BASE}/pa/secure/client",
         params={"sessionId": session_id},
