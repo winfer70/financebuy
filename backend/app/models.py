@@ -394,6 +394,31 @@ class PortfolioTrade(Base):
     portfolio = relationship("Portfolio", back_populates="trades")
 
 
+class DegiroTransaction(Base):
+    """A single buy/sell transaction pulled from DeGiro account history."""
+
+    __tablename__ = "degiro_transactions"
+
+    transaction_id = Column(BigInteger, primary_key=True)
+    portfolio_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("portfolios.portfolio_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    date = Column(DateTime(timezone=True), nullable=False)
+    product_name = Column(Text, nullable=True)
+    isin = Column(String(12), nullable=True)
+    ticker = Column(String(20), nullable=True)
+    buysell = Column(String(1), nullable=True)
+    quantity = Column(Numeric(18, 6), nullable=True)
+    price = Column(Numeric(18, 4), nullable=True)
+    value = Column(Numeric(18, 4), nullable=True)
+    currency = Column(String(8), nullable=True)
+    total_in_base = Column(Numeric(18, 4), nullable=True)
+    fee_in_base = Column(Numeric(18, 4), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class AuditLog(Base):
     """Immutable audit trail for all user-initiated actions."""
 
