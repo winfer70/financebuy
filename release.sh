@@ -32,7 +32,7 @@ cd "$TARGET_DIR"
 echo "[3/6] Backing up postgres..."
 mkdir -p ./backups
 if docker ps -q -f name="$DB_CONTAINER" | grep -q .; then
-  docker compose exec -T "$DB_CONTAINER" pg_dump -U "$DB_USER" "$DB_NAME" \
+  docker compose --env-file .env.prod exec -T "$DB_CONTAINER" pg_dump -U "$DB_USER" "$DB_NAME" \
     > ./backups/backup_\$(date +%Y%m%d_%H%M%S).sql
   echo "Backup saved."
 else
@@ -43,11 +43,11 @@ echo "[4/6] Pulling code..."
 git fetch --tags && git checkout main && git pull origin main
 
 echo "[5/6] Rebuilding containers..."
-docker compose down && docker compose up -d --build
+docker compose --env-file .env.prod down && docker compose --env-file .env.prod up -d --build
 
 echo "[6/6] Running Alembic migrations..."
 sleep 4
-docker compose exec -T app alembic upgrade head
+docker compose --env-file .env.prod exec -T app alembic upgrade head
 echo "Migrations done."
 ENDSSH
 
