@@ -120,11 +120,18 @@ async def _login(
                 cookie_keys=list(totp_resp.cookies.keys()),
             )
             totp_resp.raise_for_status()
-        totp_body = totp_resp.json()
+        totp_body = totp_resp.json() if totp_resp.text else {}
         session_id = (
             totp_resp.cookies.get("JSESSIONID")
             or (totp_body.get("data") or {}).get("sessionId")
             or session_id
+        )
+        logger.info(
+            "degiro_totp_result",
+            status=totp_resp.status_code,
+            cookie_keys=list(totp_resp.cookies.keys()),
+            location=totp_resp.headers.get("location", ""),
+            got_session=bool(session_id),
         )
 
     return session_id
