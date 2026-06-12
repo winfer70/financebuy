@@ -8,19 +8,21 @@ NODE_IP="REDACTED"
 NODE_USER="REDACTED420"
 TARGET_DIR="/home/REDACTED420/projects/finance/tickerTap"
 INTEGRATION_BRANCH="tradingAI0.1"
-DB_CONTAINER="tickertap-db"
+DB_SERVICE="db"
 DB_NAME="tickertap"
 DB_USER="postgres"
 KUMA_PUSH_URL=""  # TODO: create Push monitor in REDACTED:3001, paste URL here
 
 # ── 1. Tag and push ──────────────────────────────────────────────────────────
 echo "[1/6] Merging $INTEGRATION_BRANCH -> main..."
+git stash push -- graphify-out/ 2>/dev/null || true
 git checkout main && git pull origin main
 git merge "$INTEGRATION_BRANCH" --no-edit
 VERSION="v$(date +%Y.%m.%d-%H%M)"
 git tag -a "$VERSION" -m "Release $VERSION"
 git push origin main --tags
 git checkout "$INTEGRATION_BRANCH"
+git stash pop 2>/dev/null || true
 echo "Tagged $VERSION"
 
 # ── 2-6. Remote deploy ───────────────────────────────────────────────────────
@@ -31,10 +33,9 @@ cd "$TARGET_DIR"
 
 echo "[3/6] Backing up postgres..."
 mkdir -p ./backups
-if docker ps -q -f name="$DB_CONTAINER" | grep -q .; then
-  docker compose --env-file .env.prod exec -T "$DB_CONTAINER" pg_dump -U "$DB_USER" "$DB_NAME" \
-    > ./backups/backup_\$(date +%Y%m%d_%H%M%S).sql
-  echo "Backup saved."
+if docker compose --env-file .env.prod ps -q "$DB_SERVICE" 2>/dev/null | grep -q .; then
+  docker compose --env-file .env.prod exec -T "$DB_SERVICE" pg_dump -U "$DB_USER" "$DB_NAME" \
+    > ./backups/backup_\$(date +%Y%m%d_%H%M%S).sql && echo "Backup saved." || echo "WARNING: Backup failed, continuing."
 else
   echo "WARNING: DB container not running, skipping backup."
 fi
