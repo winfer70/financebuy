@@ -149,3 +149,12 @@ GitHub Actions (`.github/workflows/ci.yml`): lint job (ruff + black), test job (
 - **Model changes**: Update `models.py`, create Alembic migration, run `alembic upgrade head`
 - **New dependencies**: Update `backend/requirements.txt`, rebuild Docker image, run in-container tests
 - **PR checklist**: Tests pass (`pytest -q`), lint clean (`ruff check . && black --check .`), migrations apply cleanly
+
+## graphify
+
+This project has a graphify knowledge graph at graphify-out/.
+
+Rules:
+- Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
+- If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
+- After modifying code files in this session, run `graphify update .` to keep the graph current (AST-only, no API cost)

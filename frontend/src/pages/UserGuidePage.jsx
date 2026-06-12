@@ -34,6 +34,10 @@ const FEATURES = [
       "Category filters on both Top Gainers and Biggest Losers panels",
       "Allocation donut chart showing portfolio composition by position — respects display currency symbol",
       "Instant load via stale-while-revalidate caching — fresh data updates in background",
+      "KPI cards strip showing key portfolio metrics at a glance",
+      "Asset Ribbon — proportional bar across the top showing portfolio weight by asset type (Stocks, Crypto, ETFs, Physical), colour-coded by day P&L intensity",
+      "Concentration chips highlighting over-weight positions as a quick risk summary",
+      "QuickSell drawer — click any position tile to open a right-edge slide-in drawer with ticker, quantity, and average cost; place a sell directly from the Dashboard",
     ],
   },
   {
@@ -58,6 +62,10 @@ const FEATURES = [
       "Allocation % column showing each position's weight as a percentage of total portfolio value",
       "Period Gain/Loss in the summary strip — shows portfolio-level gain/loss for the selected change period (1D through 1Y)",
       "Analyst price targets displayed when modifying a position — shows mean, high, and low consensus targets from market analysts",
+      "Trade History tab — view the complete buy and sell trade log for the portfolio with entry/exit prices, P&L per trade, and aggregate trade statistics",
+      "Delete individual trade records from the Trade History tab",
+      "Cash Balance Adjustment — click the cash adjustment button in the Portfolio Manager header to open a modal and manually add or subtract cash from the portfolio's cash balance",
+      "Detailed portfolio score with per-position P&L breakdown, concentration analysis, and diversification metrics",
     ],
   },
   {
@@ -198,6 +206,8 @@ const FEATURES = [
       "Buy directly from watchlist — picks portfolio and enters quantity in a modal",
       "Rename and delete watchlists with confirmation dialogs",
       "Performance since added column tracks asset movement from your watchlist entry price",
+      "Sortable columns — click any column header (Symbol, Name, Price, Change, Day Range, Since Added %, Notes) to sort the watchlist table ascending or descending",
+      "Stale data banner — a warning banner appears when price quotes are more than 5 minutes old, prompting a manual refresh",
     ],
   },
   {
@@ -246,6 +256,9 @@ const FEATURES = [
       "Collapsible sidebar (icons-only mode) — preference saved automatically",
       "Breadcrumb in topbar shows translated page names",
       "Sidebar state persisted across sessions",
+      "Keyboard shortcuts system — press '?' anywhere to open the shortcuts modal showing all available keyboard shortcuts",
+      "Global navigation shortcuts: 'g' then 'd' (Dashboard), 'g' then 'w' (Watchlist), 'g' then 'p' (Portfolio Manager), 'g' then 't' (Trading), 'g' then 'n' (News), 'g' then 'c' (Charts) — 1500ms window to complete the two-key sequence",
+      "Keyboard shortcuts are disabled when focus is inside an input, textarea, or select element",
     ],
   },
   {
@@ -357,6 +370,49 @@ const FEATURES = [
     ],
   },
   {
+    title: "PORTFOLIO RULES",
+    icon: "trading",
+    items: [
+      "Rules engine analyses every position in a portfolio against 8 configurable rules and generates actionable alerts — accessible from the RULES tab inside Portfolio Manager",
+      "Run rules manually with the ▶ RUN RULES button, or select a schedule: On demand, Auto — market hours (re-runs every 60s during trading hours), or Auto — end of day",
+      {
+        heading: "House Money Rule",
+        text: "Fires when a position has gained enough that the original capital has been returned and you are now trading with profit only — suggests locking in a portion of gains.",
+      },
+      {
+        heading: "Stop Proximity Rule",
+        text: "Triggers a warning when the current price is within 5% of the stop-loss level, and a critical alert when within 2% — prompting you to review the position before an automatic stop is hit.",
+      },
+      {
+        heading: "Semi-Cap Concentration Rule",
+        text: "Warns when a semiconductor position exceeds the configured maximum allocation percentage of the total portfolio value — helps manage sector concentration risk.",
+      },
+      {
+        heading: "Bucket Balance Rule",
+        text: "Analyses positions grouped by bucket tags (e.g. Core, Growth, Speculative) and alerts when any bucket is overweight or underweight relative to configured target ranges.",
+      },
+      {
+        heading: "Time Stop Rule",
+        text: "Warns when a position has been held for longer than expected trading sessions without reaching its profit target — highlights positions that may be consuming capital unproductively.",
+      },
+      {
+        heading: "Analyst Consensus Rule",
+        text: "Alerts when the current price is significantly above the analyst consensus price target — a signal to reassess whether the position still has upside potential.",
+      },
+      {
+        heading: "Fundamentals Health Rule",
+        text: "Checks debt-to-equity ratio, gross margin trend, and insider trading activity — fires warning or critical alerts when fundamentals deteriorate.",
+      },
+      {
+        heading: "Pre-Earnings Rule",
+        text: "Fires an informational alert 1–2 business days before a scheduled earnings date so you can decide whether to reduce size or hedge before the event.",
+      },
+      "Alerts have severity levels: INFO (informational), WARNING (review recommended), and CRITICAL (immediate attention required)",
+      "Filter alerts by severity and state — use the chip filters to show only active, snoozed, or actioned alerts",
+      "Mark alerts as ACTIONED once reviewed, or SNOOZE to temporarily hide them — actioned alerts are dimmed and excluded from the active count badge on the RULES tab",
+    ],
+  },
+  {
     title: "ADMIN DASHBOARD",
     icon: "admin",
     items: [
@@ -442,6 +498,18 @@ const FAQ_ITEMS = [
   {
     q: "What does exclude/include do on a position?",
     a: "The exclude toggle in Portfolio Manager removes a position from all P&L calculations without deleting it. This is useful for tracking positions you don't want factored into your performance metrics. You can re-include the position at any time.",
+  },
+  {
+    q: "What is the Portfolio Rules engine?",
+    a: "The Portfolio Rules engine analyses your positions against 8 configurable rules and generates alerts in the RULES tab of Portfolio Manager. Rules check things like stop proximity, analyst consensus, fundamentals health, earnings timing, sector concentration, and more. Run rules manually or set a schedule to run automatically during market hours.",
+  },
+  {
+    q: "What do the rule alert severity levels mean?",
+    a: "INFO alerts are informational reminders (e.g. earnings tomorrow). WARNING alerts suggest reviewing a position (e.g. price near stop loss). CRITICAL alerts flag positions that may need immediate action (e.g. price within 2% of stop). You can SNOOZE an alert to hide it temporarily, or MARK ACTIONED once you have reviewed and acted on it.",
+  },
+  {
+    q: "How do I set up automatic rule scanning?",
+    a: "In the RULES tab of Portfolio Manager, open the schedule dropdown next to the ▶ RUN RULES button and select 'Auto — market hours' or 'Auto — end of day', then click ▶ RUN RULES once to register the schedule. The worker will continue re-running the analysis automatically according to the selected schedule.",
   },
   {
     q: "How do I change my name or email?",
@@ -558,6 +626,22 @@ const FAQ_ITEMS = [
   {
     q: "How do I access the admin dashboard?",
     a: "Click ADMIN in the sidebar. Access is restricted to users whose email is listed in the server's ADMIN_EMAILS configuration. Non-admin users will see an 'Access Denied' message. The dashboard provides user management, report review, and audit log viewing.",
+  },
+  {
+    q: "How do I use keyboard shortcuts?",
+    a: "Press '?' anywhere on the page (when not typing in a field) to open the keyboard shortcuts modal. Navigation shortcuts use a two-key sequence starting with 'g': g+d for Dashboard, g+w for Watchlist, g+p for Portfolio Manager, g+t for Trading, g+n for News, g+c for Charts. The second key must be pressed within 1500ms of pressing 'g'. Shortcuts are disabled when an input, textarea, or select element has focus.",
+  },
+  {
+    q: "What is the QuickSell drawer on the Dashboard?",
+    a: "Clicking a position tile on the Dashboard opens the QuickSell drawer — a slide-in panel from the right edge showing the ticker, your current quantity, and average cost. You can enter a sell quantity and submit a sell order directly without navigating to the Portfolio Manager.",
+  },
+  {
+    q: "How do I view trade history in Portfolio Manager?",
+    a: "Switch to the Trade History tab in the Portfolio Manager. It shows a complete log of all buy and sell trades for the selected portfolio, including entry/exit prices, P&L per trade, and aggregate trade statistics. You can also delete individual trade records from this tab.",
+  },
+  {
+    q: "How do I adjust the cash balance in my portfolio?",
+    a: "In the Portfolio Manager header, click the cash adjustment button (typically a +/- or wallet icon). A modal opens where you can enter a positive amount to add cash or a negative amount to subtract it. This is useful for reflecting real cash deposits or withdrawals in your tracked portfolio.",
   },
 ];
 

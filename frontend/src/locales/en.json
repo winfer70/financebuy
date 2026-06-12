@@ -48,7 +48,8 @@
     "loadingPortfolio": "LOADING PORTFOLIO DATA...",
     "allTime": "ALL TIME",
     "today": "TODAY",
-    "viewChart": "VIEW CHART"
+    "viewChart": "VIEW CHART",
+    "cashBalance": "Cash Balance"
   },
   "portfolioManager": {
     "title": "PORTFOLIO MANAGER",

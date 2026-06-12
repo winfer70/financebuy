@@ -16,7 +16,7 @@ import re
 from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, validator, root_validator
+from pydantic import BaseModel, condecimal, EmailStr, Field, validator, root_validator
 
 
 # ── User schemas ─────────────────────────────────────────────────────────────
@@ -545,6 +545,7 @@ class PortfolioOut(BaseModel):
     name: str
     strategy: Optional[str] = None
     created_at: datetime
+    cash_balance: float = 0
 
     class Config:
         orm_mode = True
@@ -563,6 +564,7 @@ class PositionCreate(BaseModel):
     physical_type: Optional[str] = Field(None, max_length=20, description="Physical asset sub-type: coin or bar.", example="coin")
     stop_loss: Optional[Decimal] = Field(None, gt=Decimal("0"), max_digits=18, decimal_places=2, description="Stop-loss price trigger.", example="140.00")
     profit_taking: Optional[Decimal] = Field(None, gt=Decimal("0"), max_digits=18, decimal_places=2, description="Profit-taking target price.", example="200.00")
+    deduct_cash: bool = Field(False, description="Deduct cost from portfolio cash balance when adding this position.")
 
 
 class PositionOut(BaseModel):
@@ -602,6 +604,37 @@ class SellRequest(BaseModel):
     """Payload for a partial sell — reduces quantity; deletes if fully sold."""
 
     quantity: Decimal = Field(..., gt=Decimal("0"), max_digits=18, decimal_places=6, description="Units to sell.")
+    credit_cash: bool = Field(True, description="Credit sale proceeds to portfolio cash balance.")
+    # Sell price per unit. When provided, overrides the position's purchase price for
+    # proceeds calculation. Allows recording actual market price at time of sale.
+    sell_price: Optional[Decimal] = Field(None, gt=Decimal("0"), max_digits=18, decimal_places=6, description="Sell price per unit. Defaults to purchase price if omitted.")
+
+
+class PortfolioTradeOut(BaseModel):
+    """Serialised portfolio trade record returned by the API."""
+
+    trade_id: UUID
+    portfolio_id: UUID
+    trade_type: str
+    ticker: str
+    quantity: float
+    price: float
+    # Average cost per unit at sell time; None for BUY trades.
+    # realized_pnl = (price - cost_basis) * quantity for SELL trades.
+    cost_basis: Optional[float] = None
+    total_value: float
+    notes: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+
+class CashAdjustmentRequest(BaseModel):
+    """Payload to manually adjust a portfolio's cash balance."""
+
+    amount: float = Field(..., description="Amount to add (positive) or subtract (negative) from the cash balance.")
+    notes: Optional[str] = Field(None, max_length=500, description="Optional note describing the adjustment.")
 
 
 # ── Market Event schemas ─────────────────────────────────────────────────────
@@ -1475,11 +1508,30 @@ class PaperTradeEquitySnapshotOut(BaseModel):
 # ── Portfolio scoring schemas ────────────────────────────────────────────
 
 
+class PortfolioItem(BaseModel):
+    """Single portfolio position passed to the extended portfolio score endpoint.
+
+    Attributes:
+        ticker:         Ticker symbol.
+        quantity:       Number of units held.
+        purchase_price: Cost basis (break-even price) per unit.
+        stop_loss:      Optional stop-loss price for status evaluation.
+        profit_taking:  Optional profit-taking target price.
+    """
+
+    ticker: str
+    quantity: float
+    purchase_price: float
+    stop_loss: Optional[float] = None
+    profit_taking: Optional[float] = None
+
+
 class PortfolioScoreRequest(BaseModel):
     """Request to score a set of positions.
 
     The caller supplies up to 30 ticker symbols and receives per-position
     analysis (trend, RSI, volatility, signal) plus an overall portfolio score.
+    Optionally supply ``positions`` for extended P&L and stop-loss evaluation.
     """
 
     symbols: List[str] = Field(
@@ -1487,6 +1539,10 @@ class PortfolioScoreRequest(BaseModel):
         min_items=1,
         max_items=30,
         description="Ticker symbols to analyze (max 30).",
+    )
+    positions: Optional[List[PortfolioItem]] = Field(
+        None,
+        description="Optional position details for extended P&L scoring.",
     )
 
 
@@ -1517,6 +1573,11 @@ class PositionScore(BaseModel):
         ..., description="Human-readable actionable suggestion."
     )
     score: int = Field(..., ge=0, le=100, description="Composite score 1-100.")
+    # Extended fields — populated when position detail is provided
+    cost_basis: Optional[float] = Field(None, description="Total cost basis (purchase_price × quantity).")
+    unrealized_pnl: Optional[float] = Field(None, description="Unrealised profit/loss in dollars.")
+    unrealized_pnl_pct: Optional[float] = Field(None, description="Unrealised profit/loss as a percentage.")
+    stop_loss_recommendation: Optional[str] = Field(None, description="Stop-loss status: OK, WARNING, TRIGGERED, or note.")
 
 
 class PortfolioScoreResponse(BaseModel):
@@ -1739,3 +1800,206 @@ class ScreenerResponse(BaseModel):
     results: List[ScreenerItem] = Field(default_factory=list)
     total_matched: int = 0
     filters_applied: Dict[str, Any] = Field(default_factory=dict)
+
+
+# ── Volume Flow Scanner ───────────────────────────────────────────────────────
+
+class ScanRunRequest(BaseModel):
+    """Request to start a Volume Flow Scan.
+
+    Attributes:
+        portfolio_value_usd: Portfolio size in USD used for Phase 5 position sizing.
+        mode:                Scan mode: "auto" (default), "live", or "prev-day".
+    """
+
+    portfolio_value_usd: float = 10000.0
+    mode: Optional[str] = "auto"  # auto | live | prev-day
+
+    @validator("portfolio_value_usd")
+    def must_be_positive(cls, v: float) -> float:
+        """Reject non-positive portfolio values."""
+        if v <= 0:
+            raise ValueError("portfolio_value_usd must be positive")
+        return v
+
+    @validator("mode")
+    def must_be_valid_mode(cls, v: Optional[str]) -> Optional[str]:
+        """Allow only known mode values."""
+        allowed = {"auto", "live", "prev-day"}
+        if v not in allowed:
+            raise ValueError(f"mode must be one of: {', '.join(sorted(allowed))}")
+        return v
+
+
+class ScanResultOut(BaseModel):
+    """Serialized scan result returned by the API.
+
+    Attributes:
+        result_id:       UUID of the scan result.
+        status:          Current state: pending/running/complete/error.
+        phase_reached:   Last phase completed (1-3).
+        parameters_json: Input parameters used for this scan.
+        results_json:    Full scan output (active sectors, industries, candidates).
+        error_message:   Error detail if status=error.
+        started_at:      When the worker picked up the job.
+        completed_at:    When the worker finished.
+        created_at:      When the job was created.
+    """
+
+    result_id:       UUID
+    status:          str
+    phase_reached:   Optional[int]
+    parameters_json: Optional[dict]
+    results_json:    Optional[dict]
+    error_message:   Optional[str]
+    started_at:      Optional[datetime]
+    completed_at:    Optional[datetime]
+    created_at:      datetime
+    mode:            str = "auto"
+
+    class Config:
+        orm_mode = True
+
+
+# ── Portfolio Rules ──────────────────────────────────────────────────────────
+
+
+class RuleAlertResponse(BaseModel):
+    """RuleAlert response schema — serialised portfolio rule alert.
+
+    Attributes:
+        id:              Auto-incremented alert primary key.
+        user_id:         Owner's UUID.
+        position_id:     Associated portfolio position (null for portfolio-level alerts).
+        portfolio_id:    Associated portfolio (null for position-level alerts).
+        rule_type:       Engine rule that produced this alert (e.g. 'house_money').
+        severity:        Alert severity: info | warning | critical.
+        title:           Short human-readable alert title.
+        body:            Longer explanatory message.
+        triggered_value: The numeric value that triggered the rule (e.g. ratio, price).
+        state:           Alert lifecycle state: active | snoozed | actioned | expired.
+        snoozed_until:   UTC timestamp until which the alert is silenced.
+        expires_at:      UTC timestamp after which the alert is auto-expired.
+        created_at:      UTC timestamp when the alert was created.
+    """
+
+    id: int
+    user_id: UUID
+    position_id: Optional[int]
+    portfolio_id: Optional[int]
+    rule_type: str
+    severity: str  # info | warning | critical
+    title: Optional[str]
+    body: Optional[str]
+    triggered_value: Optional[Decimal]
+    state: str  # active | snoozed | actioned | expired
+    snoozed_until: Optional[datetime]
+    expires_at: Optional[datetime]
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+
+class RuleAlertPatch(BaseModel):
+    """Patch request for snoozing or actioning a portfolio rule alert.
+
+    Attributes:
+        state:         New lifecycle state: snoozed | actioned | expired.
+        snoozed_until: Required when state='snoozed'; UTC timestamp to snooze until.
+    """
+
+    state: Optional[str] = None  # snoozed | actioned | expired
+    snoozed_until: Optional[datetime] = None
+
+    @validator("state")
+    def valid_state(cls, v: Optional[str]) -> Optional[str]:
+        """Reject state values outside the allowed set."""
+        allowed = {"snoozed", "actioned", "expired"}
+        if v is not None and v not in allowed:
+            raise ValueError(f"state must be one of {allowed}")
+        return v
+
+
+class PortfolioRulesRunRequest(BaseModel):
+    """Request to trigger the rules engine job.
+
+    Attributes:
+        schedule: Execution context hint: on_demand | market_hours | end_of_day.
+                  Defaults to 'on_demand' for manual API invocations.
+    """
+
+    schedule: Optional[str] = "on_demand"  # on_demand | market_hours | end_of_day
+
+    @validator("schedule")
+    def valid_schedule(cls, v: Optional[str]) -> Optional[str]:
+        """Reject schedule values outside the allowed set."""
+        allowed = {"on_demand", "market_hours", "end_of_day"}
+        if v is not None and v not in allowed:
+            raise ValueError(f"schedule must be one of {allowed}")
+        return v
+
+
+class PortfolioRulesRunResponse(BaseModel):
+    """Response returned after queuing a portfolio rules engine run.
+
+    Attributes:
+        job_id: arq job identifier that can be polled for completion.
+        status: Immediate disposition: queued | already_running.
+    """
+
+    job_id: str
+    status: str  # queued | already_running
+
+
+class PortfolioRulesConfig(BaseModel):
+    """Rule thresholds and flags stored in users.preferences_json.portfolio_rules.
+
+    All numeric thresholds have project-standard defaults; users may override
+    via the preferences API.  The ``enabled_rules`` list controls which rules
+    the engine evaluates on each run.
+
+    Attributes:
+        house_money_multiple:        Multiple of cost-basis at which position is
+                                     fully funded by gains (fire critical alert).
+        house_money_warn_at:         Warn multiple (appREDACTEDing house-money status).
+        house_money_info_at:         Info multiple (early-stage house-money signal).
+        stop_proximity_pct:          Fraction of current price within which a stop
+                                     triggers a warning (e.g. 0.07 = 7%).
+        semi_cap:                    Maximum single-position weight before a
+                                     concentration warning fires.
+        bucket_1_target:             Target weight for the first allocation bucket.
+        bucket_2_target:             Target weight for the second allocation bucket.
+        bucket_3_target:             Target weight for the third allocation bucket.
+        time_stop_warn_sessions:     Trading sessions without progress before a
+                                     time-stop warning.
+        time_stop_critical_sessions: Sessions before a critical time-stop alert.
+        analyst_flag_pct:            Analyst consensus threshold below which a
+                                     bearish flag is raised (fraction, e.g. 0.50).
+        de_ratio_warn:               Debt/equity ratio that triggers a warning.
+        de_ratio_critical:           Debt/equity ratio that triggers a critical alert.
+        margin_compression_warn_pct: Operating-margin contraction % that fires a warn.
+        enabled_rules:               List of rule slugs the engine will evaluate.
+        run_schedule:                Default schedule for automated runs.
+    """
+
+    house_money_multiple: float = 2.0
+    house_money_warn_at: float = 1.75
+    house_money_info_at: float = 1.50
+    stop_proximity_pct: float = 0.07
+    semi_cap: float = 0.35
+    bucket_1_target: float = 0.35
+    bucket_2_target: float = 0.35
+    bucket_3_target: float = 0.30
+    time_stop_warn_sessions: int = 10
+    time_stop_critical_sessions: int = 21
+    analyst_flag_pct: float = 0.50
+    de_ratio_warn: float = 200.0
+    de_ratio_critical: float = 500.0
+    margin_compression_warn_pct: float = 30.0
+    enabled_rules: List[str] = [
+        "house_money", "stop_proximity", "semi_cap",
+        "bucket", "time_stop", "analyst_consensus",
+        "fundamentals", "pre_earnings",
+    ]
+    run_schedule: str = "on_demand"

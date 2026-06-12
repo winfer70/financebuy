@@ -223,6 +223,10 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
     });
   }, []);
 
+  /* ── Trade markers — BUY/SELL history from portfolio-manager trades ───── */
+  const [showTradeMarkers, setShowTradeMarkers] = useState(false);
+  const [tradeSignals, setTradeSignals] = useState([]); // Array<{ allDataIndex, type, label, color }>
+
   /* ── Purchase points from portfolio positions ──────────────────────────── */
   const [purchasePoints, setPurchasePoints] = useState([]);
   useEffect(() => {
@@ -312,6 +316,66 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
       .finally(() => { if (!cancelled) setDataLoading(false); });
     return () => { cancelled = true; };
   }, [symbol, token, interval]);
+
+  /**
+   * Fetch portfolio trade history and compute visible BUY/SELL signal markers
+   * whenever the TRADES toggle is turned on, or when symbol/allData changes
+   * while the toggle is active.
+   *
+   * Each signal stores the allData index (not visibleData index) so that
+   * panning/zooming the chart doesn't require re-fetching.
+   */
+  useEffect(() => {
+    if (!showTradeMarkers || !token || !symbol || !allData || !allData.length) {
+      if (!showTradeMarkers) setTradeSignals([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        /* Fetch all portfolios owned by this user */
+        const portfolios = await api.listPortfolios(token);
+        if (cancelled || !portfolios?.length) return;
+
+        /* Collect trade records from every portfolio in parallel */
+        const allTrades = await Promise.all(
+          portfolios.map(p =>
+            api.getPortfolioTrades(p.portfolio_id, token).catch(() => [])
+          )
+        );
+        if (cancelled) return;
+
+        /* Filter to trades matching the currently charted symbol (case-insensitive) */
+        const symbolUpper = symbol.toUpperCase();
+        const trades = allTrades.flat().filter(
+          tr => tr.ticker?.toUpperCase() === symbolUpper
+        );
+
+        /* Build a date-string → allData-index lookup for O(1) bar matching */
+        const dateToIndex = {};
+        allData.forEach((bar, i) => { dateToIndex[bar.date] = i; });
+
+        /* Map each trade to a signal object; discard trades with no matching bar */
+        const signals = trades.map(trade => {
+          const tradeDate = trade.created_at?.slice(0, 10);
+          const idx = dateToIndex[tradeDate];
+          if (idx == null) return null;
+          const isBuy = trade.trade_type === "BUY";
+          return {
+            allDataIndex: idx,
+            type:  isBuy ? "entry" : "exit",
+            label: `${trade.trade_type} ${parseFloat(trade.quantity).toFixed(2)} @ $${parseFloat(trade.price).toFixed(2)}`,
+            color: isBuy ? "#00d97e" : "#f04438",
+          };
+        }).filter(Boolean);
+
+        if (!cancelled) setTradeSignals(signals);
+      } catch {
+        /* silent — chart still works without trade markers */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [showTradeMarkers, token, symbol, allData]);
 
   const PERIODS = isIntraday
     ? { "100": 100, "500": 500, "1000": 1000, "ALL": 9999 }
@@ -991,6 +1055,16 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
           onClick={toggleHoverData}>
           <Ic.eye /> {t("charts.hoverData")}
         </div>
+        <div className="ctrl-sep" />
+        {/* ── TRADES toggle: show BUY/SELL markers from portfolio trade history ── */}
+        <div
+          className={`overlay-toggle${showTradeMarkers ? " on" : ""}`}
+          title="Show buy/sell trade markers from your portfolio history"
+          onClick={() => setShowTradeMarkers(v => !v)}
+          style={showTradeMarkers ? { borderColor: "rgba(0,217,126,0.44)", color: "#00d97e" } : {}}>
+          <div className="overlay-dot" style={{ background: showTradeMarkers ? "#00d97e" : "#1e2535" }} />
+          TRADES
+        </div>
         {zoom && (
           <button className="ctrl-btn active" style={{ marginLeft: "auto", borderLeft: "1px solid #1e2535" }}
             onClick={() => setZoom(null)}>✕ {t("charts.reset")}</button>
@@ -1048,7 +1122,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
         onMouseLeave={handleMouseLeave}
       >
         {/* ── CHART SVG (price + volume) ── */}
-        <div ref={containerRef} style={{ width: "100%", height: "100%", position: "relative", background: "#090b0f", cursor: drawInteraction === "moving" ? "move" : "crosshair" }}>
+        <div ref={containerRef} style={{ width: "100%", height: "100%", position: "relative", background: "#090b0f", cursor: drawInteraction === "moving" ? "move" : drawInteraction === "resizing" ? "grab" : "crosshair" }}>
           {/* Legend overlay */}
           <div className="chart-legend">
             {overlays.sma50     && <div className="legend-item"><div className="legend-line" style={{ background: "#3d7ef5" }}/>SMA50</div>}
@@ -1384,6 +1458,79 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
               });
             })()}
 
+            {/* ── TRADE MARKERS — BUY/SELL history from portfolio trades ── */}
+            {showTradeMarkers && tradeSignals.length > 0 && visibleData && visibleData.length > 0 && (() => {
+              /*
+               * Filter signals to only bars within the current visible window.
+               * Translate each allDataIndex to a visibleData index for xOf/yOf.
+               */
+              const visibleSignals = tradeSignals
+                .map(sig => {
+                  const visIdx = sig.allDataIndex - visibleStart;
+                  if (visIdx < 0 || visIdx >= visibleData.length) return null;
+                  return { ...sig, visIdx };
+                })
+                .filter(Boolean);
+
+              if (!visibleSignals.length) return null;
+
+              return (
+                <g clipPath="url(#chartClip)">
+                  {visibleSignals.map((sig, i) => {
+                    const px  = xOf(sig.visIdx);
+                    const bar = visibleData[sig.visIdx];
+                    if (!bar) return null;
+                    const isBuy = sig.type === "entry";
+
+                    /*
+                     * BUY markers render below the bar's low, pointing upward.
+                     * SELL markers render above the bar's high, pointing downward.
+                     */
+                    const baseY = isBuy
+                      ? yOf(bar.low)  + 10   // below the low wick
+                      : yOf(bar.high) - 10;  // above the high wick
+
+                    /* Arrow triangle dimensions */
+                    const tip = isBuy ? baseY - 8  : baseY + 8;
+                    const lft = px - 5;
+                    const rgt = px + 5;
+                    const base = isBuy ? baseY : baseY;
+
+                    return (
+                      <g key={`tr-${i}`}>
+                        {/* Subtle dashed vertical line from marker toward the bar */}
+                        <line
+                          x1={px} y1={isBuy ? tip : base}
+                          x2={px} y2={isBuy ? yOf(bar.low) : yOf(bar.high)}
+                          stroke={sig.color} strokeWidth="0.5" strokeDasharray="2,4" opacity="0.45"
+                        />
+                        {/* Filled arrow triangle */}
+                        <polygon
+                          points={isBuy
+                            ? `${px},${tip} ${lft},${base} ${rgt},${base}`
+                            : `${px},${tip} ${lft},${base} ${rgt},${base}`}
+                          fill={sig.color} stroke="#0d0e11" strokeWidth="0.6" opacity="0.92"
+                        />
+                        {/* Label pill */}
+                        <rect
+                          x={px - 48} y={isBuy ? tip - 15 : tip + 3}
+                          width={96} height={13} rx={1}
+                          fill={sig.color} opacity="0.88"
+                        />
+                        <text
+                          x={px} y={isBuy ? tip - 5 : tip + 13}
+                          textAnchor="middle"
+                          fontFamily="IBM Plex Mono" fontSize="7.5" fontWeight="700"
+                          fill={isBuy ? "#060f08" : "#fff"}>
+                          {sig.label}
+                        </text>
+                      </g>
+                    );
+                  })}
+                </g>
+              );
+            })()}
+
             {/* ── EVENT INDICATORS (earnings, dividends, splits) ── */}
             {overlays.events && (() => {
               /** Event color + label config by type */
@@ -1516,15 +1663,31 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
           </svg>
 
           {/* ── Drawing context toolbar (floating delete/deselect) ── */}
-          {selectedDrawingId && !activeTool && (
-            <DrawingContextToolbar
-              onDelete={() => {
-                setDrawings(prev => prev.filter(d => d.id !== selectedDrawingId));
-                setSelectedDrawingId(null);
-              }}
-              onDeselect={() => setSelectedDrawingId(null)}
-            />
-          )}
+          {selectedDrawingId && !activeTool && (() => {
+            const selDrawing = drawings.find(d => d.id === selectedDrawingId);
+            if (!selDrawing || !selDrawing.anchors?.length) return null;
+            /* Compute centroid of anchor pixel positions for smart toolbar placement */
+            const anchorPixels = selDrawing.anchors.map(a => ({
+              x: resolveAnchorX(a, visibleData, visibleStart, allData, xOf),
+              y: resolveAnchorY(a.price, PAD, H, pLo, pHi),
+            }));
+            const avgX = anchorPixels.reduce((s, p) => s + p.x, 0) / anchorPixels.length;
+            const minY = Math.min(...anchorPixels.map(p => p.y));
+            /* Center toolbar above the drawing; clamp to visible area */
+            const toolbarX = Math.max(0, avgX - 60);
+            const toolbarY = Math.max(4, minY - 40);
+            return (
+              <DrawingContextToolbar
+                onDelete={() => {
+                  setDrawings(prev => prev.filter(d => d.id !== selectedDrawingId));
+                  setSelectedDrawingId(null);
+                }}
+                onDeselect={() => setSelectedDrawingId(null)}
+                x={toolbarX}
+                y={toolbarY}
+              />
+            );
+          })()}
         </div>
 
         {/* ── TOOLTIP ── */}
@@ -1940,8 +2103,7 @@ function WatchlistSidePanel({ token, onSelectSymbol, activeSymbol }) {
   const activeWatchlist = watchlists.find(w => w.watchlist_id === activeWatchlistId);
 
   return (
-    <div className="portfolio-panel">
-      {/* Header — reuses pp-header / pp-title / pp-select classes */}
+    <div className="portfolio-panel watchlist-sidebar">
       <div className="pp-header">
         <div className="pp-title">WATCHLIST</div>
         {watchlists.length > 1 ? (
@@ -2165,6 +2327,16 @@ export function ChartsPage({ initialSymbol, goBack, token }) {
 
       {/* Chart + Side Panel */}
       <div style={{ flex: 1, overflow: "hidden", minHeight: 0, display: "flex", position: "relative" }}>
+
+        {/* Watchlist side panel — visible when panelMode === "watchlist" (left of chart) */}
+        {panelMode === "watchlist" && (
+          <WatchlistSidePanel
+            token={token}
+            onSelectSymbol={handlePanelSelect}
+            activeSymbol={activeSymbol}
+          />
+        )}
+
         {/* Chart area */}
         <div style={{ flex: 1, overflow: "hidden", minHeight: 0, position: "relative" }}>
           {activeSymbol ? (
@@ -2182,18 +2354,9 @@ export function ChartsPage({ initialSymbol, goBack, token }) {
           )}
         </div>
 
-        {/* Portfolio side panel — visible when panelMode === "portfolio" */}
+        {/* Portfolio side panel — visible when panelMode === "portfolio" (right of chart) */}
         {panelMode === "portfolio" && (
           <PortfolioSidePanel
-            token={token}
-            onSelectSymbol={handlePanelSelect}
-            activeSymbol={activeSymbol}
-          />
-        )}
-
-        {/* Watchlist side panel — visible when panelMode === "watchlist" */}
-        {panelMode === "watchlist" && (
-          <WatchlistSidePanel
             token={token}
             onSelectSymbol={handlePanelSelect}
             activeSymbol={activeSymbol}
@@ -2437,6 +2600,11 @@ const CHART_CSS = `
   background: #0e1117; border-left: 1px solid #1e2535;
   display: flex; flex-direction: column;
   overflow: hidden;
+}
+/* Watchlist panel on the left side — override border direction */
+.watchlist-sidebar {
+  border-left: none;
+  border-right: 1px solid #1e2535;
 }
 .pp-header {
   padding: 14px 16px 10px; border-bottom: 1px solid #1e2535;

@@ -223,6 +223,22 @@ export function TickerStrip({ token }) {
 }
 
 /**
+ * SkeletonCard: Card-shaped shimmer placeholder for loading states
+ * Renders a full card-height animated shimmer block
+ */
+export const SkeletonCard = () => (
+  <div className="skeleton-shimmer" style={{ height: '120px', borderRadius: '4px' }} />
+);
+
+/**
+ * SkeletonChartArea: Chart loading placeholder
+ * Renders a full-width chart-height animated shimmer block
+ */
+export const SkeletonChartArea = () => (
+  <div className="skeleton-shimmer" style={{ height: '200px', width: '100%', borderRadius: '4px' }} />
+);
+
+/**
  * useMarketStatus: Hook to determine NYSE market status
  * Returns: { isOpen, countdown, dateStr, timeStr }
  * - isOpen: boolean indicating if market is currently open (9:30 AM - 4:00 PM ET, weekdays)

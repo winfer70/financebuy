@@ -48,7 +48,8 @@
     "loadingPortfolio": "ポートフォリオデータ読み込み中...",
     "allTime": "全期間",
     "today": "本日",
-    "viewChart": "チャートを見る"
+    "viewChart": "チャートを見る",
+    "cashBalance": "現金残高"
   },
   "portfolioManager": {
     "title": "ポートフォリオマネージャー",

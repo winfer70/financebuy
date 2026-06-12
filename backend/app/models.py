@@ -12,14 +12,19 @@ All foreign keys specify ondelete behaviour and nullable=False where
 a parent reference is required, ensuring referential integrity.
 """
 
+from datetime import datetime
+
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Column,
+    Date,
     DateTime,
     ForeignKey,
     Index,
     Integer,
+    JSON,
     Numeric,
     SmallInteger,
     String,
@@ -27,6 +32,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import uuid
 
@@ -289,7 +295,11 @@ class Portfolio(Base):
     )
     name = Column(String(128), nullable=False)
     strategy = Column(Text, nullable=True)
+    cash_balance = Column(Numeric(18, 4), nullable=False, default=0, server_default="0")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationship to trade history; cascade deletes when portfolio is removed
+    trades = relationship("PortfolioTrade", back_populates="portfolio", cascade="all, delete-orphan")
 
 
 class PortfolioPosition(Base):
@@ -318,6 +328,94 @@ class PortfolioPosition(Base):
     physical_type = Column(String(20), nullable=True)
     stop_loss = Column(Numeric(18, 2), nullable=True)
     profit_taking = Column(Numeric(18, 2), nullable=True)
+    # Rule-engine fields (added migration 0023) --------------------------------
+    # T+2 settlement value in USD
+    t2_usd = Column(Numeric(18, 2), nullable=True)
+    # True when the position is semi-automated (rule-managed but user-confirmed)
+    is_semi = Column(Boolean, default=False, nullable=False)
+    # GICS sector label, e.g. "Technology"
+    sector = Column(String(64), nullable=True)
+    # Calendar date the position was first opened
+    date_entered = Column(Date, nullable=True)
+    # Risk tier: 1 = core, 2 = growth, 3 = speculative; CHECK (bucket IN (1,2,3))
+    bucket = Column(SmallInteger, nullable=True)
+    # Timestamp when the position was soft-closed
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+    sold_reason = Column(Text, nullable=True)
+    # DeGiro sync fields (added migration 0026) --------------------------------
+    # ISIN code for DeGiro-synced positions (e.g. "US0378331005")
+    isin = Column(String(12), nullable=True)
+    # DeGiro internal product ID for upsert deduplication
+    degiro_product_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PortfolioTrade(Base):
+    """A recorded buy or sell trade within a Portfolio, created automatically
+    when positions are added/sold with cash tracking enabled, or manually via
+    the cash adjustment endpoint.
+
+    Attributes:
+        trade_id:     Unique UUID for the trade record.
+        portfolio_id: Parent portfolio UUID (CASCADE on portfolio delete).
+        trade_type:   'BUY' or 'SELL'.
+        ticker:       Ticker symbol of the traded asset.
+        quantity:     Number of units traded.
+        price:        Per-unit price at the time of the trade.
+        cost_basis:   Average cost per unit at time of SELL (NULL for BUY trades).
+                      Used to compute realized P&L: (price - cost_basis) * quantity.
+        total_value:  quantity × price (pre-computed for display).
+        notes:        Optional user note.
+        created_at:   UTC timestamp when the record was created.
+    """
+
+    __tablename__ = "portfolio_trades"
+    __table_args__ = (
+        Index("ix_portfolio_trades_portfolio_id", "portfolio_id"),
+    )
+
+    trade_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    portfolio_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("portfolios.portfolio_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    trade_type = Column(String(10), nullable=False)   # 'BUY' or 'SELL'
+    ticker = Column(String(20), nullable=False)
+    quantity = Column(Numeric(18, 6), nullable=False)
+    price = Column(Numeric(18, 4), nullable=False)
+    # Average cost per unit captured at sell time; NULL on BUY trades
+    cost_basis = Column(Numeric(18, 4), nullable=True)
+    total_value = Column(Numeric(18, 4), nullable=False)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Back-reference to the owning Portfolio
+    portfolio = relationship("Portfolio", back_populates="trades")
+
+
+class DegiroTransaction(Base):
+    """A single buy/sell transaction pulled from DeGiro account history."""
+
+    __tablename__ = "degiro_transactions"
+
+    transaction_id = Column(BigInteger, primary_key=True)
+    portfolio_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("portfolios.portfolio_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    date = Column(DateTime(timezone=True), nullable=False)
+    product_name = Column(Text, nullable=True)
+    isin = Column(String(12), nullable=True)
+    ticker = Column(String(20), nullable=True)
+    buysell = Column(String(1), nullable=True)
+    quantity = Column(Numeric(18, 6), nullable=True)
+    price = Column(Numeric(18, 4), nullable=True)
+    value = Column(Numeric(18, 4), nullable=True)
+    currency = Column(String(8), nullable=True)
+    total_in_base = Column(Numeric(18, 4), nullable=True)
+    fee_in_base = Column(Numeric(18, 4), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -883,3 +981,80 @@ class PaperTradeEquitySnapshot(Base):
     paper_trade_id = Column(UUID(as_uuid=True), ForeignKey("paper_trades.paper_trade_id", ondelete="CASCADE"), nullable=False)
     equity = Column(Numeric(18, 4), nullable=False)
     timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ── Volume Flow Scanner Models ────────────────────────────────────────────
+
+
+class ScanResult(Base):
+    """Queued or completed Volume Flow Scanner job with full results.
+
+    Stores the top-down scan output: active sectors, active industries,
+    candidate stocks with scores and position sizing.
+    """
+
+    __tablename__ = "scan_results"
+    __table_args__ = (
+        Index("idx_scan_results_user_id", "user_id"),
+        Index("idx_scan_results_status", "status"),
+    )
+
+    result_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # Scan parameters — e.g. {"portfolio_value_usd": 10000}
+    parameters_json = Column(JSONB, nullable=True)
+    # Full scan output — active_sectors, active_industries, candidates, counts, duration
+    results_json = Column(JSONB, nullable=True)
+    status = Column(String(20), server_default="pending", nullable=False)  # pending | running | complete | error
+    error_message = Column(Text, nullable=True)
+    # Highest phase successfully completed (1–3); null until the job finishes
+    phase_reached = Column(Integer, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    # How the scan was initiated: 'auto' | 'live' | 'prev-day' (added migration 0025)
+    mode = Column(String(16), nullable=False, default="auto")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ── Rule Alert Models ─────────────────────────────────────────────────────
+
+
+class RuleAlert(Base):
+    """Rule-engine alert triggered when a portfolio position violates a rule.
+
+    Alerts are linked to a user and optionally to a specific position (soft
+    reference — position_id is stored as an integer for forward-compatibility
+    but carries no FK constraint because portfolio_positions uses a UUID PK).
+
+    Lifecycle states: active → snoozed → actioned | expired.
+    Severity levels: info, warning, critical.
+
+    Indexes:
+        idx_rule_alerts_user_active  — fetch active alerts per user (descending).
+        idx_rule_alerts_position     — look up alerts by position and rule type.
+    """
+
+    __tablename__ = "rule_alerts"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # Soft reference to portfolio_positions (UUID PK); no FK constraint in DB
+    position_id = Column(BigInteger, nullable=True)
+    portfolio_id = Column(BigInteger, nullable=True)
+    rule_type = Column(String(32), nullable=False)
+    severity = Column(String(10), nullable=False)   # info | warning | critical
+    title = Column(String(200), nullable=True)
+    body = Column(Text, nullable=True)
+    triggered_value = Column(Numeric(18, 4), nullable=True)
+    state = Column(String(16), nullable=False, default="active")  # active | snoozed | actioned | expired
+    snoozed_until = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

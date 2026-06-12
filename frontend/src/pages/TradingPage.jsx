@@ -129,6 +129,9 @@ export function TradingPage({ token, onViewChart, initialSymbol }) {
   const [scoreResults, setScoreResults] = useState(null);   // portfolio score API response
   const [scoreLoading, setScoreLoading] = useState(false);  // loading indicator for score
 
+  /* -- State: backtest completion ----------------------------------------- */
+  const [completing, setCompleting] = useState(false); // true while OHLCV loads after job finishes
+
   /* -- Pre-fill symbol from initialSymbol prop (quick-launch) ------------- */
   useEffect(() => {
     if (initialSymbol) {
@@ -263,7 +266,8 @@ export function TradingPage({ token, onViewChart, initialSymbol }) {
             setBacktestResult(res);
             setBacktestStatus("completed");
             setBacktestStartTime(null);
-            // Load OHLCV data for the chart
+            // Load OHLCV data for the chart — setCompleting guards the UI during this fetch
+            setCompleting(true);
             try {
               const resp = await api.getOhlcv(symbol, token, 2);
               const bars = resp.bars || resp;
@@ -278,6 +282,7 @@ export function TradingPage({ token, onViewChart, initialSymbol }) {
                 })),
               );
             } catch (err) { console.error("OHLCV fetch failed:", err); }
+            finally { setCompleting(false); }
             break;
           }
           if (res.status === "failed") {
@@ -1070,7 +1075,7 @@ export function TradingPage({ token, onViewChart, initialSymbol }) {
                   overflow: "hidden",
                 }}
                 onClick={runBacktest}
-                disabled={!symbol || !selectedStrategy || backtestStatus === "queued" || backtestStatus === "running"}
+                disabled={!symbol || !selectedStrategy || backtestStatus === "queued" || backtestStatus === "running" || completing}
               >
                 {backtestStatus === "queued" ? (
                   /* Queuing state: spinner + QUEUING label */
@@ -1099,14 +1104,23 @@ export function TradingPage({ token, onViewChart, initialSymbol }) {
                       {elapsedSec}s
                     </span>
                   </span>
+                ) : completing ? (
+                  /* Completing state: spinner + COMPLETING label (OHLCV loading) */
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <svg width="14" height="14" viewBox="0 0 14 14" style={{ animation: "tt-spin 0.8s linear infinite" }}>
+                      <circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--amber)" strokeWidth="2"
+                        strokeDasharray="20 14" strokeLinecap="round" />
+                    </svg>
+                    COMPLETING...
+                  </span>
                 ) : (
                   <>
                     <Ic.charts /> RUN BACKTEST
                   </>
                 )}
 
-                {/* Indeterminate progress bar — visible only while queued/running */}
-                {(backtestStatus === "queued" || backtestStatus === "running") && (
+                {/* Indeterminate progress bar — visible only while queued/running/completing */}
+                {(backtestStatus === "queued" || backtestStatus === "running" || completing) && (
                   <span style={{
                     position: "absolute",
                     bottom: 0,

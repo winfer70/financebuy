@@ -94,9 +94,9 @@ services:
     # Mac/Windows but requires this explicit mapping on Linux).
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # Bind to all interfaces so Server B workers can reach the API over LAN.
+    # Bind to localhost only — nginx proxies externally, all workers use internal Docker network.
     ports:
-      - "0.0.0.0:8000:8000"
+      - "127.0.0.1:8000:8000"
     networks:
       - tickertap_net
     depends_on:
@@ -126,17 +126,18 @@ services:
     restart: unless-stopped
     command: ["arq", "app.trading.worker.WorkerSettings"]
     healthcheck:
-      # arq has no HTTP endpoint — verify PID 1 (arq) is still running
-      test: ["CMD-SHELL", "test -d /proc/1 || exit 1"]
-      interval: 30s
-      timeout: 5s
+      test: ["CMD", "python", "-m", "app.trading.worker_healthcheck", "trading-worker", "600"]
+      interval: 60s
+      timeout: 10s
       retries: 3
+      start_period: 30s
     env_file:
       - ./backend/.env
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-tickerTap}
-      REDIS_URL:    redis://redis:6379/0
-      TRADING_ML_URL: http://trading-ml:8001
+      DATABASE_URL:    postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-tickerTap}
+      REDIS_URL:       redis://redis:6379/0
+      TRADING_ML_URL:  http://trading-ml:8001
+      SKIP_MIGRATIONS: "1"
     networks:
       - tickertap_net
     depends_on:
@@ -163,15 +164,17 @@ services:
     restart: unless-stopped
     command: ["arq", "app.trading.paper_worker.WorkerSettings"]
     healthcheck:
-      test: ["CMD-SHELL", "test -d /proc/1 || exit 1"]
+      test: ["CMD", "python", "-m", "app.trading.worker_healthcheck", "paper-worker", "120"]
       interval: 30s
-      timeout: 5s
+      timeout: 10s
       retries: 3
+      start_period: 30s
     env_file:
       - ./backend/.env
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-tickerTap}
-      REDIS_URL:    redis://redis:6379/0
+      DATABASE_URL:    postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-tickerTap}
+      REDIS_URL:       redis://redis:6379/0
+      SKIP_MIGRATIONS: "1"
     networks:
       - tickertap_net
     depends_on:
@@ -198,10 +201,11 @@ services:
     restart: unless-stopped
     command: ["arq", "app.trading.alert_worker.WorkerSettings"]
     healthcheck:
-      test: ["CMD-SHELL", "test -d /proc/1 || exit 1"]
-      interval: 30s
-      timeout: 5s
+      test: ["CMD", "python", "-m", "app.trading.worker_healthcheck", "alert-worker", "600"]
+      interval: 60s
+      timeout: 10s
       retries: 3
+      start_period: 30s
     env_file:
       - ./backend/.env
     environment:

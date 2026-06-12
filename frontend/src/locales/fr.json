@@ -48,7 +48,8 @@
     "loadingPortfolio": "CHARGEMENT DES DONNÉES DU PORTEFEUILLE...",
     "allTime": "DEPUIS LE DÉBUT",
     "today": "AUJOURD'HUI",
-    "viewChart": "VOIR LE GRAPHIQUE"
+    "viewChart": "VOIR LE GRAPHIQUE",
+    "cashBalance": "SOLDE EN ESPECES"
   },
   "portfolioManager": {
     "title": "GESTIONNAIRE DE PORTEFEUILLE",

@@ -257,6 +257,7 @@ body::before {
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   display: flex; align-items: center; justify-content: space-between;
+  position: relative; z-index: 20;
 }
 .panel-title {
   font-family: var(--font-mono); font-size: 10px; font-weight: 500;
@@ -272,6 +273,7 @@ body::before {
   color: var(--muted); letter-spacing: 1px; text-transform: uppercase;
   border-bottom: 1px solid var(--border);
   background: var(--bg2); white-space: nowrap;
+  position: sticky; top: 0; z-index: 5;
 }
 .data-table th.right, .data-table td.right { text-align: right; }
 .data-table td {
@@ -703,6 +705,34 @@ select.form-control option { background: var(--bg3); }
   .login-right { flex: 1; min-height: auto; }
 }
 
+@media (max-width: 768px) {
+  /* Table card transformation for narrow screens */
+  .table-responsive thead { display: none; }
+  .table-responsive tr {
+    display: block; background: var(--bg2);
+    border: 1px solid var(--border); border-radius: 4px;
+    margin-bottom: 8px; padding: 8px;
+  }
+  .table-responsive td {
+    display: flex; justify-content: space-between;
+    align-items: center; padding: 3px 4px;
+    border: none; font-size: 11px;
+  }
+  /* Render column header as a pseudo-element using data-label attribute */
+  .table-responsive td::before {
+    content: attr(data-label); font-size: 10px;
+    color: var(--muted, #888); text-transform: uppercase;
+    flex-shrink: 0; margin-right: 8px;
+  }
+  /* Minimum 44px touch targets for interactive table elements */
+  .table-action-btn { min-height: 44px; min-width: 44px; padding: 8px 10px; }
+  .filter-btn { min-height: 44px; }
+  .nav-btn { min-height: 44px; }
+  .mob-nav-btn { min-height: 44px; }
+  /* Reserve space for the fixed mobile bottom navigation bar */
+  .main-area { padding-bottom: 56px; }
+}
+
 @media (max-width: 640px) {
   .sidebar { display: none; }
   .mobile-bottom-nav {
@@ -755,6 +785,48 @@ select.form-control option { background: var(--bg3); }
   .legal-tabs { overflow-x: auto; padding: 0 12px; }
   .legal-tab { padding: 10px 14px; font-size: 10px; white-space: nowrap; }
 }
+
+/* ── Skeleton loading states ── */
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.skeleton-shimmer {
+  background: linear-gradient(90deg, var(--bg2) 25%, rgba(255,255,255,0.03) 50%, var(--bg2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* ── Column picker popover ── */
+.col-picker-popover {
+  position: absolute; top: 100%; right: 0; z-index: 200;
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 4px; padding: 8px; min-width: 180px;
+  display: flex; flex-direction: column; gap: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+.col-picker-popover label {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; cursor: pointer; padding: 2px 4px; border-radius: 2px;
+}
+.col-picker-popover label:hover { background: rgba(255,255,255,0.05); }
+
+/* ── Keyboard shortcut key chip ── */
+.shortcut-key {
+  display: inline-block; background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 3px; padding: 1px 5px; font-size: 10px; color: var(--amber, #f59e0b);
+}
+
+/* ── Quick sell slide-in drawer ── */
+.quick-sell-drawer {
+  position: fixed; top: 0; right: -340px; width: 320px; height: 100vh;
+  background: var(--bg1, #0a0a0f); border-left: 1px solid var(--border);
+  z-index: 150; padding: 20px; transition: right 0.25s ease; overflow-y: auto;
+}
+.quick-sell-drawer.open { right: 0; }
+
+/* ── Table action buttons ── */
+.table-action-btn { cursor: pointer; }
 `;
 
 export const HOLDINGS = [

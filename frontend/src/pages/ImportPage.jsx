@@ -5,8 +5,8 @@
  * Includes data validation and preview before submission.
  */
 
-import { useState, useRef, useCallback } from "react";
-import api from "../api/client";
+import { useState, useRef, useCallback, useEffect } from "react";
+import api, { uploadFile } from "../api/client";
 import { Ic } from "../components/common/Icons";
 
 /**
@@ -349,6 +349,23 @@ const BROKER_LIST = [
     ],
     cols: "Run Date, Action, Symbol, Description, Type, Quantity, Price, Amount",
   },
+  {
+    id: "degiro",
+    name: "DEGIRO",
+    short: "DG",
+    color: "#ff6600",
+    bg: "#1a0800",
+    type: "European Online Broker",
+    formats: ["CSV"],
+    desc: "Export transaction history from Portfolio → Activity → Transaction History → Export",
+    steps: [
+      { text: "Log in to DEGIRO" },
+      { text: 'Go to <code>Portfolio → Activity → Transaction History</code>' },
+      { text: "Set your date range and click Export" },
+      { text: "Upload the downloaded CSV file here" },
+    ],
+    cols: "Date, Time, Product, ISIN, Description, FX, Change, Balance, Order ID",
+  },
 ];
 
 const ASSET_TYPES = [
@@ -363,19 +380,115 @@ function AssetTypeBadge({ type }) {
   return <span className={`asset-type-badge ${def.cls}`}>{def.label}</span>;
 }
 
-export function ImportPage({ addToast, goBack }) {
+export function ImportPage({ addToast, goBack, token }) {
   const [subpage, setSubpage] = useState("brokers");
   const [selectedBroker, setSelectedBroker] = useState(null);
   const [dragOver, setDragOver] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState(null);
   const [entries, setEntries] = useState([EMPTY_ENTRY()]);
   const [savedEntries, setSavedEntries] = useState([]);
   const [importedFromBroker, setImportedFromBroker] = useState([]);
+  // Portfolio selection for broker imports
+  const [portfolios, setPortfolios] = useState([]);
+  const [selectedPortfolioId, setSelectedPortfolioId] = useState("");
   const fileRef = useRef(null);
 
-  // ── File upload simulation ──────────────────────────────────────────────
+  // Load the user's portfolios on mount so the selector is populated.
+  useEffect(() => {
+    if (!token) return;
+    api.listPortfolios(token)
+      .then(data => {
+        const list = Array.isArray(data) ? data : (data?.portfolios ?? []);
+        setPortfolios(list);
+        if (list.length > 0 && !selectedPortfolioId) {
+          setSelectedPortfolioId(list[0].portfolio_id);
+        }
+      })
+      .catch(() => { /* Non-fatal — portfolio selector stays empty */ });
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── DeGiro real upload ──────────────────────────────────────────────────
+  /**
+   * handleDegiroUpload — POST the CSV to the backend and populate the
+   * importedFromBroker preview list from the dry-run response.
+   *
+   * Uses a dry run first so the user sees a preview before committing.
+   * A second call with dry_run=false would persist to the database.
+   *
+   * @param {File} file - The File object dropped or selected by the user.
+   */
+  const handleDegiroUpload = async (file) => {
+    if (!selectedPortfolioId) {
+      setUploadError("Select a portfolio before uploading.");
+      addToast && addToast("SELECT A PORTFOLIO FIRST");
+      return;
+    }
+    setUploading(true);
+    setUploadProgress(0);
+    setUploadError(null);
+
+    // Animate the progress bar while the request is in flight.
+    const fakeTimer = setInterval(() => {
+      setUploadProgress(p => Math.min(p + 10, 85));
+    }, 100);
+
+    const formData = new FormData();
+    // 'file' field name must match the FastAPI endpoint parameter name.
+    formData.append("file", file);
+    formData.append("portfolio_id", selectedPortfolioId);
+    // Dry run: parse and preview without writing to DB.
+    formData.append("dry_run", "true");
+
+    try {
+      // uploadFile sends multipart/form-data; browser sets boundary automatically.
+      const result = await uploadFile("/api/v1/import/degiro/csv", formData, token);
+      clearInterval(fakeTimer);
+      setUploadProgress(100);
+      setUploading(false);
+
+      if (result.preview && result.preview.length > 0) {
+        // Map DegiroPreviewRow → the shape ReviewTable expects.
+        const mapped = result.preview.map((row, i) => ({
+          id: Date.now() + i,
+          type: "Stock",
+          identifier: row.product,
+          qty: row.quantity,
+          purchasePrice: row.price_per_unit,
+          datePurchased: (row.trade_date || "").split("T")[0],
+          source: "DEGIRO",
+          isin: row.isin,
+          trade_type: row.trade_type,
+        }));
+        setImportedFromBroker(prev => [...prev, ...mapped]);
+        setUploadedFiles(prev => [...prev, {
+          name: file.name,
+          size: `${(file.size / 1024).toFixed(1)} KB`,
+          rows: result.preview.length,
+          broker: "DEGIRO",
+          ok: true,
+        }]);
+        addToast && addToast(
+          `DEGIRO CSV PARSED · ${result.preview.length} TRADES FOUND · REVIEW & COMMIT TO SAVE`
+        );
+      } else {
+        // Parsed successfully but no actionable trade rows found.
+        addToast && addToast(
+          `DEGIRO CSV PARSED · NO TRADE ROWS FOUND · ${result.skipped_rows} ROWS SKIPPED`
+        );
+      }
+    } catch (err) {
+      clearInterval(fakeTimer);
+      setUploading(false);
+      setUploadProgress(0);
+      setUploadError(err.message);
+      addToast && addToast(`DEGIRO IMPORT ERROR: ${err.message}`);
+    }
+  };
+
+  // ── File upload simulation (non-DeGiro brokers) ──────────────────────────
   const simulateUpload = (fileName, fileSize) => {
     setUploading(true);
     setUploadProgress(0);
@@ -408,12 +521,22 @@ export function ImportPage({ addToast, goBack }) {
     e.preventDefault();
     setDragOver(false);
     const file = e.dataTransfer.files[0];
-    if (file) simulateUpload(file.name, `${(file.size / 1024).toFixed(1)} KB`);
+    if (!file) return;
+    if (selectedBroker?.id === "degiro") {
+      handleDegiroUpload(file);
+    } else {
+      simulateUpload(file.name, `${(file.size / 1024).toFixed(1)} KB`);
+    }
   };
 
   const handleFileInput = e => {
     const file = e.target.files[0];
-    if (file) simulateUpload(file.name, `${(file.size / 1024).toFixed(1)} KB`);
+    if (!file) return;
+    if (selectedBroker?.id === "degiro") {
+      handleDegiroUpload(file);
+    } else {
+      simulateUpload(file.name, `${(file.size / 1024).toFixed(1)} KB`);
+    }
   };
 
   // ── Manual entries management ───────────────────────────────────────────
@@ -535,6 +658,38 @@ export function ImportPage({ addToast, goBack }) {
                     <div className="dl-step-text"><SafeStepText html={step.text} /></div>
                   </div>
                 ))}
+
+                {/* Portfolio selector — shown for brokers that support real import (DeGiro) */}
+                {selectedBroker?.id === "degiro" && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", letterSpacing: "0.8px", textTransform: "uppercase" }}>
+                      Target Portfolio
+                    </div>
+                    {portfolios.length === 0 ? (
+                      <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--red)" }}>
+                        No portfolios found — create a portfolio first in the Portfolio Manager.
+                      </div>
+                    ) : (
+                      <select
+                        className="entry-form-input"
+                        style={{ maxWidth: 400 }}
+                        value={selectedPortfolioId}
+                        onChange={e => setSelectedPortfolioId(e.target.value)}
+                      >
+                        {portfolios.map(p => (
+                          <option key={p.portfolio_id} value={p.portfolio_id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {uploadError && (
+                      <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--red)" }}>
+                        {uploadError}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Drop zone */}
                 <div className="drop-zone"

@@ -1,20 +1,27 @@
 /**
  * ResearchPage.jsx — Sector analysis + stock screener page.
  *
- * Two-tab layout:
- *   SECTORS  — Heat-map grid of GICS sector ETF cards, colour-coded by daily
- *              change%.  Each card includes a sparkline SVG showing a synthetic
- *              performance curve derived from change_pct, ytd_pct, and month_pct.
- *              Clicking a card navigates to the SCREENER tab with that sector
- *              pre-filtered.
- *   SCREENER — Filter bar (price, change%, volume, sector, sort) + sortable
- *              results table over ~100 popular tickers.  Each row includes
- *              action buttons (chart, watchlist, portfolio) for quick actions.
+ * Three-tab layout:
+ *   SECTORS     — Heat-map grid of GICS sector ETF cards, colour-coded by daily
+ *                 change%.  Each card includes a sparkline SVG showing a synthetic
+ *                 performance curve derived from change_pct, ytd_pct, and month_pct.
+ *                 Clicking a card navigates to the SCREENER tab with that sector
+ *                 pre-filtered.
+ *   SCREENER    — Filter bar (price, change%, volume, sector, sort) + sortable
+ *                 results table over ~100 popular tickers.  Each row includes
+ *                 action buttons (chart, watchlist, portfolio) for quick actions.
+ *   VOLUME FLOW — Multi-phase volume scanner: 11 sector ETFs → industry ETFs →
+ *                 individual stocks with unusual volume (≥2× 50-day avg + price
+ *                 up).  Phase 4 scoring (revenue, volume, analyst) shown per
+ *                 candidate with position-size suggestion.
  *
  * Data flow:
- *   1. SECTORS tab:  GET /market/sectors  on mount (cached 5 min backend-side).
- *   2. SCREENER tab: GET /market/screener with query params on "SCAN" click.
- *   3. On mount: GET /watchlists + GET /portfolio-manager/portfolios to resolve
+ *   1. SECTORS tab:     GET /market/sectors  on mount (cached 5 min backend-side).
+ *   2. SCREENER tab:    GET /market/screener with query params on "SCAN" click.
+ *   3. VOLUME FLOW tab: POST /scanner/run to start, then poll GET /scanner/:id
+ *                       every 3s until status "complete"/"error".
+ *                       GET /scanner/latest on tab open to restore prior scan.
+ *   4. On mount: GET /watchlists + GET /portfolio-manager/portfolios to resolve
  *      default IDs for the quick-add action buttons.
  *
  * Props:
@@ -22,7 +29,7 @@
  *   onViewChart — callback(symbol) to open a chart in a new tab.
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import api from "../api/client";
 
 /* ── Constants ────────────────────────────────────────────────────────────── */
@@ -31,6 +38,7 @@ import api from "../api/client";
 const TABS = [
   { id: "sectors",  label: "SECTORS" },
   { id: "screener", label: "SCREENER" },
+  { id: "scanner",  label: "VOLUME FLOW" },
 ];
 
 /** Colour palette for positive/negative values. */
@@ -348,6 +356,15 @@ export default function ResearchPage({ token, onViewChart }) {
   /* ── Action feedback — brief toast-like messages shown inline ─────── */
   const [actionFeedback, setActionFeedback] = useState(null);
 
+  /* ── Scanner tab state ────────────────────────────────────────────────── */
+  const [scanLoading,   setScanLoading]   = useState(false);
+  const [scanResult,    setScanResult]    = useState(null);  // ScanResultOut from API
+  const [scanError,     setScanError]     = useState(null);
+  const [portfolioUsd,  setPortfolioUsd]  = useState("10000");
+  // Scan mode toggle: "auto" | "live" | "prev-day"
+  const [scanMode, setScanMode] = useState("auto");
+  const pollTimerRef = useRef(null);
+
   /**
    * showFeedback — display a brief inline notification that auto-clears.
    * @param {string} msg   - Message text
@@ -531,6 +548,85 @@ export default function ResearchPage({ token, onViewChart }) {
       showFeedback(err.message || `Failed to add ${symbol}`, true);
     }
   }, [defaultPortfolioId, token, showFeedback]);
+
+  /* ── Scanner: load latest scan when VOLUME FLOW tab is activated ─────── */
+
+  /**
+   * loadLatestScan — fetch the most recent scan result for this user.
+   * Called when the VOLUME FLOW tab is opened so prior results are visible.
+   */
+  const loadLatestScan = useCallback(async () => {
+    try {
+      // api.getLatestScan returns the most recent ScanResultOut for the user
+      const data = await api.getLatestScan(token);
+      setScanResult(data);
+    } catch (_) {
+      // No prior scan — that's fine; leave scanResult null
+    }
+  }, [token]);
+
+  /**
+   * pollScan — poll a scan result every 3 seconds until complete or error.
+   * Clears the interval and sets scanLoading false when the scan finishes.
+   * @param {string} resultId - Scan result UUID from runScanner response
+   */
+  const pollScan = useCallback((resultId) => {
+    const timer = setInterval(async () => {
+      try {
+        // api.getScanResult returns updated ScanResultOut for the given ID
+        const data = await api.getScanResult(resultId, token);
+        setScanResult(data);
+        if (data.status === "complete" || data.status === "error") {
+          clearInterval(timer);
+          pollTimerRef.current = null;
+          setScanLoading(false);
+        }
+      } catch (_) {
+        clearInterval(timer);
+        pollTimerRef.current = null;
+        setScanLoading(false);
+      }
+    }, 3000);
+    pollTimerRef.current = timer;
+  }, [token]);
+
+  /**
+   * handleRunScan — validate portfolio value, call the scanner API,
+   * then start polling until the scan completes.
+   */
+  const handleRunScan = useCallback(async () => {
+    const val = parseFloat(portfolioUsd);
+    if (!val || val <= 0) {
+      setScanError("Enter a valid portfolio value.");
+      return;
+    }
+    setScanLoading(true);
+    setScanError(null);
+    setScanResult(null);
+    try {
+      // api.runScanner kicks off a new scan job and returns an initial ScanResultOut
+      const data = await api.runScanner({ portfolio_value_usd: val, mode: scanMode }, token);
+      setScanResult(data);
+      pollScan(data.result_id);
+    } catch (err) {
+      setScanError(err.message || "Failed to start scan.");
+      setScanLoading(false);
+    }
+  }, [portfolioUsd, token, pollScan, scanMode]);
+
+  // Load latest scan when the VOLUME FLOW tab is first opened
+  useEffect(() => {
+    if (activeTab === "scanner") {
+      loadLatestScan();
+    }
+  }, [activeTab, loadLatestScan]);
+
+  // Clean up poll interval on component unmount to avoid memory leaks
+  useEffect(() => {
+    return () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    };
+  }, []);
 
   /* ── Render ─────────────────────────────────────────────────────────── */
   return (
@@ -1002,6 +1098,270 @@ export default function ResearchPage({ token, onViewChart }) {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── VOLUME FLOW tab ─────────────────────────────────────────────── */}
+      {activeTab === "scanner" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+          {/* ── Scan controls ── */}
+          <div className="panel" style={{ padding: "14px 16px" }}>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", marginBottom: 10 }}>
+              Scans 11 sector ETFs → industry ETFs → individual stocks for unusual volume (≥2× 50-day avg + price up). Phases 1–3 run automatically; Phase 4 scoring is shown for each candidate.
+            </div>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--mid)" }}>Portfolio (USD):</span>
+                <input
+                  className="search-input"
+                  type="number"
+                  value={portfolioUsd}
+                  onChange={e => setPortfolioUsd(e.target.value)}
+                  style={{ width: 120, padding: "4px 8px" }}
+                  disabled={scanLoading}
+                />
+              </div>
+              {/* Mode selector — toggle group: Auto | Live | Prev-Day */}
+              <div style={{ display: "flex", alignItems: "center", gap: 0, border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, overflow: "hidden" }}>
+                {[
+                  { value: "auto",     label: "AUTO" },
+                  { value: "live",     label: "LIVE" },
+                  { value: "prev-day", label: "PREV-DAY" },
+                ].map(({ value, label }) => (
+                  <button
+                    key={value}
+                    onClick={() => setScanMode(value)}
+                    disabled={scanLoading}
+                    style={{
+                      background: scanMode === value ? `${AMBER}22` : "transparent",
+                      border: "none",
+                      borderLeft: value !== "auto" ? "1px solid rgba(255,255,255,0.1)" : "none",
+                      color: scanMode === value ? AMBER : "var(--muted)",
+                      padding: "4px 10px",
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: 0.5,
+                      cursor: scanLoading ? "not-allowed" : "pointer",
+                      fontFamily: "var(--font-mono)",
+                      transition: "color 0.15s, background 0.15s",
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <button
+                className="btn btn-primary"
+                onClick={handleRunScan}
+                disabled={scanLoading}
+                style={{ padding: "5px 16px" }}
+              >
+                {scanLoading ? "SCANNING..." : "RUN SCAN"}
+              </button>
+              {scanResult && !scanLoading && (
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
+                  Last scan: {new Date(scanResult.created_at).toLocaleString()}
+                </span>
+              )}
+            </div>
+            {/* Session status chip — shown when scan has session context in parameters_json */}
+            {(() => {
+              // parameters_json may arrive as a string or object depending on serialization
+              const pj = typeof scanResult?.parameters_json === "string"
+                ? JSON.parse(scanResult.parameters_json)
+                : (scanResult?.parameters_json || null);
+              if (!pj?.session_state) return null;
+              const sessionLabel = pj.session_state.toUpperCase();
+              const elapsedPct = pj.elapsed_weight != null
+                ? `${Math.round(pj.elapsed_weight * 100)}% elapsed`
+                : null;
+              const modeLabel = (pj.mode || "auto").toUpperCase() + " mode";
+              // Colour the chip based on session: green for active, amber for pre/after, muted for closed
+              const chipColor = ["open", "mid", "power"].includes(pj.session_state)
+                ? GREEN
+                : ["pre", "after"].includes(pj.session_state)
+                ? AMBER
+                : "var(--muted)";
+              return (
+                <div style={{ marginTop: 8, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <div style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: 0.5,
+                    color: chipColor,
+                    background: `${chipColor}18`,
+                    border: `1px solid ${chipColor}55`,
+                    borderRadius: 4,
+                    padding: "2px 8px",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}>
+                    {sessionLabel}
+                    {elapsedPct && (
+                      <span style={{ color: "var(--muted)", fontWeight: 400 }}>| {elapsedPct}</span>
+                    )}
+                    <span style={{ color: "var(--muted)", fontWeight: 400 }}>| {modeLabel}</span>
+                  </div>
+                </div>
+              );
+            })()}
+            {scanError && (
+              <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--red)" }}>
+                {scanError}
+              </div>
+            )}
+          </div>
+
+          {/* ── Phase progress ── */}
+          {(scanLoading || scanResult) && (
+            <div className="panel" style={{ padding: "12px 16px" }}>
+              <div style={{ display: "flex", gap: 0, alignItems: "center" }}>
+                {[
+                  { label: "① SECTORS",    done: scanResult?.results_json?.active_sectors?.length >= 0 },
+                  { label: "② INDUSTRIES", done: scanResult?.results_json?.active_industries?.length >= 0 },
+                  { label: "③ STOCKS",     done: scanResult?.results_json?.candidates?.length >= 0 },
+                  { label: "④ SCORE/SIZE", done: scanResult?.status === "complete" },
+                ].map((phase, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center" }}>
+                    <div style={{
+                      fontFamily: "var(--font-mono)", fontSize: 10,
+                      color: phase.done ? "var(--green)" : scanLoading ? "var(--amber)" : "var(--muted)",
+                      padding: "4px 10px",
+                      border: `1px solid ${phase.done ? "var(--green)" : scanLoading ? "var(--amber)" : "var(--border)"}`,
+                      background: phase.done ? "rgba(0,200,100,0.06)" : "transparent",
+                    }}>
+                      {phase.done ? "✓ " : scanLoading ? "⏳ " : ""}{phase.label}
+                    </div>
+                    {i < 3 && <div style={{ width: 20, height: 1, background: "var(--border)" }} />}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Error state ── */}
+          {scanResult?.status === "error" && (
+            <div className="panel" style={{ padding: 12, borderLeft: "2px solid var(--red)" }}>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--red)" }}>
+                Scan error: {scanResult.error_message || "Unknown error"}
+              </div>
+            </div>
+          )}
+
+          {/* ── Active sectors chips ── */}
+          {scanResult?.results_json?.active_sectors?.length > 0 && (
+            <div className="panel" style={{ padding: "10px 16px" }}>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", marginBottom: 6 }}>
+                ACTIVE SECTORS ({scanResult.results_json.active_sectors.length})
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {scanResult.results_json.active_sectors.map(s => (
+                  <div key={s.sector} style={{
+                    fontFamily: "var(--font-mono)", fontSize: 10,
+                    padding: "3px 10px", border: "1px solid var(--green)",
+                    color: "var(--green)", background: "rgba(0,200,100,0.06)",
+                  }}>
+                    {s.etf} {s.sector} {s.ratio}×
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Active industries chips ── */}
+          {scanResult?.results_json?.active_industries?.length > 0 && (
+            <div className="panel" style={{ padding: "10px 16px" }}>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", marginBottom: 6 }}>
+                ACTIVE INDUSTRIES ({scanResult.results_json.active_industries.length})
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {scanResult.results_json.active_industries.map(ind => (
+                  <div key={ind.industry} style={{
+                    fontFamily: "var(--font-mono)", fontSize: 10,
+                    padding: "3px 10px", border: "1px solid var(--amber)",
+                    color: "var(--amber)", background: "rgba(255,170,0,0.06)",
+                  }}>
+                    {ind.industry} {ind.etf} {ind.ratio}×
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── No active sectors ── */}
+          {scanResult?.status === "complete" && scanResult.results_json?.active_sectors?.length === 0 && (
+            <div className="panel" style={{ padding: 16, textAlign: "center" }}>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>
+                No sectors at 2× volume threshold today. Market may be in distribution or range-bound.
+              </div>
+            </div>
+          )}
+
+          {/* ── Candidates table ── */}
+          {scanResult?.results_json?.candidates?.length > 0 && (
+            <div className="panel" style={{ padding: "12px 16px" }}>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--bright)", marginBottom: 10, fontWeight: 600 }}>
+                PHASE 3 CANDIDATES — {scanResult.results_json.candidates.length} stock(s) passed auto-screening
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "var(--font-mono)", fontSize: 11 }}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                      {["SYMBOL","INDUSTRY","PRICE","VOL/AVG","REV GRW","ANALYST","SCORE","POSITION"].map(h => (
+                        <th key={h} style={{ padding: "4px 8px", textAlign: "left", color: "var(--muted)", fontWeight: 400, fontSize: 10 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scanResult.results_json.candidates.map(c => {
+                      const pos = c.position || {};
+                      const upside = c.upside_pct != null ? `${c.upside_pct > 0 ? "+" : ""}${c.upside_pct.toFixed(1)}%` : "—";
+                      return (
+                        <tr key={c.ticker} style={{ borderBottom: "1px solid var(--border)" }}>
+                          <td style={{ padding: "6px 8px", color: "var(--bright)", fontWeight: 600 }}>{c.ticker}</td>
+                          <td style={{ padding: "6px 8px", color: "var(--mid)" }}>{c.industry}</td>
+                          <td style={{ padding: "6px 8px", color: "var(--mid)" }}>${c.price?.toFixed(2)}</td>
+                          <td style={{ padding: "6px 8px", color: c.vol_ratio >= 3 ? "var(--green)" : "var(--amber)" }}>{c.vol_ratio?.toFixed(1)}×</td>
+                          <td style={{ padding: "6px 8px", color: c.rev_yoy_pct >= 25 ? "var(--green)" : "var(--mid)" }}>
+                            {c.rev_yoy_pct != null ? `+${c.rev_yoy_pct.toFixed(0)}%` : "—"}
+                          </td>
+                          <td style={{ padding: "6px 8px", color: "var(--mid)" }}>
+                            {c.rec_key || "—"}{c.n_analysts ? ` (${c.n_analysts})` : ""}
+                          </td>
+                          <td style={{ padding: "6px 8px" }}>
+                            <span style={{ color: c.auto_score >= 12 ? "var(--green)" : c.auto_score >= 8 ? "var(--amber)" : "var(--red)" }}>
+                              {c.auto_score}/{c.auto_score_max}
+                            </span>
+                            <span style={{ color: "var(--muted)", fontSize: 9, marginLeft: 4 }}>auto</span>
+                          </td>
+                          <td style={{ padding: "6px 8px", color: pos.at_cap ? "var(--amber)" : "var(--mid)" }}>
+                            {pos.shares ?? "—"}sh ${pos.position_usd?.toFixed(0)} ({pos.position_pct?.toFixed(1)}%)
+                            {pos.at_cap && <span style={{ color: "var(--amber)", marginLeft: 4, fontSize: 9 }}>CAP</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ marginTop: 10, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
+                ⚠ Auto-score uses 3 of 7 factors (revenue momentum, volume confirm, analyst consensus). Before entering: manually assess thesis clarity, risk/reward (score 1-5), sector tailwind, and entry zone quality. Need ≥25/35 total to proceed.
+              </div>
+            </div>
+          )}
+
+          {/* ── No candidates ── */}
+          {scanResult?.status === "complete" && scanResult.results_json?.active_sectors?.length > 0 && scanResult.results_json?.candidates?.length === 0 && (
+            <div className="panel" style={{ padding: 16, textAlign: "center" }}>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>
+                Sectors active but no stocks passed Phase 3 screening (volume ≥2×, revenue ≥15%, market cap ≥$500M, price below analyst target).
+              </div>
+            </div>
+          )}
+
         </div>
       )}
     </div>

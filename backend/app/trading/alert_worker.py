@@ -10,21 +10,27 @@ Runs as a standalone arq worker via:
 """
 
 import asyncio
-import logging
 import os
 import uuid
 from datetime import datetime
 from decimal import Decimal
 
+import structlog
 import yfinance as yf
 from arq.connections import RedisSettings, create_pool
+from arq.cron import cron
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
+from ..logging_config import configure_structlog
 from ..models import Notification, PriceAlert
+from .heartbeat import write_worker_heartbeat
+from ..services.degiro_sync import sync_degiro_portfolio  # noqa: F401
 
-logger = logging.getLogger("alert_worker")
+# Configure structlog before any logger is obtained — idempotent guard inside
+configure_structlog()
+logger = structlog.get_logger("alert_worker")
 
 # -- Database setup (standalone — worker runs outside FastAPI) ─────────────
 
@@ -72,7 +78,7 @@ def _fetch_price(symbol: str) -> float:
         ticker = yf.Ticker(symbol)
         return round(_safe_float(ticker.fast_info.last_price), 4)
     except Exception as exc:
-        logger.warning("Failed to fetch price for %s: %s", symbol, exc)
+        logger.warning("Failed to fetch price for symbol", symbol=symbol, error=str(exc))
         return 0.0
 
 
@@ -128,6 +134,12 @@ async def evaluate_price_alerts(ctx: dict) -> None:
     Args:
         ctx: arq job context dict.
     """
+    # Bind per-job context so all log lines carry worker and job_id fields
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(
+        worker="alert-worker", job_id=str(ctx.get("job_id", ""))
+    )
+    _last_error = ""
     session: AsyncSession = _SessionLocal()
     try:
         # Fetch all active alerts
@@ -146,7 +158,9 @@ async def evaluate_price_alerts(ctx: dict) -> None:
             by_symbol.setdefault(alert.symbol, []).append(alert)
 
         logger.info(
-            "Evaluating %d alerts across %d symbols", len(alerts), len(by_symbol)
+            "Evaluating alerts",
+            alert_count=len(alerts),
+            symbol_count=len(by_symbol),
         )
 
         # Fetch prices in parallel (thread pool for sync yfinance calls)
@@ -206,18 +220,19 @@ async def evaluate_price_alerts(ctx: dict) -> None:
                     )
                     triggered_count += 1
                     logger.info(
-                        "Alert triggered: %s %s $%.2f (current: $%.2f)",
-                        symbol,
-                        alert.condition,
-                        target,
-                        current_price,
+                        "Alert triggered",
+                        symbol=symbol,
+                        condition=alert.condition,
+                        target=target,
+                        current_price=current_price,
                     )
 
         if triggered_count > 0:
             await session.commit()
-            logger.info("Triggered %d alerts", triggered_count)
+            logger.info("Triggered alerts", count=triggered_count)
 
-    except Exception:
+    except Exception as exc:
+        _last_error = str(exc)[:300]
         logger.exception("Error evaluating price alerts")
         await session.rollback()
     finally:
@@ -228,10 +243,15 @@ async def evaluate_price_alerts(ctx: dict) -> None:
         defer_by = 60 if _is_market_open() else 300
         try:
             pool = await create_pool(RedisSettings.from_dsn(_REDIS_URL))
-            await pool.enqueue_job("evaluate_price_alerts", _defer_by=defer_by)
+            await pool.enqueue_job("evaluate_price_alerts", _defer_by=defer_by, _queue_name="arq:alert")
             await pool.close()
         except Exception as exc:
-            logger.error("Failed to re-enqueue alert evaluation: %s", exc)
+            logger.error("Failed to re-enqueue alert evaluation", error=str(exc))
+
+        # Write heartbeat regardless of success/failure
+        await write_worker_heartbeat(
+            "alert-worker", _REDIS_URL, jobs_processed_delta=1, last_error=_last_error
+        )
 
 
 # -- Startup hook ──────────────────────────────────────────────────────────
@@ -249,7 +269,7 @@ async def startup(ctx: dict) -> None:
     logger.info("Alert worker starting — seeding first evaluation in 10s")
     try:
         pool = await create_pool(RedisSettings.from_dsn(_REDIS_URL))
-        await pool.enqueue_job("evaluate_price_alerts", _defer_by=10)
+        await pool.enqueue_job("evaluate_price_alerts", _defer_by=10, _queue_name="arq:alert")
         await pool.close()
     except Exception:
         logger.exception("Failed to seed initial alert evaluation job")
@@ -264,7 +284,9 @@ class WorkerSettings:
     Run with: ``arq app.trading.alert_worker.WorkerSettings``
     """
 
-    functions = [evaluate_price_alerts]
+    functions = [evaluate_price_alerts, sync_degiro_portfolio]
+    cron_jobs = [cron(sync_degiro_portfolio, hour=2, minute=0)]
+    queue_name = "arq:alert"
     on_startup = startup
     redis_settings = RedisSettings.from_dsn(_REDIS_URL)
     max_jobs = 5

@@ -15,6 +15,8 @@ User preferences are stored in User.preferences JSONB:
   }
 """
 
+import asyncio
+import os
 import uuid
 import logging
 from typing import Optional, Dict, Any
@@ -71,6 +73,9 @@ async def notify(
     webhook_events = prefs.get("webhook", [])
     if event_type in webhook_events:
         await _fire_webhooks(db, user_id, event_type, title, body, metadata)
+
+    # 5. Telegram (always, if TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID set)
+    asyncio.create_task(_send_telegram(title, body))
 
 
 async def _insert_notification(
@@ -187,3 +192,19 @@ async def _fire_webhooks(
                 )
             except Exception as e:
                 logger.warning("Webhook failed: url=%s error=%s", wh.url, e)
+
+
+async def _send_telegram(title: str, body: str) -> None:
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    if not (token and chat_id):
+        return
+    text = f"*{title}*\n{body}" if body else f"*{title}*"
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
+            await client.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+            )
+    except Exception as e:
+        logger.warning("Telegram notification failed: %s", e)

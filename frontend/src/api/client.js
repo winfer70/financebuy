@@ -265,8 +265,8 @@ const api = {
   deletePosition: (positionId, token) =>
     apiFetch(`/portfolio-manager/positions/${positionId}`, { method: "DELETE", token }),
 
-  sellPosition: (positionId, quantity, token) =>
-    apiFetch(`/portfolio-manager/positions/${positionId}/sell`, { method: "POST", body: { quantity }, token }),
+  sellPosition: (positionId, quantity, sellPrice, token, creditCash = true) =>
+    apiFetch(`/portfolio-manager/positions/${positionId}/sell`, { method: "POST", body: { quantity, sell_price: sellPrice, credit_cash: creditCash }, token }),
 
   /**
    * Fetch portfolio performance time series from the backend.
@@ -863,6 +863,114 @@ const api = {
     apiFetch("/trading/portfolio-score", { method: "POST", body, token }),
 
   /**
+   * Score a portfolio with extended P&L analysis using position details.
+   * Passes full position data (ticker, quantity, purchase_price, stop_loss,
+   * profit_taking) so the backend can compute unrealised P&L and stop-loss
+   * status for each position.
+   *
+   * @param {Array<{ticker, quantity, purchase_price, stop_loss, profit_taking}>} positions
+   * @param {string} token - JWT access token
+   * @returns {Promise<object>} Extended portfolio scoring results
+   */
+  scorePortfolioDetailed: (positions, token) =>
+    apiFetch("/trading/portfolio-score", {
+      method: "POST",
+      body: { symbols: positions.map(p => p.ticker), positions },
+      token,
+    }),
+
+  /**
+   * Fetch trade history for a portfolio.
+   * @param {string} portfolioId - Portfolio UUID
+   * @param {string} token       - JWT access token
+   * @returns {Promise<Array<object>>} Array of trade records
+   */
+  getPortfolioTrades: (portfolioId, token) =>
+    apiFetch(`/portfolio-manager/${portfolioId}/trades`, { token }),
+
+  /**
+   * Delete a trade record by ID.
+   * Ownership is verified server-side via the parent portfolio.
+   * @param {string} tradeId - Trade UUID
+   * @param {string} token   - JWT access token
+   * @returns {Promise<null>} Null on success (204)
+   */
+  deleteTrade: (tradeId, token) =>
+    apiFetch(`/portfolio-manager/trades/${tradeId}`, { method: "DELETE", token }),
+
+  /**
+   * Manually adjust a portfolio's cash balance.
+   * @param {string}      portfolioId - Portfolio UUID
+   * @param {number}      amount      - Positive to add, negative to subtract
+   * @param {string|null} notes       - Optional note
+   * @param {string}      token       - JWT access token
+   * @returns {Promise<{cash_balance: number}>} Updated cash balance
+   */
+  adjustPortfolioCash: (portfolioId, amount, notes = null, token) =>
+    apiFetch(`/portfolio-manager/${portfolioId}/cash`, {
+      method: "POST",
+      body: { amount, notes },
+      token,
+    }),
+
+  /**
+   * Trigger portfolio rules evaluation for a portfolio.
+   * @param {string} portfolioId - Portfolio UUID
+   * @param {string} schedule    - "on_demand" | "market_hours" | "end_of_day"
+   * @param {string} token       - JWT access token
+   * @returns {Promise<object>} PortfolioRulesRunResponse with task_id
+   */
+  runPortfolioRules: (portfolioId, schedule, token) =>
+    apiFetch(`/portfolio-manager/portfolios/${portfolioId}/run-rules`, {
+      method: "POST",
+      body: { schedule },
+      token,
+    }),
+
+  /**
+   * List rule alerts for a portfolio with optional filters.
+   * @param {string}      portfolioId - Portfolio UUID
+   * @param {object}      [filters]   - { severity, state, rule_type }
+   * @param {string}      token       - JWT access token
+   * @returns {Promise<Array>} List of RuleAlertResponse objects
+   */
+  getRuleAlerts: (portfolioId, { severity = null, state = null, rule_type = null } = {}, token) => {
+    const params = new URLSearchParams();
+    if (severity)  params.set("severity",  severity);
+    if (state)     params.set("state",     state);
+    if (rule_type) params.set("rule_type", rule_type);
+    const qs = params.toString();
+    return apiFetch(`/portfolio-manager/portfolios/${portfolioId}/rule-alerts${qs ? "?" + qs : ""}`, { token });
+  },
+
+  /**
+   * Patch a rule alert state.
+   * @param {string} alertId - Alert UUID
+   * @param {object} payload - { state: "snoozed"|"actioned"|"expired" }
+   * @param {string} token   - JWT access token
+   * @returns {Promise<object>} Updated RuleAlertResponse
+   */
+  patchRuleAlert: (alertId, payload, token) =>
+    apiFetch(`/portfolio-manager/rule-alerts/${alertId}`, { method: "PATCH", body: payload, token }),
+
+  /**
+   * Get user's portfolio rules configuration.
+   * @param {string} token - JWT access token
+   * @returns {Promise<object>} PortfolioRulesConfig
+   */
+  getRuleConfig: (token) =>
+    apiFetch("/portfolio-manager/rule-config", { token }),
+
+  /**
+   * Update user's portfolio rules configuration.
+   * @param {object} payload - Config fields to update
+   * @param {string} token   - JWT access token
+   * @returns {Promise<object>} Updated PortfolioRulesConfig
+   */
+  patchRuleConfig: (payload, token) =>
+    apiFetch("/portfolio-manager/rule-config", { method: "PATCH", body: payload, token }),
+
+  /**
    * Run exit analysis for a symbol — computes ATR stops, Bollinger levels,
    * moving-average support/resistance, Fibonacci retracements, and more.
    *
@@ -899,6 +1007,37 @@ const api = {
     });
     return apiFetch(`/market/screener?${qs}`, { token });
   },
+
+  // ── Scanner (Volume Flow) ────────────────────────────────────────────────
+
+  /**
+   * Start a volume flow scanner run.
+   * Scans sector ETFs → industry ETFs → individual stocks for unusual volume.
+   * Returns an initial ScanResultOut (status "pending" or "running").
+   * @param {object} data  - { portfolio_value_usd: number }
+   * @param {string} token - JWT access token
+   * @returns {Promise<object>} ScanResultOut with result_id for polling
+   */
+  runScanner: (data, token) =>
+    apiFetch("/scanner/run", { method: "POST", body: data, token }),
+
+  /**
+   * Poll a scan result by ID.  Call every 3s until status is "complete"/"error".
+   * @param {string} resultId - Scan result UUID (from runScanner response)
+   * @param {string} token    - JWT access token
+   * @returns {Promise<object>} ScanResultOut
+   */
+  getScanResult: (resultId, token) =>
+    apiFetch(`/scanner/${resultId}`, { token }),
+
+  /**
+   * Fetch the latest scan result for the authenticated user.
+   * Used to restore prior scan state when the VOLUME FLOW tab is opened.
+   * @param {string} token - JWT access token
+   * @returns {Promise<object>} ScanResultOut
+   */
+  getLatestScan: (token) =>
+    apiFetch("/scanner/latest", { token }),
 
   // ── Admin ───────────────────────────────────────────────────────────────
 
@@ -978,6 +1117,51 @@ const api = {
 };
 
 export default api;
+
+/* ── uploadFile — multipart/form-data upload ─────────────────────────────── */
+/**
+ * uploadFile — POST a FormData payload without setting Content-Type.
+ *
+ * The browser automatically sets Content-Type to multipart/form-data with the
+ * correct boundary when Content-Type is absent from the request headers.
+ * Setting it manually breaks the boundary and causes a 422 on the backend.
+ *
+ * @param {string}   path     - Full URL path, e.g. "/api/v1/import/degiro/csv"
+ * @param {FormData} formData - FormData instance to send as the request body
+ * @param {string}   [token]  - Optional JWT access token
+ * @returns {Promise<any>} Parsed JSON response
+ * @throws  {Error}       On HTTP errors or network failure
+ */
+export async function uploadFile(path, formData, token) {
+  const headers = {};
+  // Inject auth header only when a token is provided.
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(path, {
+    method: "POST",
+    headers,
+    credentials: "include",  // Forward httpOnly cookies in case needed
+    body: formData,           // DO NOT set Content-Type — browser sets it with boundary
+  });
+
+  if (!res.ok) {
+    // Attempt to parse error detail from JSON; fall back to raw text.
+    const text = await res.text();
+    let detail = text;
+    try {
+      detail = JSON.parse(text).detail || text;
+    } catch {
+      /* text is not JSON — use as-is */
+    }
+    if (Array.isArray(detail)) {
+      detail = detail.map(e => e.msg || JSON.stringify(e)).join("; ");
+    }
+    throw new Error(detail || `HTTP ${res.status}`);
+  }
+
+  if (res.status === 204) return null;
+  return res.json();
+}
 
 /* ── useApi hook ─────────────────────────────────────────────────────────── */
 /**
