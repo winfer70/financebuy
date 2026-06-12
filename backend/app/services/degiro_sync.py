@@ -89,50 +89,39 @@ async def _login(
     ).get("sessionId")
     login_status = body.get("status")
 
-    # status=6 means TOTP required — server holds state, no session issued yet
-    totp_needed = login_status == 6
-    if not session_id and not totp_needed:
-        return None
-
-    # Send TOTP if configured or required
-    if totp_secret and (totp_needed or session_id):
-        otp_code = pyotp.TOTP(totp_secret).now()  # string, preserve leading zeros
-        totp_kwargs: dict = {"json": {"totpToken": otp_code}}
+    # status=6 means TOTP required — re-POST to same login endpoint with OTP included
+    if login_status == 6 and totp_secret:
+        otp_code = int(pyotp.TOTP(totp_secret).now())
         logger.info("degiro_totp_sending", otp_code=otp_code)
-        if session_id:
-            totp_kwargs["cookies"] = {"JSESSIONID": session_id}
         totp_resp = await client.post(
-            f"{_BASE}/login/secure/login/totp",
-            follow_redirects=False,  # session cookie is on the 302, not the destination
-            **totp_kwargs,
-        )
-        logger.info(
-            "degiro_totp_response",
-            status=totp_resp.status_code,
-            cookie_keys=list(totp_resp.cookies.keys()),
-            location=totp_resp.headers.get("location", ""),
-        )
-        if not totp_resp.is_success and totp_resp.status_code not in (301, 302, 303, 307, 308):
-            logger.info(
-                "degiro_totp_error",
-                status=totp_resp.status_code,
-                body=totp_resp.text[:300],
-                cookie_keys=list(totp_resp.cookies.keys()),
-            )
-            totp_resp.raise_for_status()
-        totp_body = totp_resp.json() if totp_resp.text else {}
-        session_id = (
-            totp_resp.cookies.get("JSESSIONID")
-            or (totp_body.get("data") or {}).get("sessionId")
-            or session_id
+            f"{_BASE}/login/secure/login",
+            follow_redirects=True,
+            json={
+                "username": username,
+                "password": password,
+                "isPassCodeReset": False,
+                "isRedirectToMobile": False,
+                "oneTimePassword": otp_code,
+            },
         )
         logger.info(
             "degiro_totp_result",
             status=totp_resp.status_code,
             cookie_keys=list(totp_resp.cookies.keys()),
-            location=totp_resp.headers.get("location", ""),
-            got_session=bool(session_id),
+            got_session=bool(
+                totp_resp.cookies.get("JSESSIONID")
+                or (totp_resp.json().get("data") or {}).get("sessionId")
+                if totp_resp.text else False
+            ),
         )
+        totp_resp.raise_for_status()
+        totp_body = totp_resp.json() if totp_resp.text else {}
+        session_id = (
+            totp_resp.cookies.get("JSESSIONID")
+            or (totp_body.get("data") or {}).get("sessionId")
+        )
+    elif not session_id:
+        return None
 
     return session_id
 
