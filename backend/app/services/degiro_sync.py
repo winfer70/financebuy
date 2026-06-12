@@ -42,7 +42,7 @@ _engine = create_async_engine(
 )
 _SessionLocal = sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
 
-_BASE = "https://trader.degiro.com"
+_BASE = "https://trader.degiro.nl"
 
 
 def _map_product_type(product_type: str | None) -> str:
