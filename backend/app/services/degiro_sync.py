@@ -57,75 +57,54 @@ async def _login(
     password: str,
     totp_secret: str | None,
 ) -> str | None:
-    """Login to DeGiro and return sessionId, or None on failure."""
-    # Attempt 1: single-step login with TOTP embedded in initial POST
-    otp_str = pyotp.TOTP(totp_secret).now() if totp_secret else None
-    login_body: dict[str, Any] = {
-        "username": username,
-        "password": password,
-        "isPassCodeReset": False,
-        "isRedirectToMobile": False,
-    }
-    if otp_str:
-        login_body["oneTimePassword"] = int(otp_str)
+    """Login to DeGiro and return sessionId, or None on failure.
 
-    resp = await client.post(
-        f"{_BASE}/login/secure/login",
-        follow_redirects=True,
-        json=login_body,
-    )
-    resp.raise_for_status()
-    body = resp.json()
-    login_status = body.get("status")
+    Matches degiro-connector behaviour: if TOTP secret is set, send a single
+    POST directly to /login/secure/login/totp with all credentials + OTP.
+    No two-step challenge flow.
+    """
+    if totp_secret:
+        url = f"{_BASE}/login/secure/login/totp"
+        otp_str = pyotp.TOTP(totp_secret).now()  # string, zero-padded
+        body: dict[str, Any] = {
+            "username": username,
+            "password": password,
+            "isPassCodeReset": False,
+            "isRedirectToMobile": False,
+            "queryParams": {},
+            "oneTimePassword": otp_str,  # string per degiro-connector
+        }
+    else:
+        url = f"{_BASE}/login/secure/login"
+        body = {
+            "username": username,
+            "password": password,
+            "isPassCodeReset": False,
+            "isRedirectToMobile": False,
+            "queryParams": {},
+        }
+
+    resp = await client.post(url, follow_redirects=True, json=body)
+    resp_body = resp.json() if resp.text else {}
 
     logger.info(
         "degiro_login_response",
         status=resp.status_code,
-        login_status=login_status,
-        login_status_text=body.get("statusText"),
+        login_status=resp_body.get("status"),
+        login_status_text=resp_body.get("statusText"),
+        body_preview=str(resp_body)[:300],
         cookie_keys=list(resp.cookies.keys()),
-        client_cookie_keys=list(client.cookies.keys()),
-        included_otp=otp_str is not None,
     )
+
+    if not resp.is_success:
+        resp.raise_for_status()
 
     session_id: str | None = (
         resp.cookies.get("JSESSIONID")
         or client.cookies.get("JSESSIONID")
-        or (body.get("data") or {}).get("sessionId")
+        or (resp_body.get("data") or {}).get("sessionId")
+        or resp_body.get("sessionId")
     )
-
-    # If single-step worked, session_id is set and login_status != 6
-    if session_id and login_status != 6:
-        logger.info("degiro_login_single_step_ok")
-        return session_id
-
-    # status=6 means TOTP still required — two-step flow
-    if login_status == 6 and totp_secret:
-        # Re-generate OTP (time may have advanced)
-        otp_str = pyotp.TOTP(totp_secret).now()
-        otp_int = int(otp_str)
-        logger.info("degiro_totp_sending", otp_int=otp_int)
-        totp_resp = await client.post(
-            f"{_BASE}/login/secure/login/totp",
-            json={"oneTimePassword": otp_int},
-        )
-        logger.info(
-            "degiro_totp_result",
-            status=totp_resp.status_code,
-            body_preview=totp_resp.text[:400],
-        )
-        if not totp_resp.is_success:
-            totp_resp.raise_for_status()
-        totp_body = totp_resp.json() if totp_resp.text else {}
-        session_id = (
-            totp_resp.cookies.get("JSESSIONID")
-            or client.cookies.get("JSESSIONID")
-            or (totp_body.get("data") or {}).get("sessionId")
-        )
-
-    if not session_id:
-        return None
-
     return session_id
 
 
