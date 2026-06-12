@@ -154,6 +154,27 @@ async def _get_account_overview(
     return {item["name"]: item.get("value") for item in raw}
 
 
+async def _get_stop_orders(
+    client: httpx.AsyncClient, session_id: str, int_account: int
+) -> dict[int, Decimal]:
+    """Return {productId: stopPrice} for active stop-sell orders."""
+    resp = await client.get(
+        f"{_BASE}/trading/secure/v5/update/{int_account};jsessionid={session_id}",
+        params={"orders": 0},
+    )
+    resp.raise_for_status()
+    raw_orders = (resp.json().get("orders") or {}).get("value") or []
+    stop_prices: dict[int, Decimal] = {}
+    for raw in raw_orders:
+        flat = _flatten_position(raw)
+        product_id = flat.get("productId")
+        buysell = str(flat.get("buysell") or flat.get("buySell") or "").upper()
+        stop_price = flat.get("stopPrice")
+        if product_id and buysell == "S" and stop_price:
+            stop_prices[int(product_id)] = Decimal(str(stop_price))
+    return stop_prices
+
+
 async def _get_products_info(
     client: httpx.AsyncClient,
     session_id: str,
@@ -300,6 +321,12 @@ async def sync_degiro_portfolio(ctx: dict) -> dict:
                 overview = await _get_account_overview(client, session_id, int_account)
             except Exception:
                 overview = {}
+
+            # Fetch open stop-sell orders for stop_loss population (best-effort)
+            try:
+                stop_orders = await _get_stop_orders(client, session_id, int_account)
+            except Exception:
+                stop_orders = {}
 
             # Fetch transactions (last 2 years, best-effort)
             try:

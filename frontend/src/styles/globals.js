@@ -257,6 +257,7 @@ body::before {
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   display: flex; align-items: center; justify-content: space-between;
+  position: relative; z-index: 20;
 }
 .panel-title {
   font-family: var(--font-mono); font-size: 10px; font-weight: 500;
@@ -798,7 +799,7 @@ select.form-control option { background: var(--bg3); }
 
 /* ── Column picker popover ── */
 .col-picker-popover {
-  position: absolute; top: 100%; right: 0; z-index: 50;
+  position: absolute; top: 100%; right: 0; z-index: 200;
   background: var(--bg2); border: 1px solid var(--border);
   border-radius: 4px; padding: 8px; min-width: 180px;
   display: flex; flex-direction: column; gap: 4px;
