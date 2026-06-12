@@ -39,7 +39,7 @@ router = APIRouter(prefix="/analysis", tags=["analysis"])
 
 _RULES_PATH = Path(__file__).parent.parent / "config" / "investment_rules.json"
 _OLLAMA_URL = os.getenv("OLLAMA_URL", "http://REDACTED:11434")
-_OLLAMA_MODEL = os.getenv("OLLAMA_ANALYSIS_MODEL", "qwen3:4b")
+_OLLAMA_MODEL = os.getenv("OLLAMA_ANALYSIS_MODEL", "hermes3:8b")
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -294,7 +294,7 @@ async def _call_ollama(prompt: str) -> str:
         "model": _OLLAMA_MODEL,
         "prompt": prompt,
         "stream": False,
-        "options": {"temperature": 0.2, "num_predict": 512},
+        "options": {"temperature": 0.2, "num_predict": 1024},
     }
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
