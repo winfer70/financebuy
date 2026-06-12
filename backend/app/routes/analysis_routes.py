@@ -289,7 +289,7 @@ def _parse_ollama_response(text: str) -> dict:
 
 
 async def _call_ollama(prompt: str) -> str:
-    timeout = httpx.Timeout(120.0, connect=10.0)
+    timeout = httpx.Timeout(300.0, connect=10.0)
     payload = {
         "model": _OLLAMA_MODEL,
         "prompt": prompt,
