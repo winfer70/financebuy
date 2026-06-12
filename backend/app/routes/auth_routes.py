@@ -2,14 +2,21 @@
 auth_routes.py — Authentication endpoints and user dependency for TickerTap.
 
 Provides /auth/register, /auth/login, /auth/forgot-password, /auth/reset-password
-as well as the canonical get_current_user and get_current_admin dependencies that
-all other route modules should use (via dependencies.py re-export).
+as well as the canonical get_current_user, get_current_admin, and
+get_current_user_or_bot dependencies that all other route modules should use
+(via dependencies.py re-export).
 
 Security measures applied in this module:
   - Rate limiting: login 5/minute, register 3/minute (via SlowAPI)
   - Password reset tokens stored as SHA-256 hashes (raw token only in email)
   - Failed login attempts logged to audit_log
   - Constant-time password comparison via argon2-cffi
+
+Environment variables:
+  BOT_API_KEY   — shared secret checked against the X-Bot-Api-Key request header;
+                  required for bot authentication (get_current_user_or_bot).
+  BOT_USER_ID   — user_id placed in the bot identity dict returned by
+                  get_current_user_or_bot when bot auth succeeds (optional).
 """
 
 import asyncio
@@ -18,6 +25,7 @@ import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
+from typing import Optional, Union
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -74,6 +82,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
+# Optional variant used by get_current_user_or_bot — auto_error=False prevents
+# FastAPI from raising 401 automatically when the Authorization header is absent,
+# which is the normal case for bot requests that carry X-Bot-Api-Key instead.
+_oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
 
 def _is_admin(user: User) -> bool:
@@ -148,6 +161,59 @@ async def get_current_admin(current_user: User = Depends(get_current_user)) -> U
             detail="admin privileges required",
         )
     return current_user
+
+
+async def get_current_user_or_bot(
+    request: Request,
+    token: Optional[str] = Depends(_oauth2_scheme_optional),
+) -> Union[User, dict]:
+    """FastAPI dependency accepting either a bot API key or a JWT bearer token.
+
+    Checks for an X-Bot-Api-Key header first.  If present and valid, returns a
+    minimal bot identity dict without performing a database lookup.  If absent,
+    falls through to standard JWT authentication and returns the User ORM object
+    with an ``is_bot=False`` attribute appended as a dynamic Python attribute.
+
+    Bot-related env vars consumed here:
+      BOT_API_KEY  — required; shared secret expected in X-Bot-Api-Key header.
+      BOT_USER_ID  — optional; user_id surfaced in the bot identity dict.
+
+    Args:
+        request: FastAPI Request — used to read the X-Bot-Api-Key header.
+        token:   Optional Bearer token from the OAuth2 scheme (auto_error
+                 disabled so the header may be absent on bot requests).
+
+    Returns:
+        dict with keys ``user_id`` and ``is_bot=True`` when bot auth succeeds,
+        or a User ORM instance with ``is_bot=False`` set as a dynamic attribute
+        when JWT auth succeeds.
+
+    Raises:
+        HTTP 401: Bot key present but invalid, or BOT_API_KEY env var not set.
+        HTTP 401: No bot header and JWT token is missing, invalid, or expired.
+    """
+    bot_key_header = request.headers.get("X-Bot-Api-Key")
+
+    if bot_key_header is not None:
+        expected = os.getenv("BOT_API_KEY")
+        if not expected or bot_key_header != expected:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="invalid bot API key",
+            )
+        return {"user_id": os.getenv("BOT_USER_ID", ""), "is_bot": True}
+
+    # No bot header — require a valid JWT and delegate to standard auth.
+    if token is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user = await get_current_user(token=token)
+    user.is_bot = False  # type: ignore[attr-defined]
+    return user
 
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)

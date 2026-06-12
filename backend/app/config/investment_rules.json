@@ -1,0 +1,44 @@
+{
+  "hard_stop_atr_multiplier": 1.5,
+  "atr_period": 14,
+
+  "volatile_bep_trigger_pct": 5.0,
+  "stable_bep_trigger_pct": 2.0,
+
+  "phase0_grace_days": 3,
+  "phase1_end_days": 10,
+  "phase2_extension_days": 5,
+
+  "analyst_target_premium_warn_pct": 40.0,
+
+  "reentry_cooloff_standard_days": 1,
+  "reentry_cooloff_volatile_days": 2,
+  "sndk_strike3_ban_days": 5,
+
+  "swing_stop_loss_pct": 5.0,
+  "swing_target1_pct": 7.0,
+  "swing_target2_pct": 12.0,
+  "swing_max_hold_days": 5,
+  "swing_risk_per_trade_pct": 1.0,
+  "swing_max_concurrent_trades": 2,
+
+  "volatile_tickers": ["SNDK", "NVDA", "ALAB", "INTC", "RDDT", "ZETA"],
+  "stable_tickers": ["CHE", "HALO", "SONY", "AAPL", "GOOGL"],
+  "avoid_tickers": ["OGN", "TCGL", "SMCI", "RGTI", "QBTS", "IONQ", "APLD", "STX", "TEM", "LULU", "OSCR", "SOUN", "NNOX", "RXRX", "SMR", "KTOS", "PATH", "ARM"],
+
+  "watchlist_tier_s": ["TSM", "AVGO", "META", "MA", "MSFT"],
+  "watchlist_tier_a": ["XOM", "PLTR", "PLD", "V"],
+  "watchlist_tier_b": ["PANW", "ZS", "NBIS", "MU", "AMD"],
+
+  "rules_text": [
+    "Never chase — wait for entry, not momentum",
+    "Hard stop set at entry, never moved against position",
+    "No averaging down on losing positions",
+    "Take partial profits at T1 (+7%), run remainder to T2 (+12%)",
+    "No same-day re-entry on stopped volatile positions (2-day cooloff)",
+    "SNDK: 3-strike rule = 5-day ban, two-bucket system only",
+    "Max 2 concurrent swing trades",
+    "No adding if analyst target already baked in (>40% premium)",
+    "FOMO checklist: planned setup? exit defined? position-sized? enter tomorrow?"
+  ]
+}
