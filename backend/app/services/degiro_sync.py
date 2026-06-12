@@ -76,6 +76,8 @@ async def _login(
         body_keys=list(body.keys()),
         data_keys=list((body.get("data") or {}).keys()),
         cookie_keys=list(resp.cookies.keys()),
+        response_header_keys=list(resp.headers.keys()),
+        set_cookie=resp.headers.get("set-cookie", ""),
         captcha_required=body.get("captchaRequired"),
         login_status=body.get("status"),
         login_status_text=body.get("statusText"),
@@ -101,6 +103,13 @@ async def _login(
             f"{_BASE}/login/secure/login/totp",
             **totp_kwargs,
         )
+        if not totp_resp.is_success:
+            logger.info(
+                "degiro_totp_error",
+                status=totp_resp.status_code,
+                body=totp_resp.text[:300],
+                cookie_keys=list(totp_resp.cookies.keys()),
+            )
         totp_resp.raise_for_status()
         totp_body = totp_resp.json()
         session_id = (
