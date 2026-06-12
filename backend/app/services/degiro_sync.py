@@ -397,7 +397,7 @@ async def sync_degiro_portfolio(ctx: dict) -> dict:
                 existing.name = name
                 existing.ticker = ticker
                 if stop_loss_price is not None:
-                    existing.stop_loss = stop_loss_price
+                    existing.hard_stop_loss = stop_loss_price
             else:
                 db.add(
                     PortfolioPosition(
@@ -412,7 +412,7 @@ async def sync_degiro_portfolio(ctx: dict) -> dict:
                         group_tag="DEGIRO_SYNC",
                         asset_type=asset_type,
                         is_excluded=False,
-                        stop_loss=stop_loss_price,
+                        hard_stop_loss=stop_loss_price,
                     )
                 )
             synced += 1

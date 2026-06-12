@@ -326,7 +326,8 @@ class PortfolioPosition(Base):
     is_excluded = Column(Boolean, server_default="false", nullable=False)
     asset_type = Column(String(20), server_default="stock", nullable=False)
     physical_type = Column(String(20), nullable=True)
-    stop_loss = Column(Numeric(18, 2), nullable=True)
+    hard_stop_loss = Column(Numeric(18, 2), nullable=True)
+    soft_stop_loss = Column(Numeric(18, 2), nullable=True)
     profit_taking = Column(Numeric(18, 2), nullable=True)
     # Rule-engine fields (added migration 0023) --------------------------------
     # T+2 settlement value in USD

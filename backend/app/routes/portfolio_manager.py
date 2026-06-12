@@ -188,13 +188,10 @@ async def add_position(
         group_tag=payload.group_tag,
         asset_type=payload.asset_type,
         physical_type=payload.physical_type,
-        stop_loss=payload.stop_loss,
+        hard_stop_loss=payload.hard_stop_loss,
+        soft_stop_loss=payload.soft_stop_loss,
         profit_taking=payload.profit_taking,
     )
-    db.add(position)
-    await db.commit()
-    await db.refresh(position)
-    return position
 
 
 @router.post(
@@ -226,7 +223,8 @@ async def bulk_import_positions(
             group_tag=p.group_tag,
             asset_type=p.asset_type,
             physical_type=p.physical_type,
-            stop_loss=p.stop_loss,
+            hard_stop_loss=p.hard_stop_loss,
+            soft_stop_loss=p.soft_stop_loss,
             profit_taking=p.profit_taking,
         )
         for p in payload
@@ -255,8 +253,10 @@ async def modify_position(
         position.group_tag = payload.group_tag
     if payload.is_excluded is not None:
         position.is_excluded = payload.is_excluded
-    if payload.stop_loss is not None:
-        position.stop_loss = payload.stop_loss if payload.stop_loss > 0 else None
+    if payload.hard_stop_loss is not None:
+        position.hard_stop_loss = payload.hard_stop_loss if payload.hard_stop_loss > 0 else None
+    if payload.soft_stop_loss is not None:
+        position.soft_stop_loss = payload.soft_stop_loss if payload.soft_stop_loss > 0 else None
     if payload.profit_taking is not None:
         position.profit_taking = payload.profit_taking if payload.profit_taking > 0 else None
     await db.commit()

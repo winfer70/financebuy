@@ -24,9 +24,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from ..logging_config import configure_structlog
-from ..models import Notification, PriceAlert
+from ..models import Notification, PriceAlert, Portfolio, PortfolioPosition
 from .heartbeat import write_worker_heartbeat
 from ..services.degiro_sync import sync_degiro_portfolio  # noqa: F401
+from .notifications import _send_telegram
 
 # Configure structlog before any logger is obtained — idempotent guard inside
 configure_structlog()
@@ -122,6 +123,65 @@ def _check_condition(condition: str, current_price: float, target_price: float) 
 
 
 # -- Main periodic job ─────────────────────────────────────────────────────
+
+
+async def _check_soft_stops(session: AsyncSession) -> None:
+    """Check soft_stop_loss on open positions; fire Telegram + in-app notification and clear."""
+    result = await session.execute(
+        select(PortfolioPosition, Portfolio.user_id)
+        .join(Portfolio, PortfolioPosition.portfolio_id == Portfolio.portfolio_id)
+        .where(
+            PortfolioPosition.soft_stop_loss.isnot(None),
+            PortfolioPosition.closed_at.is_(None),
+        )
+    )
+    rows = result.all()
+    if not rows:
+        return
+
+    by_ticker: dict[str, list] = {}
+    for pos, user_id in rows:
+        by_ticker.setdefault(pos.ticker, []).append((pos, user_id))
+
+    prices = await asyncio.gather(
+        *[asyncio.to_thread(_fetch_price, sym) for sym in by_ticker]
+    )
+    price_map = dict(zip(by_ticker.keys(), prices))
+
+    triggered = 0
+    now = datetime.utcnow()
+    for ticker, entries in by_ticker.items():
+        current_price = price_map.get(ticker, 0.0)
+        if current_price <= 0:
+            continue
+        for pos, user_id in entries:
+            soft_stop = float(pos.soft_stop_loss)
+            if current_price <= soft_stop:
+                title = f"Soft stop hit: {ticker} at ${current_price:.2f}"
+                body = f"{ticker} dropped to ${current_price:.2f} — below your soft stop ${soft_stop:.2f}. Review your position."
+                session.add(
+                    Notification(
+                        notification_id=uuid.uuid4(),
+                        user_id=user_id,
+                        event_type="soft_stop_loss",
+                        title=title,
+                        body=body,
+                        metadata_json={
+                            "ticker": ticker,
+                            "soft_stop": soft_stop,
+                            "triggered_price": current_price,
+                            "position_id": str(pos.position_id),
+                        },
+                    )
+                )
+                pos.soft_stop_loss = None
+                triggered += 1
+                logger.info("Soft stop triggered", ticker=ticker, soft_stop=soft_stop, price=current_price)
+                await _send_telegram(title, body)
+
+    if triggered > 0:
+        await session.commit()
+        logger.info("Soft stops triggered", count=triggered)
 
 
 async def evaluate_price_alerts(ctx: dict) -> None:
@@ -230,6 +290,9 @@ async def evaluate_price_alerts(ctx: dict) -> None:
         if triggered_count > 0:
             await session.commit()
             logger.info("Triggered alerts", count=triggered_count)
+
+        # ── soft stop-loss check ───────────────────────────────────────────
+        await _check_soft_stops(session)
 
     except Exception as exc:
         _last_error = str(exc)[:300]

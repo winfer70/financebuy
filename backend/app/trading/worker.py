@@ -626,7 +626,7 @@ async def run_portfolio_rules(ctx: dict, portfolio_id: str, user_id: str, schedu
             ticker = pos.ticker
             price = Decimal(str(price_map.get(ticker, float(pos.purchase_price))))
             purchase_price = Decimal(str(pos.purchase_price))
-            stop_loss = Decimal(str(pos.stop_loss or 0))
+            stop_loss = Decimal(str(pos.hard_stop_loss or 0))
             profit_taking = Decimal(str(pos.profit_taking or 0))
             t2_usd = Decimal(str(pos.t2_usd)) if pos.t2_usd is not None else None
             quantity = Decimal(str(pos.quantity))
