@@ -60,6 +60,7 @@ async def _login(
     """Login to DeGiro and return sessionId, or None on failure."""
     resp = await client.post(
         f"{_BASE}/login/secure/login",
+        follow_redirects=True,
         json={
             "username": username,
             "password": password,
@@ -217,7 +218,7 @@ async def sync_degiro_portfolio(ctx: dict) -> dict:
             "Origin": "https://trader.degiro.nl",
             "Referer": "https://trader.degiro.nl/trader/",
         }
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, headers=headers) as client:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False, headers=headers) as client:
             log.info("degiro_connecting")
             if session_id_env:
                 session_id = session_id_env
