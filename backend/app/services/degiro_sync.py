@@ -155,7 +155,19 @@ async def sync_degiro_portfolio(ctx: dict) -> dict:
         return {"status": "error", "reason": "DEGIRO_PORTFOLIO_ID is not a valid UUID"}
 
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/125.0.0.0 Safari/537.36"
+            ),
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Origin": "https://trader.degiro.nl",
+            "Referer": "https://trader.degiro.nl/trader/",
+        }
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, headers=headers) as client:
             log.info("degiro_connecting")
             session_id = await _login(client, username, password, totp_secret)
             if not session_id:
