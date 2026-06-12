@@ -95,8 +95,8 @@ async def _login(
 
     # Send TOTP if configured or required
     if totp_secret and (totp_needed or session_id):
-        otp_code = int(pyotp.TOTP(totp_secret).now())
-        totp_kwargs: dict = {"json": {"oneTimePassword": otp_code}}
+        otp_code = pyotp.TOTP(totp_secret).now()  # string, preserve leading zeros
+        totp_kwargs: dict = {"json": {"totpToken": otp_code}}
         if session_id:
             totp_kwargs["cookies"] = {"JSESSIONID": session_id}
         totp_resp = await client.post(
