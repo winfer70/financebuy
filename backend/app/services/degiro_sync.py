@@ -288,7 +288,7 @@ async def sync_degiro_portfolio(ctx: dict) -> dict:
                         ticker=ticker,
                         name=name,
                         isin=isin,
-                        degiro_product_id=raw_pos["id"],
+                        degiro_product_id=int(raw_pos["id"]),
                         quantity=quantity,
                         purchase_price=avg_price,
                         purchase_date=datetime.now(timezone.utc),
