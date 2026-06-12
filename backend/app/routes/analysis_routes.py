@@ -331,7 +331,7 @@ async def analyse_stock(
     flags = _check_rules(ticker, market_data, rules)
 
     # RAG: find similar past analyses with known outcomes
-    rag_context = query_similar(
+    rag_context = await query_similar(
         ticker=ticker,
         sector=market_data.get("sector", ""),
         recommendation=None,
@@ -369,7 +369,7 @@ async def analyse_stock(
     await db.refresh(analysis)
 
     # Store embedding in ChromaDB for future RAG (no-op if ChromaDB unreachable)
-    chromadb_id = store_analysis(
+    chromadb_id = await store_analysis(
         analysis_id=str(analysis.analysis_id),
         ticker=ticker,
         recommendation=rec,

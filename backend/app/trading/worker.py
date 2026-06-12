@@ -33,11 +33,13 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.dialects.postgresql import UUID
 
+import httpx
+
 from ..logging_config import configure_structlog
 from .heartbeat import write_worker_heartbeat
 from .scanner_worker import run_scanner  # noqa: F401 — registered in WorkerSettings
 from ..services.degiro_sync import sync_degiro_portfolio  # noqa: F401 — registered in WorkerSettings
-from ..services.chromadb_client import store_analysis, query_similar
+from ..services.chromadb_client import store_analysis
 
 # Configure structlog before any logger is obtained — idempotent guard inside
 configure_structlog()
@@ -786,254 +788,12 @@ async def run_portfolio_rules(ctx: dict, portfolio_id: str, user_id: str, schedu
 
 # -- arq worker settings ───────────────────────────────────────────────────
 
-async def evaluate_closed_trade(ctx: dict, analysis_id: str) -> None:
-    """Post-trade evaluation for a closed AI_PAPER position linked to a TradeAnalysis.
-
-    Called after an AI_PAPER position is closed (closed_at set).
-    1. Loads the TradeAnalysis row
-    2. Fetches the linked PortfolioPosition for actual entry/exit/pnl
-    3. Calls Ollama for a critique (what went right/wrong vs the rules)
-    4. Persists evaluation_json, outcome, actual_pnl_pct
-    5. Updates ChromaDB embedding with outcome data
-    """
-    import httpx
-    import json as _json
-
-    _OLLAMA_URL = os.getenv("OLLAMA_URL", "http://REDACTED:11434")
-    _OLLAMA_MODEL = os.getenv("OLLAMA_ANALYSIS_MODEL", "hermes3:8b")
-
-    async with _get_session() as db:
-        from ..models import TradeAnalysis, PortfolioPosition
-        from sqlalchemy import select as _select
-
-        result = await db.execute(
-            _select(TradeAnalysis).where(TradeAnalysis.analysis_id == analysis_id)
-        )
-        analysis = result.scalar_one_or_none()
-        if not analysis:
-            logger.warning("evaluate_closed_trade_not_found", analysis_id=analysis_id)
-            return
-
-        pos = None
-        if analysis.position_id:
-            pos_result = await db.execute(
-                _select(PortfolioPosition).where(
-                    PortfolioPosition.position_id == analysis.position_id
-                )
-            )
-            pos = pos_result.scalar_one_or_none()
-
-        actual_entry = float(pos.purchase_price) if pos and pos.purchase_price else None
-        # sold_reason may encode sell price; fall back to hard_stop_loss
-        actual_exit = float(pos.hard_stop_loss) if pos and pos.hard_stop_loss else None
-        pnl_pct = None
-        if actual_entry and actual_exit:
-            pnl_pct = round((actual_exit - actual_entry) / actual_entry * 100, 4)
-        outcome = "WIN" if pnl_pct and pnl_pct > 0 else ("LOSS" if pnl_pct and pnl_pct < 0 else "BREAK_EVEN")
-
-        market_snap = analysis.market_data_snapshot or {}
-        rec = analysis.recommendation or "N/A"
-        suggested_stop = float(analysis.suggested_stop) if analysis.suggested_stop else "N/A"
-        suggested_target = float(analysis.suggested_target) if analysis.suggested_target else "N/A"
-
-        critique_prompt = (
-            f"You are a trading coach reviewing a completed trade. Be concise and specific.\n\n"
-            f"Ticker: {analysis.ticker}\n"
-            f"Original recommendation: {rec}\n"
-            f"Suggested entry: {analysis.suggested_entry} | stop: {suggested_stop} | target: {suggested_target}\n"
-            f"Actual entry: {actual_entry} | exit: {actual_exit} | P&L: {pnl_pct}%\n"
-            f"Outcome: {outcome}\n"
-            f"Market data at analysis: price={market_snap.get('price')} RSI14={market_snap.get('rsi14')} "
-            f"SMA50={market_snap.get('sma50')} SMA200={market_snap.get('sma200')}\n\n"
-            f"In 3-4 sentences: what did the analysis get right or wrong? "
-            f"What single rule change would have improved this trade? "
-            f"Format: VERDICT: [correct|incorrect|partial]\nCRITIQUE: [your analysis]\nRULE_SUGGESTION: [specific rule tweak]"
-        )
-
-        raw_eval = ""
-        try:
-            timeout = httpx.Timeout(180.0, connect=10.0)
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(
-                    f"{_OLLAMA_URL}/api/generate",
-                    json={"model": _OLLAMA_MODEL, "prompt": critique_prompt, "stream": False,
-                          "options": {"temperature": 0.2, "num_predict": 512}},
-                )
-                resp.raise_for_status()
-                raw_eval = resp.json().get("response", "")
-        except Exception as exc:
-            logger.warning("evaluate_closed_trade_ollama_failed", error=str(exc))
-
-        analysis.evaluation_json = {"raw": raw_eval, "outcome": outcome, "pnl_pct": pnl_pct}
-        analysis.outcome = outcome
-        if pnl_pct is not None:
-            from decimal import Decimal
-            analysis.actual_pnl_pct = Decimal(str(pnl_pct))
-        if actual_entry:
-            analysis.actual_entry = Decimal(str(actual_entry))
-        if actual_exit:
-            analysis.actual_exit = Decimal(str(actual_exit))
-
-        await db.commit()
-
-        # Update ChromaDB embedding with outcome
-        if analysis.chromadb_id:
-            store_analysis(
-                analysis_id=str(analysis.analysis_id),
-                ticker=analysis.ticker,
-                recommendation=rec,
-                market_data=market_snap,
-                analysis_text=raw_eval or "",
-                outcome=outcome,
-                actual_pnl_pct=pnl_pct,
-            )
-
-        logger.info(
-            "evaluate_closed_trade_done",
-            analysis_id=analysis_id,
-            ticker=analysis.ticker,
-            outcome=outcome,
-            pnl_pct=pnl_pct,
-        )
-
-
-async def weekly_meta_analysis(ctx: dict) -> None:
-    """Weekly cron: analyse 90-day closed AI_PAPER trades, generate rule suggestions.
-
-    1. Fetch closed TradeAnalysis rows with outcomes from last 90 days
-    2. Build summary stats (win rate, avg P&L, common flags)
-    3. Ask Ollama to identify patterns and suggest rule changes
-    4. Save to rule_refinements table with status=pending
-    5. Telegram notification: new refinement available
-    """
-    import httpx
-    import json as _json
-    from datetime import timedelta
-
-    _OLLAMA_URL = os.getenv("OLLAMA_URL", "http://REDACTED:11434")
-    _OLLAMA_MODEL = os.getenv("OLLAMA_ANALYSIS_MODEL", "hermes3:8b")
-
-    cutoff = datetime.now(timezone.utc) - timedelta(days=90)
-
-    async with _get_session() as db:
-        from ..models import TradeAnalysis, RuleRefinement
-        from sqlalchemy import select as _select, func as _func
-
-        result = await db.execute(
-            _select(TradeAnalysis).where(
-                TradeAnalysis.outcome.in_(["WIN", "LOSS", "BREAK_EVEN"]),
-                TradeAnalysis.requested_at >= cutoff,
-            )
-        )
-        trades = result.scalars().all()
-
-        if len(trades) < 3:
-            logger.info("weekly_meta_analysis_skipped", reason="insufficient_trades", count=len(trades))
-            return
-
-        wins = [t for t in trades if t.outcome == "WIN"]
-        losses = [t for t in trades if t.outcome == "LOSS"]
-        win_rate = round(len(wins) / len(trades) * 100, 2)
-        pnl_values = [float(t.actual_pnl_pct) for t in trades if t.actual_pnl_pct is not None]
-        avg_pnl = round(sum(pnl_values) / len(pnl_values), 4) if pnl_values else 0.0
-
-        trade_summaries = []
-        for t in trades[:20]:
-            snap = t.market_data_snapshot or {}
-            eval_json = t.evaluation_json or {}
-            trade_summaries.append(
-                f"- {t.ticker}: rec={t.outcome}, P&L={t.actual_pnl_pct}%, "
-                f"RSI={snap.get('rsi14')}, entry={t.suggested_entry}, stop={t.suggested_stop}, "
-                f"critique={str(eval_json.get('raw', ''))[:100]}"
-            )
-
-        summary_text = "\n".join(trade_summaries)
-        period_start = cutoff
-        period_end = datetime.now(timezone.utc)
-
-        prompt = (
-            f"You are a trading coach reviewing 90 days of AI paper trades. "
-            f"Trade count: {len(trades)} | Win rate: {win_rate}% | Avg P&L: {avg_pnl}%\n\n"
-            f"Recent trades:\n{summary_text}\n\n"
-            f"Identify 2-3 specific patterns that explain wins vs losses. "
-            f"Suggest concrete rule changes (numbers where possible).\n\n"
-            f"Format your response exactly as:\n"
-            f"PATTERN_SUMMARY: [2-3 sentence pattern description]\n"
-            f"RULE_SUGGESTIONS:\n- [rule 1 change]\n- [rule 2 change]\n- [rule 3 change]"
-        )
-
-        raw_response = ""
-        try:
-            timeout = httpx.Timeout(240.0, connect=10.0)
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(
-                    f"{_OLLAMA_URL}/api/generate",
-                    json={"model": _OLLAMA_MODEL, "prompt": prompt, "stream": False,
-                          "options": {"temperature": 0.3, "num_predict": 768}},
-                )
-                resp.raise_for_status()
-                raw_response = resp.json().get("response", "")
-        except Exception as exc:
-            logger.warning("weekly_meta_analysis_ollama_failed", error=str(exc))
-
-        # Parse pattern summary and rule suggestions
-        pattern_summary = ""
-        suggested_rules = []
-        if raw_response:
-            import re as _re
-            m = _re.search(r"PATTERN_SUMMARY:\s*(.+?)(?:\nRULE_SUGGESTIONS:|$)", raw_response, _re.DOTALL)
-            if m:
-                pattern_summary = m.group(1).strip()
-            rules_m = _re.search(r"RULE_SUGGESTIONS:\s*((?:-.+\n?)+)", raw_response)
-            if rules_m:
-                suggested_rules = [
-                    line.lstrip("- ").strip()
-                    for line in rules_m.group(1).splitlines()
-                    if line.strip().startswith("-")
-                ]
-
-        refinement = RuleRefinement(
-            refinement_id=_uuid_mod.uuid4(),
-            period_start=period_start,
-            period_end=period_end,
-            trade_count=len(trades),
-            win_rate_pct=win_rate,
-            avg_pnl_pct=avg_pnl,
-            pattern_summary=pattern_summary,
-            suggested_rules={"rules": suggested_rules},
-            raw_ollama_response=raw_response,
-            status="pending",
-        )
-        db.add(refinement)
-        await db.commit()
-
-        # Telegram notification
-        try:
-            _token = os.getenv("TELEGRAM_BOT_TOKEN")
-            _chat = os.getenv("TELEGRAM_CHAT_ID")
-            if _token and _chat:
-                msg = (
-                    f"📊 *Weekly Rule Refinement Ready*\n"
-                    f"{len(trades)} trades | Win rate: {win_rate}% | Avg P&L: {avg_pnl:+.2f}%\n\n"
-                    f"Use /refinements to review suggestions."
-                )
-                async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
-                    await client.post(
-                        f"https://api.telegram.org/bot{_token}/sendMessage",
-                        json={"chat_id": _chat, "text": msg, "parse_mode": "Markdown"},
-                    )
-        except Exception:
-            pass
-
-        logger.info(
-            "weekly_meta_analysis_done",
-            trade_count=len(trades),
-            win_rate=win_rate,
-            refinement_id=str(refinement.refinement_id),
-        )
-
-
 async def _periodic_heartbeat(ctx: dict) -> None:
+    """Keep the health-check key alive between jobs.
+
+    Runs every 5 minutes via arq cron so the worker shows healthy
+    even when no backtest or scanner jobs are queued.
+    """
     await write_worker_heartbeat(
         "trading-worker", _REDIS_URL, jobs_processed_delta=0, last_error=""
     )
@@ -1053,17 +813,214 @@ async def _worker_startup(ctx: dict) -> None:
     )
 
 
-class WorkerSettings:
-    """arq worker configuration.
+_OLLAMA_URL = os.getenv("OLLAMA_URL", "http://REDACTED:11434")
+_TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+_TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
-    Run with: ``arq app.trading.worker.WorkerSettings``
-    """
-    functions = [run_backtest, run_scanner, run_portfolio_rules, sync_degiro_portfolio, evaluate_closed_trade, weekly_meta_analysis]
+
+async def _ollama(prompt: str) -> str:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
+        r = await client.post(
+            f"{_OLLAMA_URL}/api/generate",
+            json={"model": "hermes3:8b", "prompt": prompt, "stream": False, "options": {"num_predict": 1024}},
+        )
+        r.raise_for_status()
+        return r.json().get("response", "")
+
+
+async def _telegram_notify(text: str) -> None:
+    if not (_TELEGRAM_BOT_TOKEN and _TELEGRAM_CHAT_ID):
+        return
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(
+                f"https://api.telegram.org/bot{_TELEGRAM_BOT_TOKEN}/sendMessage",
+                json={"chat_id": _TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"},
+            )
+    except Exception:
+        pass
+
+
+async def evaluate_closed_trade(ctx: dict, analysis_id: str) -> None:
+    """Evaluate a closed AI_PAPER trade: compute outcome, run Ollama critique, update ChromaDB."""
+    from ..models import TradeAnalysis, PortfolioPosition, PortfolioTrade
+
+    async with _SessionLocal() as db:
+        result = await db.execute(
+            select(TradeAnalysis).where(TradeAnalysis.analysis_id == _uuid_mod.UUID(analysis_id))
+        )
+        analysis = result.scalar_one_or_none()
+        if analysis is None:
+            logger.warning("evaluate_closed_trade_not_found", analysis_id=analysis_id)
+            return
+
+        pos = None
+        if analysis.position_id:
+            pos_result = await db.execute(
+                select(PortfolioPosition).where(PortfolioPosition.position_id == analysis.position_id)
+            )
+            pos = pos_result.scalar_one_or_none()
+
+        actual_entry = float(pos.purchase_price) if pos else None
+
+        # Sell price from PortfolioTrade SELL record linked to this position
+        actual_exit = None
+        if pos:
+            trade_result = await db.execute(
+                select(PortfolioTrade).where(
+                    PortfolioTrade.portfolio_id == pos.portfolio_id,
+                    PortfolioTrade.ticker == pos.ticker,
+                    PortfolioTrade.trade_type == "SELL",
+                ).order_by(PortfolioTrade.created_at.desc()).limit(1)
+            )
+            sell_trade = trade_result.scalar_one_or_none()
+            if sell_trade:
+                actual_exit = float(sell_trade.price)
+
+        actual_pnl_pct = None
+        if actual_entry and actual_exit:
+            actual_pnl_pct = (actual_exit - actual_entry) / actual_entry * 100
+
+        outcome = "OPEN"
+        if actual_pnl_pct is not None:
+            if actual_pnl_pct > 1.0:
+                outcome = "WIN"
+            elif actual_pnl_pct < -1.0:
+                outcome = "LOSS"
+            else:
+                outcome = "BREAK_EVEN"
+
+        prompt = (
+            f"You are a trading coach reviewing a closed paper trade.\n"
+            f"Ticker: {analysis.ticker}\n"
+            f"Recommendation: {analysis.recommendation}\n"
+            f"Suggested entry: {analysis.suggested_entry}, stop: {analysis.suggested_stop}, target: {analysis.suggested_target}\n"
+            f"Actual entry: {actual_entry}, exit: {actual_exit}, P&L: {actual_pnl_pct:.2f}%\n"
+            f"Original analysis: {(analysis.analysis_json or {}).get('raw', '')[:500]}\n\n"
+            f"Critique this trade in 3 sentences. What went right or wrong? "
+            f"What single rule change would have improved the outcome? Be specific.\n"
+            f"CRITIQUE:"
+        )
+        try:
+            critique = await _ollama(prompt)
+        except Exception as exc:
+            critique = f"Ollama unavailable: {exc}"
+
+        analysis.outcome = outcome
+        analysis.actual_entry = Decimal(str(actual_entry)) if actual_entry else None
+        analysis.actual_exit = Decimal(str(actual_exit)) if actual_exit else None
+        analysis.actual_pnl_pct = Decimal(str(round(actual_pnl_pct, 4))) if actual_pnl_pct is not None else None
+        analysis.evaluation_json = {"critique": critique, "outcome": outcome}
+        await db.commit()
+
+        market_data = analysis.market_data_snapshot or {}
+        chroma_id = await store_analysis(
+            analysis_id=str(analysis.analysis_id),
+            ticker=analysis.ticker,
+            recommendation=analysis.recommendation,
+            market_data=market_data,
+            analysis_text=(analysis.analysis_json or {}).get("raw", "")[:500],
+            outcome=outcome,
+            actual_pnl_pct=actual_pnl_pct,
+        )
+        if chroma_id:
+            analysis.chromadb_id = chroma_id
+            await db.commit()
+
+    logger.info("evaluate_closed_trade_done", analysis_id=analysis_id, outcome=outcome)
+
+
+async def weekly_meta_analysis(ctx: dict) -> None:
+    """Weekly cron: analyse 90 days of closed AI_PAPER trades, generate rule refinement suggestions."""
+    from ..models import TradeAnalysis, RuleRefinement
+    from sqlalchemy import and_
+
+    ninety_days_ago = datetime.now(timezone.utc) - timedelta(days=90)
+
+    async with _SessionLocal() as db:
+        result = await db.execute(
+            select(TradeAnalysis).where(
+                and_(
+                    TradeAnalysis.outcome != "OPEN",
+                    TradeAnalysis.requested_at >= ninety_days_ago,
+                )
+            )
+        )
+        trades = result.scalars().all()
+
+    if len(trades) < 5:
+        logger.info("weekly_meta_analysis_skipped", reason="too_few_trades", count=len(trades))
+        return
+
+    wins = [t for t in trades if t.outcome == "WIN"]
+    losses = [t for t in trades if t.outcome == "LOSS"]
+    win_rate = len(wins) / len(trades) * 100
+    avg_pnl = sum(float(t.actual_pnl_pct or 0) for t in trades) / len(trades)
+
+    trade_summaries = []
+    for t in trades[:30]:
+        pnl = float(t.actual_pnl_pct or 0)
+        trade_summaries.append(
+            f"- {t.ticker} | {t.recommendation} | P&L: {pnl:+.2f}% | Outcome: {t.outcome}"
+        )
+    summary_block = "\n".join(trade_summaries)
+
+    prompt = (
+        f"You are a quantitative trading coach. Analyse these {len(trades)} closed paper trades "
+        f"(90-day window). Win rate: {win_rate:.1f}%. Avg P&L: {avg_pnl:+.2f}%.\n\n"
+        f"Trades:\n{summary_block}\n\n"
+        f"Identify 2-3 concrete rule changes that would improve win rate or risk/reward. "
+        f"Format each rule as a short imperative sentence (e.g. 'Avoid buying when RSI14 > 70').\n"
+        f"PATTERN_SUMMARY: (1-2 sentences describing what you observe)\n"
+        f"RULES:\n1.\n2.\n3."
+    )
+
+    try:
+        raw = await _ollama(prompt)
+    except Exception as exc:
+        logger.warning("weekly_meta_analysis_ollama_failed", error=str(exc))
+        return
+
+    # Parse response
+    pattern_summary = ""
+    rules = []
+    for line in raw.splitlines():
+        ls = line.strip()
+        if ls.startswith("PATTERN_SUMMARY:"):
+            pattern_summary = ls[len("PATTERN_SUMMARY:"):].strip()
+        elif ls and ls[0].isdigit() and ls[1:3] in (". ", ") "):
+            rules.append(ls[2:].strip() if ls[1] == "." else ls[3:].strip())
+
+    async with _SessionLocal() as db:
+        refinement = RuleRefinement(
+            period_start=ninety_days_ago,
+            period_end=datetime.now(timezone.utc),
+            trade_count=len(trades),
+            win_rate_pct=Decimal(str(round(win_rate, 2))),
+            avg_pnl_pct=Decimal(str(round(avg_pnl, 4))),
+            pattern_summary=pattern_summary or raw[:500],
+            suggested_rules={"rules": rules},
+            raw_ollama_response=raw,
+            status="pending",
+        )
+        db.add(refinement)
+        await db.commit()
+
+    await _telegram_notify(
+        f"*Weekly Meta-Analysis*\n"
+        f"{len(trades)} trades | Win rate: {win_rate:.1f}% | Avg P&L: {avg_pnl:+.2f}%\n"
+        f"New rule suggestions ready. Use /refinements to review."
+    )
+    logger.info("weekly_meta_analysis_done", trades=len(trades), win_rate=win_rate)
+
+
+class WorkerSettings:
+    functions = [run_backtest, run_scanner, run_portfolio_rules, sync_degiro_portfolio, evaluate_closed_trade]
     queue_name = "arq:trading"
     cron_jobs = [
         cron(_periodic_heartbeat, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
         cron(sync_degiro_portfolio, hour=2, minute=0),
-        cron(weekly_meta_analysis, weekday=0, hour=3, minute=0),  # Monday 03:00
+        cron(weekly_meta_analysis, weekday=0, hour=3, minute=0),
     ]
     on_startup = _worker_startup
     redis_settings = RedisSettings.from_dsn(_REDIS_URL)

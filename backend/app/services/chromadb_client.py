@@ -1,6 +1,7 @@
 """
 chromadb_client.py — ChromaDB client for trade analysis embeddings.
 
+Uses raw httpx REST calls (no chromadb Python package — requires pydantic v2).
 Collection: trade_analyses
 Embedding: ticker + sector + recommendation + market_data summary
 Used for RAG injection in analysis_routes.py — finds similar past trades with outcomes.
@@ -9,35 +10,41 @@ Used for RAG injection in analysis_routes.py — finds similar past trades with 
 import os
 from typing import Optional
 
-import chromadb
+import httpx
 import structlog
 
 logger = structlog.get_logger("tickerTap.chromadb")
 
 _CHROMADB_URL = os.getenv("CHROMADB_URL", "http://REDACTED:8000")
-_COLLECTION = "trade_analyses"
+_COLLECTION_NAME = "trade_analyses"
+_TIMEOUT = httpx.Timeout(10.0)
 
-_client: Optional[chromadb.HttpClient] = None
-_collection = None
+_collection_id: Optional[str] = None
 
 
-def _get_client():
-    global _client, _collection
-    if _client is None:
-        try:
-            _client = chromadb.HttpClient(
-                host=_CHROMADB_URL.replace("http://", "").split(":")[0],
-                port=int(_CHROMADB_URL.rsplit(":", 1)[-1]),
+async def _get_collection_id() -> Optional[str]:
+    global _collection_id
+    if _collection_id:
+        return _collection_id
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            r = await client.get(f"{_CHROMADB_URL}/api/v1/collections/{_COLLECTION_NAME}")
+            if r.status_code == 200:
+                _collection_id = r.json()["id"]
+                return _collection_id
+            # Create if not found
+            r2 = await client.post(
+                f"{_CHROMADB_URL}/api/v1/collections",
+                json={"name": _COLLECTION_NAME, "metadata": {"hnsw:space": "cosine"}},
             )
-            _collection = _client.get_or_create_collection(
-                name=_COLLECTION,
-                metadata={"hnsw:space": "cosine"},
-            )
-        except Exception as exc:
-            logger.warning("chromadb_init_failed", error=str(exc))
-            _client = None
-            _collection = None
-    return _collection
+            if r2.status_code in (200, 201):
+                _collection_id = r2.json()["id"]
+                return _collection_id
+            logger.warning("chromadb_collection_create_failed", status=r2.status_code)
+            return None
+    except Exception as exc:
+        logger.warning("chromadb_init_failed", error=str(exc))
+        return None
 
 
 def _build_doc(
@@ -63,7 +70,7 @@ def _build_doc(
     )
 
 
-def store_analysis(
+async def store_analysis(
     analysis_id: str,
     ticker: str,
     recommendation: Optional[str],
@@ -73,8 +80,8 @@ def store_analysis(
     actual_pnl_pct: Optional[float] = None,
 ) -> Optional[str]:
     """Upsert a trade analysis embedding. Returns chromadb_id or None on failure."""
-    col = _get_client()
-    if col is None:
+    col_id = await _get_collection_id()
+    if col_id is None:
         return None
     doc_id = f"analysis_{analysis_id}"
     doc = _build_doc(analysis_id, ticker, recommendation, market_data, analysis_text, outcome, actual_pnl_pct)
@@ -85,33 +92,48 @@ def store_analysis(
         "sector": market_data.get("sector", ""),
     }
     try:
-        col.upsert(ids=[doc_id], documents=[doc], metadatas=[metadata])
-        return doc_id
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            r = await client.post(
+                f"{_CHROMADB_URL}/api/v1/collections/{col_id}/upsert",
+                json={"ids": [doc_id], "documents": [doc], "metadatas": [metadata]},
+            )
+            if r.status_code in (200, 201):
+                return doc_id
+            logger.warning("chromadb_upsert_failed", status=r.status_code, body=r.text[:200])
+            return None
     except Exception as exc:
         logger.warning("chromadb_upsert_failed", error=str(exc))
         return None
 
 
-def query_similar(
+async def query_similar(
     ticker: str,
     sector: str,
     recommendation: Optional[str],
     n_results: int = 3,
 ) -> list:
     """Find similar past analyses with known outcomes for RAG context."""
-    col = _get_client()
-    if col is None:
+    col_id = await _get_collection_id()
+    if col_id is None:
         return []
     query = f"Ticker: {ticker} | Sector: {sector} | Rec: {recommendation or 'N/A'}"
     try:
-        results = col.query(
-            query_texts=[query],
-            n_results=n_results,
-            where={"outcome": {"$ne": "OPEN"}},
-        )
-        docs = results.get("documents", [[]])[0]
-        metas = results.get("metadatas", [[]])[0]
-        return [{"doc": d, "meta": m} for d, m in zip(docs, metas)]
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            r = await client.post(
+                f"{_CHROMADB_URL}/api/v1/collections/{col_id}/query",
+                json={
+                    "query_texts": [query],
+                    "n_results": n_results,
+                    "where": {"outcome": {"$ne": "OPEN"}},
+                },
+            )
+            if r.status_code != 200:
+                logger.warning("chromadb_query_failed", status=r.status_code)
+                return []
+            data = r.json()
+            docs = data.get("documents", [[]])[0]
+            metas = data.get("metadatas", [[]])[0]
+            return [{"doc": d, "meta": m} for d, m in zip(docs, metas)]
     except Exception as exc:
         logger.warning("chromadb_query_failed", error=str(exc))
         return []
