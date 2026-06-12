@@ -34,7 +34,7 @@ from typing import Any
 import httpx
 import pyotp
 import structlog
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -177,12 +177,11 @@ async def _get_transactions(
     to_date: date,
 ) -> list[dict[str, Any]]:
     resp = await client.get(
-        f"{_BASE}/account/secure/v5/transactions",
+        f"{_BASE}/account/secure/v5/transactions;jsessionid={session_id}",
         params={
             "fromDate": from_date.strftime("%d/%m/%Y"),
             "toDate": to_date.strftime("%d/%m/%Y"),
             "intAccount": int_account,
-            "sessionId": session_id,
         },
     )
     resp.raise_for_status()
@@ -426,7 +425,10 @@ async def _delete_manual_positions(portfolio_id: uuid.UUID, db: AsyncSession) ->
         delete(PortfolioPosition)
         .where(
             PortfolioPosition.portfolio_id == portfolio_id,
-            PortfolioPosition.group_tag != "DEGIRO_SYNC",
+            or_(
+                PortfolioPosition.group_tag.is_(None),
+                PortfolioPosition.group_tag != "DEGIRO_SYNC",
+            ),
             PortfolioPosition.asset_type.in_(["stock", "etf"]),
             PortfolioPosition.closed_at.is_(None),
         )
