@@ -58,51 +58,53 @@ async def _login(
     totp_secret: str | None,
 ) -> str | None:
     """Login to DeGiro and return sessionId, or None on failure."""
-    # Preflight: seed initial cookies (CSRF tokens etc.) that DeGiro expects
-    try:
-        pre = await client.get(f"{_BASE}/login/nl", follow_redirects=True)
-        logger.info("degiro_preflight", status=pre.status_code, cookies=list(client.cookies.keys()))
-    except Exception:
-        pass
+    # Attempt 1: single-step login with TOTP embedded in initial POST
+    otp_str = pyotp.TOTP(totp_secret).now() if totp_secret else None
+    login_body: dict[str, Any] = {
+        "username": username,
+        "password": password,
+        "isPassCodeReset": False,
+        "isRedirectToMobile": False,
+    }
+    if otp_str:
+        login_body["oneTimePassword"] = int(otp_str)
 
     resp = await client.post(
         f"{_BASE}/login/secure/login",
         follow_redirects=True,
-        json={
-            "username": username,
-            "password": password,
-            "isPassCodeReset": False,
-            "isRedirectToMobile": False,
-        },
+        json=login_body,
     )
     resp.raise_for_status()
     body = resp.json()
+    login_status = body.get("status")
 
     logger.info(
         "degiro_login_response",
         status=resp.status_code,
-        full_body=body,
+        login_status=login_status,
+        login_status_text=body.get("statusText"),
         cookie_keys=list(resp.cookies.keys()),
         client_cookie_keys=list(client.cookies.keys()),
-        login_status=body.get("status"),
-        login_status_text=body.get("statusText"),
+        included_otp=otp_str is not None,
     )
 
-    session_id: str | None = resp.cookies.get("JSESSIONID") or (
-        body.get("data") or {}
-    ).get("sessionId")
-    login_status = body.get("status")
+    session_id: str | None = (
+        resp.cookies.get("JSESSIONID")
+        or client.cookies.get("JSESSIONID")
+        or (body.get("data") or {}).get("sessionId")
+    )
 
-    # status=6 means TOTP required — call /login/totp with oneTimePassword (int)
+    # If single-step worked, session_id is set and login_status != 6
+    if session_id and login_status != 6:
+        logger.info("degiro_login_single_step_ok")
+        return session_id
+
+    # status=6 means TOTP still required — two-step flow
     if login_status == 6 and totp_secret:
-        otp_str = pyotp.TOTP(totp_secret).now()  # zero-padded 6-char string
+        # Re-generate OTP (time may have advanced)
+        otp_str = pyotp.TOTP(totp_secret).now()
         otp_int = int(otp_str)
-        logger.info(
-            "degiro_totp_sending",
-            otp_str=otp_str,
-            otp_int=otp_int,
-            client_cookies_before=list(client.cookies.keys()),
-        )
+        logger.info("degiro_totp_sending", otp_int=otp_int)
         totp_resp = await client.post(
             f"{_BASE}/login/secure/login/totp",
             json={"oneTimePassword": otp_int},
@@ -110,34 +112,18 @@ async def _login(
         logger.info(
             "degiro_totp_result",
             status=totp_resp.status_code,
-            cookie_keys=list(totp_resp.cookies.keys()),
-            client_cookies_after=list(client.cookies.keys()),
-            location=totp_resp.headers.get("location", ""),
             body_preview=totp_resp.text[:400],
         )
         if not totp_resp.is_success:
-            # Retry with zero-padded string format
-            logger.info("degiro_totp_retry_string_format", otp_str=otp_str)
-            totp_resp2 = await client.post(
-                f"{_BASE}/login/secure/login/totp",
-                json={"oneTimePassword": otp_str},
-            )
-            logger.info(
-                "degiro_totp_retry_result",
-                status=totp_resp2.status_code,
-                body_preview=totp_resp2.text[:400],
-            )
-            if totp_resp2.is_success:
-                totp_resp = totp_resp2
-            else:
-                totp_resp.raise_for_status()
+            totp_resp.raise_for_status()
         totp_body = totp_resp.json() if totp_resp.text else {}
         session_id = (
             totp_resp.cookies.get("JSESSIONID")
             or client.cookies.get("JSESSIONID")
             or (totp_body.get("data") or {}).get("sessionId")
         )
-    elif not session_id:
+
+    if not session_id:
         return None
 
     return session_id
