@@ -97,6 +97,7 @@ async def _login(
     if totp_secret and (totp_needed or session_id):
         otp_code = pyotp.TOTP(totp_secret).now()  # string, preserve leading zeros
         totp_kwargs: dict = {"json": {"totpToken": otp_code}}
+        logger.info("degiro_totp_sending", otp_code=otp_code)
         if session_id:
             totp_kwargs["cookies"] = {"JSESSIONID": session_id}
         totp_resp = await client.post(
