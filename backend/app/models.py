@@ -1124,3 +1124,27 @@ class TradeAnalysis(Base):
     evaluation_json = Column(JSON, nullable=True)
     chromadb_id = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class RuleRefinement(Base):
+    """AI-generated rule change suggestion from weekly meta-analysis.
+
+    Status: pending → approved | rejected.
+    Rules never auto-update — user must approve via /approve_refinement bot command.
+    """
+
+    __tablename__ = "rule_refinements"
+
+    refinement_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    generated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    period_start = Column(DateTime(timezone=True), nullable=True)
+    period_end = Column(DateTime(timezone=True), nullable=True)
+    trade_count = Column(Integer, nullable=True)
+    win_rate_pct = Column(Numeric(5, 2), nullable=True)
+    avg_pnl_pct = Column(Numeric(8, 4), nullable=True)
+    pattern_summary = Column(Text, nullable=True)
+    suggested_rules = Column(JSONB, nullable=True)
+    raw_ollama_response = Column(Text, nullable=True)
+    status = Column(String(16), server_default="pending", nullable=False)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

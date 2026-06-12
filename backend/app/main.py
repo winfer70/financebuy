@@ -65,6 +65,7 @@ from .routes import (
 from .routes.auth_routes import get_current_admin, register_deletion_purge
 from .routes.feedback import register_outcome_checker
 from .routes.news import register_retention_task
+from .telegram_bot.bot import start_bot, stop_bot
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 configure_structlog()
@@ -176,6 +177,14 @@ async def _startup_checks():
 
     # Seed system strategies from templates on first run
     await _seed_system_strategies()
+
+    # Start Telegram bot (no-op if TELEGRAM_BOT_TOKEN not set)
+    await start_bot()
+
+
+@app.on_event("shutdown")
+async def _shutdown():
+    await stop_bot()
 
 
 # ── Middleware stack (registered last → executes first) ──────────────────────

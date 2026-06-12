@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..models import TradeAnalysis
+from ..services.chromadb_client import query_similar, store_analysis
 from .auth_routes import get_current_user_or_bot
 
 logger = structlog.get_logger("tickerTap.analysis")
@@ -201,7 +202,7 @@ def _check_rules(ticker: str, market_data: dict, rules: dict) -> list:
     return flags
 
 
-def _build_prompt(ticker: str, market_data: dict, rules: dict, flags: list) -> str:
+def _build_prompt(ticker: str, market_data: dict, rules: dict, flags: list, rag_context: list = None) -> str:
     rules_text = "\n".join(f"- {r}" for r in rules.get("rules_text", []))
     flag_text = "\n".join(f"- [{f['severity'].upper()}] {f['rule']}: {f['detail']}" for f in flags) if flags else "- No rule violations detected"
 
@@ -219,6 +220,11 @@ def _build_prompt(ticker: str, market_data: dict, rules: dict, flags: list) -> s
     atr_val = market_data.get("atr14")
     stop_hint = f"{price - 1.5 * atr_val:.2f}" if price and atr_val else "N/A"
     atr_mult = rules.get("hard_stop_atr_multiplier", 1.5)
+
+    rag_section = ""
+    if rag_context:
+        rag_lines = "\n".join(f"- {r['doc']}" for r in rag_context[:3])
+        rag_section = f"\n## Similar Past Trades (for context only)\n{rag_lines}\n"
 
     return f"""You are a disciplined swing trader analyst. Analyse {ticker} using ONLY the data and rules provided. Be concise and specific.
 
@@ -238,7 +244,7 @@ def _build_prompt(ticker: str, market_data: dict, rules: dict, flags: list) -> s
 - Sector: {sector}
 - Analyst mean target: {analyst_t}
 - Suggested hard stop (price - {atr_mult}×ATR): ${stop_hint}
-
+{rag_section}
 ## Instructions
 Provide a structured analysis with EXACTLY these fields (one per line):
 RECOMMENDATION: [BUY|HOLD|AVOID|WATCH]
@@ -324,7 +330,15 @@ async def analyse_stock(
     market_data = _fetch_market_data(ticker)
     flags = _check_rules(ticker, market_data, rules)
 
-    prompt = _build_prompt(ticker, market_data, rules, flags)
+    # RAG: find similar past analyses with known outcomes
+    rag_context = query_similar(
+        ticker=ticker,
+        sector=market_data.get("sector", ""),
+        recommendation=None,
+        n_results=3,
+    )
+
+    prompt = _build_prompt(ticker, market_data, rules, flags, rag_context)
     raw_response = await _call_ollama(prompt)
     parsed = _parse_ollama_response(raw_response)
 
@@ -354,11 +368,26 @@ async def analyse_stock(
     await db.commit()
     await db.refresh(analysis)
 
+    # Store embedding in ChromaDB for future RAG (no-op if ChromaDB unreachable)
+    chromadb_id = store_analysis(
+        analysis_id=str(analysis.analysis_id),
+        ticker=ticker,
+        recommendation=rec,
+        market_data=market_data,
+        analysis_text=parsed.get("analysis_text", ""),
+        outcome="OPEN",
+    )
+    if chromadb_id:
+        analysis.chromadb_id = chromadb_id
+        await db.commit()
+
     logger.info(
         "trade_analysis_created",
         ticker=ticker,
         recommendation=rec,
         analysis_id=str(analysis.analysis_id),
+        rag_results=len(rag_context),
+        chromadb_stored=chromadb_id is not None,
     )
 
     return AnalysisResponse(
@@ -374,3 +403,78 @@ async def analyse_stock(
         analysis_text=parsed.get("analysis_text", raw_response),
         requested_at=analysis.requested_at.isoformat() if analysis.requested_at else datetime.now(timezone.utc).isoformat(),
     )
+
+
+# ── Refinement endpoints ──────────────────────────────────────────────────────
+
+class ApproveRefinementRequest(BaseModel):
+    refinement_id_prefix: str
+
+
+@router.get("/refinements")
+async def list_refinements(
+    db: AsyncSession = Depends(get_db),
+    _auth=Depends(get_current_user_or_bot),
+):
+    """List all rule refinements ordered by most recent."""
+    from sqlalchemy import select as _select
+    from ..models import RuleRefinement
+
+    result = await db.execute(
+        _select(RuleRefinement).order_by(RuleRefinement.generated_at.desc()).limit(20)
+    )
+    rows = result.scalars().all()
+    return [
+        {
+            "refinement_id": str(r.refinement_id),
+            "status": r.status,
+            "trade_count": r.trade_count,
+            "win_rate_pct": float(r.win_rate_pct) if r.win_rate_pct else None,
+            "avg_pnl_pct": float(r.avg_pnl_pct) if r.avg_pnl_pct else None,
+            "pattern_summary": r.pattern_summary,
+            "suggested_rules": r.suggested_rules,
+            "generated_at": r.generated_at.isoformat() if r.generated_at else None,
+        }
+        for r in rows
+    ]
+
+
+@router.post("/refinements/approve")
+async def approve_refinement(
+    body: ApproveRefinementRequest,
+    db: AsyncSession = Depends(get_db),
+    _auth=Depends(get_current_user_or_bot),
+):
+    """Approve a rule refinement: apply suggested rules to investment_rules.json."""
+    from sqlalchemy import select as _select
+    from ..models import RuleRefinement
+
+    result = await db.execute(_select(RuleRefinement))
+    all_refs = result.scalars().all()
+    match = next(
+        (r for r in all_refs if str(r.refinement_id).startswith(body.refinement_id_prefix)),
+        None,
+    )
+    if not match:
+        raise HTTPException(status_code=404, detail="Refinement not found")
+    if match.status != "pending":
+        raise HTTPException(status_code=400, detail=f"Refinement already {match.status}")
+
+    suggested = (match.suggested_rules or {}).get("rules", [])
+
+    # Append suggested rules to rules_text in investment_rules.json
+    try:
+        rules = json.loads(_RULES_PATH.read_text(encoding="utf-8"))
+        existing = rules.get("rules_text", [])
+        new_rules = [r for r in suggested if r not in existing]
+        rules["rules_text"] = existing + new_rules
+        _RULES_PATH.write_text(json.dumps(rules, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to update rules: {exc}")
+
+    match.status = "approved"
+    from datetime import datetime as _dt, timezone as _tz
+    match.approved_at = _dt.now(_tz.utc)
+    await db.commit()
+
+    return {"status": "approved", "applied_rules": suggested}
