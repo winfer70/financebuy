@@ -9,6 +9,7 @@ Route prefix: /api/v1/portfolio-manager  (registered in main.py)
 """
 
 import asyncio
+import os
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Dict, List
@@ -20,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..models import Portfolio, PortfolioPosition, PortfolioTrade
+from ..models import Portfolio, PortfolioPosition, PortfolioTrade, TradeAnalysis
 from ..schemas import (
     CashAdjustmentRequest,
     PerformancePointOut,
@@ -308,6 +309,15 @@ async def sell_position(
         quantity_sold = float(position.quantity)
         sell_total = quantity_sold * sell_price
 
+        # Check for linked open AI analysis before position is deleted
+        analysis_result = await db.execute(
+            select(TradeAnalysis).where(
+                TradeAnalysis.position_id == position.position_id,
+                TradeAnalysis.outcome == "OPEN",
+            )
+        )
+        linked_analysis = analysis_result.scalar_one_or_none()
+
         # Always record the trade regardless of cash credit preference
         trade = PortfolioTrade(
             portfolio_id=position.portfolio_id,
@@ -325,6 +335,18 @@ async def sell_position(
 
         await db.delete(position)
         await db.commit()
+
+        if linked_analysis is not None:
+            try:
+                from arq import create_pool
+                from arq.connections import RedisSettings
+                _redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
+                pool = await create_pool(RedisSettings.from_dsn(_redis_url))
+                await pool.enqueue_job("evaluate_closed_trade", str(linked_analysis.analysis_id), _queue_name="arq:trading")
+                await pool.aclose()
+            except Exception:
+                pass
+
         return None
 
     # Partial sell

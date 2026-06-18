@@ -822,7 +822,7 @@ async def _ollama(prompt: str) -> str:
     async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
         r = await client.post(
             f"{_OLLAMA_URL}/api/generate",
-            json={"model": "hermes3:8b", "prompt": prompt, "stream": False, "options": {"num_predict": 1024}},
+            json={"model": "qwen3:14b", "prompt": prompt, "stream": False, "options": {"num_predict": 1024}},
         )
         r.raise_for_status()
         return r.json().get("response", "")

@@ -40,7 +40,7 @@ router = APIRouter(prefix="/analysis", tags=["analysis"])
 
 _RULES_PATH = Path(__file__).parent.parent / "config" / "investment_rules.json"
 _OLLAMA_URL = os.getenv("OLLAMA_URL", "http://REDACTED:11434")
-_OLLAMA_MODEL = os.getenv("OLLAMA_ANALYSIS_MODEL", "hermes3:8b")
+_OLLAMA_MODEL = os.getenv("OLLAMA_ANALYSIS_MODEL", "qwen3:14b")
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
