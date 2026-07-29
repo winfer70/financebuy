@@ -1,0 +1,219 @@
+# docker-compose.REDACTED.yml — TickerTap standalone stack for REDACTED.
+#
+# Self-contained (not an override file) to avoid Docker Compose's ambiguous
+# list-merge semantics for `volumes:`/`networks:`/`ports:` across multiple
+# -f files — same reasoning as ai-agent-stack's docker-compose.REDACTED.yml.
+#
+# Faithfully reproduces the *actual live* hybrid configuration verified via
+# `docker inspect` on REDACTED (a mix of docker-compose.yml + prod.yml
+# settings per-service), plus adds the new containerized web tier +
+# Cloudflare Tunnel that replace host-level nginx/certbot on REDACTED.
+#
+# Server B (REDACTED, REDACTED) — a systemd-based news worker — talks to
+# `app` directly over the LAN at 0.0.0.0:8000, which is why that port stays
+# published here exactly as it was on REDACTED. Its TICKERTAP_API_URL must
+# be updated to point at REDACTED during cutover (see tt-serverb-repoint).
+
+networks:
+  tickertap_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: REDACTED/16   # different subnet than REDACTED's REDACTED/16 to avoid collisions if both run briefly during cutover
+
+services:
+  db:
+    image: timescale/timescaledb:latest-pg15
+    container_name: tickertap_db
+    restart: always
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB:       ${POSTGRES_DB:-tickerTap}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - tickertap_net
+    healthcheck:
+      test:     ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout:  5s
+      retries:  5
+
+  redis:
+    image: redis:7-alpine
+    container_name: tickertap_redis
+    restart: always
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks:
+      - tickertap_net
+    healthcheck:
+      test:     ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout:  5s
+      retries:  5
+
+  app:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: tickertap_app
+    restart: always
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL:    postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-tickerTap}
+      REDIS_URL:       redis://redis:6379/0
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://ticker-tap.com}
+      SMTP_HOST:       ${SMTP_HOST:-smtp.example.com}
+      OLLAMA_URL:      ${OLLAMA_URL:-http://REDACTED:11434}
+      TRADING_ML_URL:  http://trading-ml:8001
+      ADMIN_EMAILS:    ${ADMIN_EMAILS:-}
+    # Bound to all interfaces (matches REDACTED) — Server B (REDACTED) worker
+    # connects directly via LAN IP:8000 for news ingestion/feedback rules.
+    ports:
+      - "0.0.0.0:8000:8000"
+    networks:
+      - tickertap_net
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      trading-ml:
+        condition: service_healthy
+
+  trading-worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: tickertap_trading_worker
+    restart: unless-stopped
+    command: ["arq", "app.trading.worker.WorkerSettings"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.trading.worker_healthcheck", "trading-worker", "600"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL:    postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-tickerTap}
+      REDIS_URL:       redis://redis:6379/0
+      TRADING_ML_URL:  http://trading-ml:8001
+      SKIP_MIGRATIONS: "1"
+    networks:
+      - tickertap_net
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/app:/app/app:ro
+      - ./backend/alembic:/app/alembic:ro
+
+  paper-worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: tickertap_paper_worker
+    restart: unless-stopped
+    command: ["arq", "app.trading.paper_worker.WorkerSettings"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.trading.worker_healthcheck", "paper-worker", "120"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL:    postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-tickerTap}
+      REDIS_URL:       redis://redis:6379/0
+      SKIP_MIGRATIONS: "1"
+    networks:
+      - tickertap_net
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/app:/app/app:ro
+      - ./backend/alembic:/app/alembic:ro
+
+  alert-worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: tickertap_alert_worker
+    restart: always
+    command: ["arq", "app.trading.alert_worker.WorkerSettings"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.trading.worker_healthcheck", "alert-worker", "600"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-tickerTap}
+      REDIS_URL:    redis://redis:6379/0
+    networks:
+      - tickertap_net
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  trading-ml:
+    build:
+      context: ./trading-ml
+      dockerfile: Dockerfile
+    container_name: tickertap_trading_ml
+    restart: unless-stopped
+    networks:
+      - tickertap_net
+    volumes:
+      - ml_checkpoints:/app/checkpoints
+    healthcheck:
+      test:     ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 30s
+      timeout:  10s
+      retries:  3
+      start_period: 60s
+
+  # ── New: containerized web tier (replaces host nginx + certbot) ───────────
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    container_name: tickertap_web
+    restart: always
+    networks:
+      - tickertap_net
+    depends_on:
+      app:
+        condition: service_healthy
+
+  # ── New: Cloudflare Tunnel (replaces router port-forwarding for 80/443) ──
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: tickertap_cloudflared
+    restart: always
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TICKERTAP_CLOUDFLARE_TUNNEL_TOKEN:?TICKERTAP_CLOUDFLARE_TUNNEL_TOKEN is required}
+    networks:
+      - tickertap_net
+    depends_on:
+      web:
+        condition: service_healthy
+
+volumes:
+  db_data:
+  ml_checkpoints:
