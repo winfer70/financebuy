@@ -65,7 +65,12 @@ services:
       DATABASE_URL:    postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-tickerTap}
       REDIS_URL:       redis://redis:6379/0
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://ticker-tap.com}
-      SMTP_HOST:       ${SMTP_HOST:-smtp.example.com}
+      # Falls back to host.docker.internal (the container's route to the host)
+      # rather than a dummy placeholder, since SMTP is a host-native service
+      # (ProtonMail Bridge) not yet running in a container. NOTE: Bridge must
+      # be configured to accept connections beyond 127.0.0.1 (e.g. via a
+      # socat forwarder) for this to actually work — see tt-smtp-bridge todo.
+      SMTP_HOST:       ${SMTP_HOST:-host.docker.internal}
       OLLAMA_URL:      ${OLLAMA_URL:-http://REDACTED:11434}
       TRADING_ML_URL:  http://trading-ml:8001
       ADMIN_EMAILS:    ${ADMIN_EMAILS:-}
@@ -75,6 +80,8 @@ services:
       - "0.0.0.0:8000:8000"
     networks:
       - tickertap_net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # lets app reach host-native ProtonMail Bridge (SMTP)
     depends_on:
       db:
         condition: service_healthy
