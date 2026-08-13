@@ -1,5 +1,5 @@
 """
-strategy_learner.py — Strategy performance learner for Server B (REDACTED_HOST).
+strategy_learner.py — Strategy performance learner for the remote worker host.
 
 Analyses historical backtest outcomes to identify which strategy/parameter
 combinations work best in which market regimes, and posts learned insights

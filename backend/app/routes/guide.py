@@ -1,7 +1,7 @@
 """
 routes/guide.py — User Guide AI Q&A endpoint.
 
-Proxies user questions to the Ollama LLM on Server B (REDACTED_HOST) for
+Proxies user questions to the configured Ollama endpoint for
 context-aware answers about TickerTap features and usage.
 
 Route:

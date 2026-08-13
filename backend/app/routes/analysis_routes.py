@@ -5,7 +5,7 @@ GET /api/v1/analysis/stock?ticker=XX
   - Fetches live market data via yfinance (price, RSI14, SMA50/200, P/E, sector)
   - Loads investment_rules.json hot (no restart needed)
   - Pre-checks rules: avoid list, analyst target premium, volatility class
-  - Posts to Ollama (REDACTED:11434) for LLM analysis
+  - Posts to the configured Ollama endpoint for LLM analysis
   - Parses recommendation (BUY/HOLD/AVOID/WATCH), entry, stop, target, R:R
   - Saves TradeAnalysis row
   - Returns JSON
@@ -39,7 +39,7 @@ logger = structlog.get_logger("tickerTap.analysis")
 router = APIRouter(prefix="/analysis", tags=["analysis"])
 
 _RULES_PATH = Path(__file__).parent.parent / "config" / "investment_rules.json"
-_OLLAMA_URL = os.getenv("OLLAMA_URL", "http://REDACTED:11434")
+_OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 _OLLAMA_MODEL = os.getenv("OLLAMA_ANALYSIS_MODEL", "qwen3:14b")
 
 

@@ -16,7 +16,7 @@
 ## Exact next action
 1. Test Telegram: `/analyze AAPL` → `/buy AAPL 10 180.50` → `/positions` → `/pnl`
 2. Auto-trigger `evaluate_closed_trade`: add arq enqueue call in portfolio_manager.py sell route after position closes, or in bot.py `cmd_sell` after successful sell API call
-3. Verify ChromaDB collection: `curl http://REDACTED:8000/api/v1/collections`
+3. Verify ChromaDB collection: `curl http://<YOUR_CHROMADB_HOST>:8000/api/v1/collections`
 
 ## Blockers
 - No auto-trigger for evaluate_closed_trade — must wire it in sell flow

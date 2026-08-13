@@ -1,6 +1,9 @@
-# Secrets
-.env.prod
-.env
+# Secrets / local env files
+.env*
+!.env.prod.example
+!backend/.env.example
+!frontend/.env.development
+!frontend/.env.production
 
 # Build artifacts
 frontend/dist/
@@ -29,6 +32,7 @@ db_data/
 
 # Claude internals
 .claude/
+.copilot_audit/
 
 # Binary artifacts
 PortfolioTracker.zip
@@ -37,3 +41,10 @@ PortfolioTracker/
 # Graphify generated
 graphify-out/cache/
 graphify-out/*.html
+
+# Local scratch / backups
+*.bak
+*.tmp
+*.temp
+scratch*.sql
+tmp*.sql

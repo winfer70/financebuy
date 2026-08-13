@@ -2,7 +2,7 @@
 
 Generated: 2026-05-13  
 Branch: `tradingAI0.1`  
-Root: `/home/REDACTED420/projects/finance/tickerTap`
+Root: `/path/to/tickerTap`
 
 ---
 
@@ -20,8 +20,8 @@ Root: `/home/REDACTED420/projects/finance/tickerTap`
 | Frontend | React 19, Vite 7.x |
 | Reverse Proxy | Host nginx (serves `frontend/dist` directly, proxies `/api/v1/` to :8000) |
 | Market Data | yfinance (prices, OHLCV, fundamentals, events) |
-| LLM (Guide) | Ollama (llama3:8b-instruct-q4_K_M) on REDACTED_HOST/Server B |
-| LLM (News) | Ollama news-scoring worker on REDACTED_HOST/Server B |
+| LLM (Guide) | Ollama (llama3:8b-instruct-q4_K_M) on the remote worker host |
+| LLM (News) | Ollama news-scoring worker on the remote worker host |
 
 ---
 

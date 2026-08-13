@@ -1,25 +1,26 @@
-# docker-compose.REDACTED.yml — TickerTap standalone stack for REDACTED.
+# Deployment compose file — TickerTap standalone stack for the target deployment host.
 #
 # Self-contained (not an override file) to avoid Docker Compose's ambiguous
 # list-merge semantics for `volumes:`/`networks:`/`ports:` across multiple
-# -f files — same reasoning as ai-agent-stack's docker-compose.REDACTED.yml.
+# -f files — same reasoning as the separate AI agent stack migration compose file.
 #
-# Faithfully reproduces the *actual live* hybrid configuration verified via
-# `docker inspect` on REDACTED (a mix of docker-compose.yml + prod.yml
-# settings per-service), plus adds the new containerized web tier +
-# Cloudflare Tunnel that replace host-level nginx/certbot on REDACTED.
+# Reproduces the verified hybrid configuration from the existing deployment
+# (a mix of docker-compose.yml + prod.yml settings per-service), plus adds
+# the new containerized web tier + Cloudflare Tunnel that replace the old
+# host-level nginx/certbot setup on the current production host.
 #
-# Server B (REDACTED, REDACTED) — a systemd-based news worker — talks to
-# `app` directly over the LAN at 0.0.0.0:8000, which is why that port stays
-# published here exactly as it was on REDACTED. Its TICKERTAP_API_URL must
-# be updated to point at REDACTED during cutover (see tt-serverb-repoint).
+# A remote systemd-based news worker talks to `app` directly over the
+# configured API endpoint on port 8000, which is why that port stays
+# published here exactly as it was on the current production host. Its
+# TICKERTAP_API_URL must be updated to point at the replacement host during
+# cutover (see tt-serverb-repoint).
 
 networks:
   tickertap_net:
     driver: bridge
     ipam:
       config:
-        - subnet: REDACTED/16   # different subnet than REDACTED's REDACTED/16 to avoid collisions if both run briefly during cutover
+        - subnet: 10.51.0.0/16   # separate private subnet from the primary stack's 10.50.0.0/16 to avoid collisions during cutover
 
 services:
   db:
@@ -71,11 +72,11 @@ services:
       # be configured to accept connections beyond 127.0.0.1 (e.g. via a
       # socat forwarder) for this to actually work — see tt-smtp-bridge todo.
       SMTP_HOST:       ${SMTP_HOST:-host.docker.internal}
-      OLLAMA_URL:      ${OLLAMA_URL:-http://REDACTED:11434}
+      OLLAMA_URL:      ${OLLAMA_URL:-http://<YOUR_OLLAMA_HOST>:11434}
       TRADING_ML_URL:  http://trading-ml:8001
       ADMIN_EMAILS:    ${ADMIN_EMAILS:-}
-    # Bound to all interfaces (matches REDACTED) — Server B (REDACTED) worker
-    # connects directly via LAN IP:8000 for news ingestion/feedback rules.
+    # Bound to all interfaces (matches the current production host) so the
+    # remote worker can connect directly for news ingestion/feedback rules.
     ports:
       - "0.0.0.0:8000:8000"
     networks:

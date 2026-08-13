@@ -368,7 +368,7 @@ of who generated them.
 ## Hardware — Dedicated Ollama Node for Rule Builder
 
 ### Current setup
-- **REDACTED_HOST laptop (Server B):** runs `llama3:8b-instruct-q4_K_M` for news scoring
+- **Dedicated news-scoring host (Server B):** runs `llama3:8b-instruct-q4_K_M` for news scoring
   (continuous pipeline, high token volume, open-ended generation — needs the 8B)
 
 ### Proposed addition
@@ -422,8 +422,8 @@ Separate env var so rule builder and news scoring never contend:
 
 ```env
 # .env.prod
-OLLAMA_URL=http://reduser-laptop:11434         # existing — llama3:8b news scoring
-OLLAMA_RULES_URL=http://i5-laptop:11434    # new — phi3.5:mini rule generation
+OLLAMA_URL=http://<YOUR_NEWS_OLLAMA_HOST>:11434      # existing — llama3:8b news scoring
+OLLAMA_RULES_URL=http://<YOUR_RULES_OLLAMA_HOST>:11434  # new — phi3.5:mini rule generation
 ```
 
 The i5 laptop sits idle ~95% of the time (rule generation is user-triggered,
@@ -448,11 +448,11 @@ async def run_rule_generation(ctx, user_id: str, prompt: str) -> dict:
 ### Fallback behaviour
 
 If the i5 laptop is offline, `run_rule_generation` falls back to `OLLAMA_URL`
-(the REDACTED_HOST news laptop) with the same model call. The news pipeline is unaffected
+(the configured news-scoring host) with the same model call. The news pipeline is unaffected
 because rule generation jobs are infrequent. Add a 30-second timeout so a
 slow/offline node doesn't block the arq queue.
 
 ---
 
 *Related files: portfolio_manager.py, volume_flow_scanner.py, SCANNER.md, MANAGER.md, ARCHITECTURE.md*
-*TickerTap branch: tradingAI0.1 | Root: /home/REDACTED420/projects/finance/tickerTap*
+*TickerTap branch: tradingAI0.1 | Root: /path/to/tickerTap*

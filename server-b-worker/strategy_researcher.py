@@ -1,5 +1,5 @@
 """
-strategy_researcher.py — Strategy research agent for Server B (REDACTED_HOST).
+strategy_researcher.py — Strategy research agent for the remote worker host.
 
 Standalone script that periodically analyses market conditions and
 backtest outcomes to suggest new strategy configurations or parameter

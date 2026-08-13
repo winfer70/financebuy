@@ -1,5 +1,5 @@
 """
-worker.py — TickerTap background news worker for Server B (REDACTED_HOST).
+worker.py — TickerTap background news worker for the remote worker host.
 
 Main loop:
     1. Flush any pending articles from the local SQLite queue.

@@ -813,7 +813,7 @@ async def _worker_startup(ctx: dict) -> None:
     )
 
 
-_OLLAMA_URL = os.getenv("OLLAMA_URL", "http://REDACTED:11434")
+_OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 _TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 _TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 

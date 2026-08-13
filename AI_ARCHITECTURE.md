@@ -5,12 +5,12 @@ _Last updated: 2026-06-18_
 ## Node Map
 
 ```
-KamiloPC (REDACTED)   ← dev machine, all code
-REDACTED (REDACTED) ← prod: tickerTap app + workers (Docker)
-jaskier (REDACTED)     ← GPU inference: Ollama, RTX 3060 12GB (PRIMARY)
-REDACTED (REDACTED)      ← ChromaDB :8000, Redis :6379, Ollama CPU (FALLBACK)
-REDACTED (REDACTED)    ← Prometheus :9090, Grafana :3000, tickertap-worker
-REDACTED (REDACTED)     ← swarmAI :8010 (Logician/Devil/Aggregator)
+dev-workstation (<YOUR_DEV_MACHINE_IP>)     ← dev machine, all code
+app-host (<YOUR_APP_SERVER_IP>)             ← prod: tickerTap app + workers (Docker)
+ollama-gpu-host (<YOUR_OLLAMA_GPU_IP>)      ← GPU inference: Ollama, RTX 3060 12GB (PRIMARY)
+vector-store-host (<YOUR_VECTOR_STORE_IP>)  ← ChromaDB :8000, Redis :6379, Ollama CPU (FALLBACK)
+monitoring-host (<YOUR_MONITORING_IP>)      ← Prometheus :9090, Grafana :3000, tickertap-worker
+advisor-host (<YOUR_ADVISOR_IP>)            ← swarmAI :8010 (Logician/Devil/Aggregator)
 ```
 
 ---
@@ -19,10 +19,10 @@ REDACTED (REDACTED)     ← swarmAI :8010 (Logician/Devil/Aggregator)
 
 | Node | Role | Models |
 |------|------|--------|
-| jaskier | PRIMARY — RTX 3060 12GB GPU | qwen3:14b (9.3GB), hermes3:8b, deepseek-r1:8b, gemma4, qwen2.5-coder:7b |
-| REDACTED | FALLBACK — CPU only | qwen3:4b, qwen3:8b, deepseek-r1:8b, codestral:22b, hermes3:8b |
+| ollama-gpu-host | PRIMARY — RTX 3060 12GB GPU | qwen3:14b (9.3GB), hermes3:8b, deepseek-r1:8b, gemma4, qwen2.5-coder:7b |
+| vector-store-host | FALLBACK — CPU only | qwen3:4b, qwen3:8b, deepseek-r1:8b, codestral:22b, hermes3:8b |
 
-All tickerTap + swarmAI AI calls route to **jaskier** (`OLLAMA_URL=http://REDACTED:11434`).
+All tickerTap + swarmAI AI calls route to **ollama-gpu-host** (`OLLAMA_URL=http://<YOUR_OLLAMA_GPU_IP>:11434`).
 Model: **qwen3:14b** for analysis and critique (switched from hermes3:8b 2026-06-18).
 
 ---
@@ -42,7 +42,7 @@ analysis_routes.py:
   3. _check_rules() — flags: AVOID_LIST, VOLATILE, ANALYST_TARGET_BAKED_IN, RSI bands, SMA trend, tier S/A/B
   4. query_similar() → ChromaDB :8000 — 3 similar past trades with outcomes (RAG context)
   5. _build_prompt() — rules + market data + RAG + structured output format
-  6. POST jaskier:11434/api/generate — model: qwen3:14b, temp: 0.2, num_predict: 1024, timeout: 300s
+  6. POST ollama-gpu-host:11434/api/generate — model: qwen3:14b, temp: 0.2, num_predict: 1024, timeout: 300s
   7. _parse_ollama_response() — extract: RECOMMENDATION / ENTRY / STOP / TARGET / RISK_REWARD / ANALYSIS
   8. INSERT trade_analyses row (outcome=OPEN)
   9. store_analysis() → ChromaDB upsert embedding
@@ -97,7 +97,7 @@ User flow:
 
 ---
 
-## ChromaDB (REDACTED :8000)
+## ChromaDB (vector-store-host :8000)
 
 - Collection: `trade_analyses`
 - Embedding: `{ticker} {sector} {recommendation} price={price} rsi={rsi} sma50={sma50} sma200={sma200} {analysis_text}`
@@ -107,18 +107,18 @@ User flow:
 
 ---
 
-## swarmAI (REDACTED :8010)
+## swarmAI (advisor-host :8010)
 
 ```
 User → POST /advisor
          ↓
-Logician (agent) → jaskier:11434 qwen3:14b — frames question
+Logician (agent) → ollama-gpu-host:11434 qwen3:14b — frames question
          ↓
-Devil (agent) → jaskier:11434 qwen3:14b — adversarial critique
+Devil (agent) → ollama-gpu-host:11434 qwen3:14b — adversarial critique
          ↓
-Aggregator (agent) → jaskier:11434 qwen3:14b — synthesises final answer
+Aggregator (agent) → ollama-gpu-host:11434 qwen3:14b — synthesises final answer
          ↓
-Response ~27.9s (was 7-10min on REDACTED CPU before jaskier GPU)
+Response ~27.9s (was 7-10min on vector-store-host CPU before ollama-gpu-host GPU)
 ```
 
 ---
@@ -128,11 +128,11 @@ Response ~27.9s (was 7-10min on REDACTED CPU before jaskier GPU)
 | File | Purpose |
 |------|---------|
 | `backend/app/config/investment_rules.json` | Trading rules — hot-reload. Rules text, avoid list, volatile/stable tickers, tier S/A/B watchlists, R:R thresholds, ATR multiplier |
-| `backend/.env` (REDACTED) | All secrets + `OLLAMA_URL`, `CHROMADB_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
+| `backend/.env` (app-host) | All secrets + `OLLAMA_URL`, `CHROMADB_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
 
 ---
 
-## Workers (REDACTED Docker)
+## Workers (app-host Docker)
 
 | Container | Queue | Jobs |
 |-----------|-------|------|

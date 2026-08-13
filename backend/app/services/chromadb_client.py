@@ -15,7 +15,7 @@ import structlog
 
 logger = structlog.get_logger("tickerTap.chromadb")
 
-_CHROMADB_URL = os.getenv("CHROMADB_URL", "http://REDACTED:8000")
+_CHROMADB_URL = os.getenv("CHROMADB_URL", "http://localhost:8000")
 _COLLECTION_NAME = "trade_analyses"
 _TIMEOUT = httpx.Timeout(10.0)
 

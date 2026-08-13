@@ -1,5 +1,5 @@
 """
-learner.py — TickerTap scoring accuracy analyser for Server B (REDACTED_HOST).
+learner.py — TickerTap scoring accuracy analyser for the remote worker host.
 
 Standalone script that runs periodically (via systemd timer, typically weekly).
 Analyses prediction outcomes to identify scoring biases and generates

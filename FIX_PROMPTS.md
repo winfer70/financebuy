@@ -194,7 +194,7 @@ Line 2653 — paper trade kickoff from API route:
 ### Deploy
 Backend is bind-mounted (`./backend/app:/app/app:ro`) — changes take effect on container restart:
 ```bash
-cd /home/REDACTED420/projects/finance/tickerTap
+cd /path/to/tickerTap
 docker compose --env-file .env.prod -f docker-compose.prod.yml restart trading-worker paper-worker alert-worker app
 ```
 
@@ -297,8 +297,8 @@ This is a manual Docker operation — NOT a code change.
 
 **Warning:** Verify nothing calls port 8001 before removing:
 ```bash
-grep -r "8001" /home/REDACTED420/projects/finance/tickerTap/backend/app/ --include="*.py"
-grep -r "8001" /home/REDACTED420/projects/finance/tickerTap/frontend/src/ --include="*.js" --include="*.jsx"
+grep -r "8001" /path/to/tickerTap/backend/app/ --include="*.py"
+grep -r "8001" /path/to/tickerTap/frontend/src/ --include="*.js" --include="*.jsx"
 ```
 If grep returns no results, proceed:
 
@@ -317,8 +317,8 @@ docker rmi <image-id>
 To prevent it from being re-created if there is a stale dev `docker-compose.yml` entry,
 search the dev compose file:
 ```bash
-grep -r "trading.ml\|trading-ml\|8001" /home/REDACTED420/projects/finance/tickerTap/*.yml \
-  /home/REDACTED420/projects/finance/tickerTap/*.yaml 2>/dev/null
+grep -r "trading.ml\|trading-ml\|8001" /path/to/tickerTap/*.yml \
+  /path/to/tickerTap/*.yaml 2>/dev/null
 ```
 If found, remove the service block from the dev compose file.
 
@@ -327,7 +327,7 @@ If found, remove the service block from the dev compose file.
 ## FIX 4 — Secure ai_agent_postgres Port Binding
 
 ### Problem
-`/home/REDACTED420/ai-agent-stack/docker-compose.yml` line 13:
+`/path/to/ai-agent-stack/docker-compose.yml` line 13:
 ```yaml
 ports:
   - "5432:5432"
@@ -337,7 +337,7 @@ network interface, including the public-facing one. Any device on the LAN (or in
 if router forwards 5432) can attempt to connect.
 
 ### Fix
-**File: `/home/REDACTED420/ai-agent-stack/docker-compose.yml`**
+**File: `/path/to/ai-agent-stack/docker-compose.yml`**
 
 Line 13:
 ```yaml
@@ -367,7 +367,7 @@ Also apply the same fix to Redis on line 44 for defense-in-depth:
 
 ### Deploy
 ```bash
-cd /home/REDACTED420/ai-agent-stack
+cd /path/to/ai-agent-stack
 docker compose down postgres redis
 docker compose up -d postgres redis
 ```
@@ -376,7 +376,7 @@ docker compose up -d postgres redis
 From the host (not inside a container):
 ```bash
 nc -zv 127.0.0.1 5432   # should connect
-nc -zv REDACTED 5432  # should REFUSE
+nc -zv <YOUR_APP_SERVER_IP> 5432  # should REFUSE
 ```
 
 ---
@@ -384,8 +384,8 @@ nc -zv REDACTED 5432  # should REFUSE
 ## FIX 5 — Add Worker Heartbeat Monitoring Endpoint
 
 ### Problem
-The n8n monitor at `/home/REDACTED420/ai-agent-stack/monitor/main.py` checks TickerTap
-via `GET http://REDACTED:8000/health` but has no visibility into individual arq
+The n8n monitor at `/path/to/ai-agent-stack/monitor/main.py` checks TickerTap
+via `GET http://<YOUR_APP_SERVER_IP>:8000/health` but has no visibility into individual arq
 worker health (trading-worker, paper-worker, alert-worker). Worker failures are invisible
 to n8n alerts.
 
@@ -448,16 +448,16 @@ route registration).
 
 ### Fix (Part B) — Update ai_agent_monitor to check worker heartbeats
 
-**File: `/home/REDACTED420/ai-agent-stack/monitor/main.py`**
+**File: `/path/to/ai-agent-stack/monitor/main.py`**
 
-Find the section that checks TickerTap (`http://REDACTED:8000/health`) and add a
+Find the section that checks TickerTap (`http://<YOUR_APP_SERVER_IP>:8000/health`) and add a
 second check after it:
 
 ```python
 # After the existing TickerTap /health check, add:
 async def check_tickertap_workers(session: aiohttp.ClientSession) -> dict:
     """Check TickerTap arq worker heartbeat status."""
-    url = "http://REDACTED:8000/api/v1/metrics/workers"
+    url = "http://<YOUR_APP_SERVER_IP>:8000/api/v1/metrics/workers"
     try:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
             if resp.status == 200:
@@ -483,10 +483,10 @@ file — do not restructure unrelated code.
 ### Deploy
 After code changes:
 1. Rebuild and restart TickerTap app: `docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build app`
-2. Rebuild and restart monitor: `cd /home/REDACTED420/ai-agent-stack && docker compose up -d --build monitor`
+2. Rebuild and restart monitor: `cd /path/to/ai-agent-stack && docker compose up -d --build monitor`
 
 ### Verify
 ```bash
-curl -s http://REDACTED:8000/api/v1/metrics/workers | python3 -m json.tool
+curl -s http://<YOUR_APP_SERVER_IP>:8000/api/v1/metrics/workers | python3 -m json.tool
 ```
 Should return JSON with status for all three workers.

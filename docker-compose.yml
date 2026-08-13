@@ -22,7 +22,7 @@ networks:
     # Restrict the subnet to a non-routable private range.
     ipam:
       config:
-        - subnet: REDACTED/16
+        - subnet: 10.50.0.0/16
 
 services:
   db:
