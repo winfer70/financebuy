@@ -1,22 +1,28 @@
-# tickerTap HANDOFF — 2026-06-17
+# tickerTap HANDOFF — 2026-08-15
 
-## Accomplished (phases B/C/D/E complete)
-- **Phase B**: `GET /api/v1/analysis/stock?ticker=XX` — yfinance + investment_rules.json pre-check + Ollama hermes3:8b → saves to `trade_analyses` (migration 0030). Tested AAPL → WATCH rec confirmed.
-- **Phase C**: Telegram bot (`python-telegram-bot>=21.0`) running inside FastAPI. Commands: `/analyze /buy /sell /positions /pnl /alerts /refinements /approve_refinement`. `telegram_bot_started` confirmed in logs.
-- **Phase D**: ChromaDB client via raw httpx REST (no chromadb Python package — pydantic v2 conflict). RAG injects 3 similar past trades before Ollama. `evaluate_closed_trade` arq job (sell price from PortfolioTrade SELL record).
-- **Phase E**: Migration 0031 (`rule_refinements`). `weekly_meta_analysis` cron Monday 03:00. Shadow mode: AI suggests, user approves via `/approve_refinement`, rules.json never auto-updates.
-- **Fix**: chromadb-client removed from requirements.txt; store_analysis/query_similar made async.
+## Date
+- 2026-08-15
 
-## Current state
-- All 7 containers healthy: app, alert-worker, trading-worker, paper-worker, trading-ml, db, redis
-- Migration head: 0031
-- All env vars set in `backend/.env`: BOT_API_KEY, BOT_USER_ID, AI_PAPER_PORTFOLIO_ID, OLLAMA_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DEGIRO_*
-- Branch: `tradingAI0.1` — clean, pushed, merged
+## What Was Accomplished
+- **Repo public-safety audit**: verified `winfer70/tickerTap` is safe to make public. `main` diverges from `tradingAI0.1` only with benign cleanup/graphify/merge commits; no leaked secrets were found and no remediation is needed.
+- **Production incident postmortem**: investigated same-day logged-in production breakage on labserver (`kamilo`; this repo now runs on labserver, not swiss-knife).
+- Root cause: `tickertap_web` (nginx) cached Docker DNS resolution for `proxy_pass http://app:8000`; after `tickertap_app` was recreated on 2026-08-13, nginx kept proxying to stale IP `172.29.0.4` even though the app had moved to `172.29.0.6`, producing connection-refused 502s for proxied API routes while static/SPA pages still loaded.
+- Fix already applied on production: `docker exec tickertap_web nginx -s reload` (graceful reload, no container restart required).
+- Verification already completed: `https://ticker-tap.com/health` returned 200; previously failing API endpoints returned expected 401 instead of 502; nginx logs showed no new `connect() failed` / 502 entries after reload.
 
-## Exact next action
-1. Test Telegram: `/analyze AAPL` → `/buy AAPL 10 180.50` → `/positions` → `/pnl`
-2. Auto-trigger `evaluate_closed_trade`: add arq enqueue call in portfolio_manager.py sell route after position closes, or in bot.py `cmd_sell` after successful sell API call
-3. Verify ChromaDB collection: `curl http://<YOUR_CHROMADB_HOST>:8000/api/v1/collections`
+## Current State
+- Branch: `tradingAI0.1`
+- Repo is confirmed safe for public GitHub publication; no audit remediation follow-up is required.
+- Production is currently healthy after the nginx reload.
+- Known cosmetic-only follow-up: CSP currently blocks Google Fonts (`style-src 'self' 'unsafe-inline'`), so fonts fall back but functionality is unaffected.
+- Structural risk remains: future `tickertap_app` redeploys/recreates can cause the same outage again unless nginx is also reloaded/restarted or the upstream config is changed to re-resolve Docker DNS.
+
+## Exact Next Actions
+1. Add an nginx reload step to the labserver deploy/release flow whenever `tickertap_app` or other proxied backend containers are recreated.
+2. Prefer a durable nginx hardening fix: use a Docker DNS `resolver` plus variable-based `proxy_pass` so nginx periodically re-resolves `app` instead of caching the container IP for the life of the worker process.
+3. Optional cosmetic follow-up: either allowlist `https://fonts.googleapis.com` / related font sources in CSP or self-host the fonts.
+4. If/when publishing the repo publicly, proceed normally from `tradingAI0.1`; no secret cleanup is required first.
 
 ## Blockers
-- No auto-trigger for evaluate_closed_trade — must wire it in sell flow
+- No structural nginx/Docker DNS hardening has been implemented yet, so the 502 failure mode can recur on the next backend container recreate.
+- CSP font issue is unresolved and awaits prioritization.
