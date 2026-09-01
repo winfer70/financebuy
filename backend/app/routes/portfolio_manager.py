@@ -193,6 +193,10 @@ async def add_position(
         soft_stop_loss=payload.soft_stop_loss,
         profit_taking=payload.profit_taking,
     )
+    db.add(position)
+    await db.commit()
+    await db.refresh(position)
+    return position
 
 
 @router.post(
