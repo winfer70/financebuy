@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-10
 **Project:** TickerTap
-**Status:** Phases 1–4 implemented and deployed
+**Status:** Phases 1–4 implemented. This file is the original plan — prefer `CLAUDE.md` / `AI_ARCHITECTURE.md` / code for current behavior.
 
 ---
 

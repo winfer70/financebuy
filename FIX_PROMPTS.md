@@ -1,7 +1,8 @@
 # TickerTap — Fix Prompts for Claude Code
 
-Each section is a self-contained prompt. Paste it into Claude Code (MODE: EXECUTE).
-All line numbers are exact; verify they match before applying.
+**Status as of 2026-09-02:** Historical. Worker queues are already isolated (`arq:alert`, `arq:trading`, `arq:paper`). Do not apply these patches blindly — line numbers are stale.
+
+Each section was a self-contained prompt. Verify against current code before using.
 
 ---
 

@@ -1,6 +1,13 @@
 # TickerTap Integration Plan — Portfolio Rules Engine + Scanner
-**Date: May 14, 2026**
-**Scope: Integrating portfolio_manager.py + volume_flow_scanner.py into TickerTap**
+**Date: May 14, 2026**  
+**Status as of 2026-09-02: IMPLEMENTED in this repo.** Treat this file as historical design notes, not a todo.
+
+Shipped equivalents:
+- Rules engine → `backend/app/trading/worker.py` `run_portfolio_rules` + `backend/app/routes/portfolio_rules.py`
+- `rule_alerts` table → Alembic **0024**, ORM `RuleAlert` in `models.py`
+- Scanner → `backend/app/trading/scanner_worker.py` (there is **no** `volume_flow_scanner.py` and no standalone `SCANNER.md` / `MANAGER.md` in git)
+
+**Scope (original):** Integrating portfolio_manager.py + volume_flow_scanner.py into TickerTap
 
 ---
 
@@ -455,4 +462,4 @@ slow/offline node doesn't block the arq queue.
 ---
 
 *Related files: portfolio_manager.py, volume_flow_scanner.py, SCANNER.md, MANAGER.md, ARCHITECTURE.md*
-*TickerTap branch: tradingAI0.1 | Root: /path/to/tickerTap*
+*Historical plan. Live code is on `main`. Scanner: `scanner_worker.py`. Rules: `run_portfolio_rules` + `rule_alerts`.*

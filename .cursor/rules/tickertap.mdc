@@ -1,0 +1,23 @@
+---
+description: tickerTap stack conventions from CLAUDE.md and copilot-instructions
+alwaysApply: true
+---
+
+# tickerTap
+
+Bloomberg-style trading app. FastAPI + React 19 + Postgres + Redis.
+
+Canonical branch: **`main`**. New work: `feature/<name>` from a pulled `main`. `tradingAI0.1` is a legacy integration alias kept in sync for `release.sh` — do not start features from it.
+
+- SQLAlchemy **1.4 async**, not 2.x. Pydantic **v1** (`orm_mode = True`), not v2.
+- Money: `Decimal` / `condecimal` / `Numeric`. Never float.
+- `get_current_user` returns User ORM — use `.user_id`.
+- No client-side router; page state in `App.jsx`. API only via `api/client.js`.
+- Two-stage backend Dockerfile (wheels). Do not change without asking.
+- Prod compose: env-file `.env.prod` plus the host-specific compose file. Never the dev compose on prod. After recreating `app`, reload nginx (`docker exec tickertap_web nginx -s reload`). Never `compose down` the whole stack on prod.
+- Frontend: `npm install --legacy-peer-deps`. Rebuild `npm run build` after UI changes.
+- News scores come from `server-b-worker/` (Ollama) → `POST /api/v1/news/internal/news`. There is no FinBERT in this repo.
+- Scanner: `backend/app/trading/scanner_worker.py` (not `volume_flow_scanner.py`). Phase 4 auto-scores 3 of 7 rubric factors.
+- Soft stops: two-stage Telegram + ntfy in `alert_worker.py` / `notifications.py`. Hard stops are broker-side; never auto-clear `soft_stop_loss`.
+- Personal DEGIRO rules (stops, no chase, no averaging down) apply when touching trading logic — see Desktop memory index; do not invent strategy.
+- Never commit `.env`, tokens, passwords, or LAN topology.

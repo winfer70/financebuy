@@ -1,7 +1,7 @@
 # TickerTap — News Expansion Feasibility Research
 
-**Date**: 2026-03-16
-**Status**: Research — no code changes
+**Date**: 2026-03-16  
+**Status**: Research (source-expansion options). Live scoring path is already `server-b-worker/` → Ollama → `POST /api/v1/news/internal/news`. **Not FinBERT.**
 
 ---
 

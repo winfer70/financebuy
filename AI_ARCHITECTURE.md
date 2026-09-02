@@ -1,6 +1,8 @@
 # TickerTap AI Architecture
 
-_Last updated: 2026-06-18_
+_Last updated: 2026-09-02_
+
+Node names below are **placeholders**. Real hostnames, LAN IPs, and credentials live only in gitignored env files — never commit them.
 
 ## Node Map
 
@@ -136,8 +138,12 @@ Response ~27.9s (was 7-10min on vector-store-host CPU before ollama-gpu-host GPU
 
 | Container | Queue | Jobs |
 |-----------|-------|------|
-| tickertap-alert-worker-1 | arq:default | price_alert_check, degiro_sync cron 02:00, soft_stop_check |
-| tickertap-trading-worker-1 | arq:trading | evaluate_closed_trade, weekly_meta_analysis (Mon 03:00) |
+| tickertap-alert-worker-1 | arq:alert | `evaluate_price_alerts` (also runs two-stage soft-stop loop), `evaluate_one_soft_stop`, DeGiro sync cron 02:00 |
+| tickertap-trading-worker-1 | arq:trading | `run_backtest`, `run_scanner`, `run_portfolio_rules`, `sync_degiro_portfolio`, `evaluate_closed_trade`; cron `weekly_meta_analysis` Mon 03:00 |
+
+Soft-stop delivery: Telegram + ntfy (`NTFY_URL` / `NTFY_TOPIC` / `NTFY_TOKEN`) with per-channel retry. Price alerts remain in-app only.
+
+News scoring is **not** this stack. See `NEWS_RESEARCH.md` + `server-b-worker/` (Ollama on the news-worker host → `POST /api/v1/news/internal/news`).
 
 ---
 
