@@ -13,16 +13,22 @@ import uuid
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
-# MUST set before any app imports to prevent Redis connection and
-# JWT validation failure during module load.
-os.environ.setdefault(
-    "JWT_SECRET",
-    "test-secret-key-that-is-long-enough-for-jwt-validation-purposes",
+# MUST set before any app imports.
+# REDIS_URL stays a real redis:// DSN so arq RedisSettings.from_dsn() accepts it
+# at import time (no connection). Rate-limit storage is in-memory for unit tests.
+os.environ["JWT_SECRET"] = (
+    "test-secret-key-that-is-long-enough-for-jwt-validation-purposes"
 )
-os.environ.setdefault("REDIS_URL", "memory://")
-os.environ.setdefault(
-    "DATABASE_URL", "postgresql+asyncpg://test:test@localhost/test"
-)
+os.environ["REDIS_URL"] = "redis://localhost:6379/0"
+os.environ["RATE_LIMIT_STORAGE"] = "memory://"
+os.environ["DATABASE_URL"] = "postgresql+asyncpg://test:test@localhost/test"
+
+# A test module imported before this file may already have constructed the
+# Redis-backed limiter. Rebuild it against in-memory storage.
+if "app.limiter" in sys.modules:
+    import importlib
+
+    importlib.reload(sys.modules["app.limiter"])
 
 import pytest
 from fastapi.testclient import TestClient
@@ -41,7 +47,10 @@ def reset_rate_limits():
     from app.limiter import limiter
     storage = getattr(limiter, "_storage", None)
     if storage is not None and hasattr(storage, "reset"):
-        storage.reset()
+        try:
+            storage.reset()
+        except Exception:
+            pass
     yield
 
 
