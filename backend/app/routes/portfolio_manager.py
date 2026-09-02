@@ -257,7 +257,10 @@ async def modify_position(
     if payload.hard_stop_loss is not None:
         position.hard_stop_loss = payload.hard_stop_loss if payload.hard_stop_loss > 0 else None
     if payload.soft_stop_loss is not None:
-        position.soft_stop_loss = payload.soft_stop_loss if payload.soft_stop_loss > 0 else None
+        new_soft = payload.soft_stop_loss if payload.soft_stop_loss > 0 else None
+        if new_soft != position.soft_stop_loss:
+            position.reset_soft_stop_stages()
+        position.soft_stop_loss = new_soft
     if payload.profit_taking is not None:
         position.profit_taking = payload.profit_taking if payload.profit_taking > 0 else None
     await db.commit()

@@ -328,7 +328,18 @@ class PortfolioPosition(Base):
     physical_type = Column(String(20), nullable=True)
     hard_stop_loss = Column(Numeric(18, 2), nullable=True)
     soft_stop_loss = Column(Numeric(18, 2), nullable=True)
+    # Two-stage soft-stop delivery: NY dates last successfully pinged (at least
+    # one of Telegram/ntfy). Stop itself is never auto-cleared.
+    soft_stop_intraday_on = Column(Date, nullable=True)
+    soft_stop_eod_on = Column(Date, nullable=True)
+    soft_stop_delivery_json = Column(JSONB, nullable=True)
     profit_taking = Column(Numeric(18, 2), nullable=True)
+
+    def reset_soft_stop_stages(self) -> None:
+        """Clear two-stage alert state so a new soft-stop level can fire again."""
+        self.soft_stop_intraday_on = None
+        self.soft_stop_eod_on = None
+        self.soft_stop_delivery_json = None
     # Rule-engine fields (added migration 0023) --------------------------------
     # T+2 settlement value in USD
     t2_usd = Column(Numeric(18, 2), nullable=True)

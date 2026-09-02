@@ -15,7 +15,6 @@ User preferences are stored in User.preferences JSONB:
   }
 """
 
-import asyncio
 import os
 import uuid
 import logging
@@ -75,7 +74,7 @@ async def notify(
         await _fire_webhooks(db, user_id, event_type, title, body, metadata)
 
     # 5. Telegram (always, if TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID set)
-    asyncio.create_task(_send_telegram(title, body))
+    await _send_telegram(title, body)
 
 
 async def _insert_notification(
@@ -194,17 +193,79 @@ async def _fire_webhooks(
                 logger.warning("Webhook failed: url=%s error=%s", wh.url, e)
 
 
-async def _send_telegram(title: str, body: str) -> None:
+async def _send_telegram(title: str, body: str) -> bool:
+    """Send a Telegram message. True on 2xx or if Telegram is not configured."""
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
     if not (token and chat_id):
-        return
-    text = f"*{title}*\n{body}" if body else f"*{title}*"
+        return True
+    text = f"{title}\n{body}" if body else title
     try:
         async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
-            await client.post(
+            resp = await client.post(
                 f"https://api.telegram.org/bot{token}/sendMessage",
-                json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+                json={"chat_id": chat_id, "text": text},
             )
+            ok = 200 <= resp.status_code < 300
+            if not ok:
+                logger.warning("Telegram notification failed: status=%s", resp.status_code)
+            return ok
     except Exception as e:
         logger.warning("Telegram notification failed: %s", e)
+        return False
+
+
+async def _send_ntfy(title: str, body: str, priority: int = 3) -> bool:
+    """POST to ntfy. True on 2xx or if NTFY_URL is not configured."""
+    base = os.getenv("NTFY_URL", "").rstrip("/")
+    if not base:
+        return True
+    topic = os.getenv("NTFY_TOPIC", "tickertap-alerts")
+    token = os.getenv("NTFY_TOKEN", "")
+    headers = {
+        "Title": title,
+        "Priority": str(priority),
+        "Tags": "warning,chart_with_downwards_trend",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
+            resp = await client.post(
+                f"{base}/{topic}",
+                content=(body or title).encode(),
+                headers=headers,
+            )
+            ok = 200 <= resp.status_code < 300
+            if not ok:
+                logger.warning("ntfy notification failed: status=%s", resp.status_code)
+            return ok
+    except Exception as e:
+        logger.warning("ntfy notification failed: %s", e)
+        return False
+
+
+async def notify_soft_stop(
+    db: AsyncSession,
+    user_id,
+    event_type: str,
+    title: str,
+    body: str = "",
+    metadata: Optional[Dict[str, Any]] = None,
+    ntfy_priority: int = 3,
+    send_in_app: bool = True,
+    send_telegram: bool = True,
+    send_ntfy: bool = True,
+) -> Dict[str, bool]:
+    """Deliver a soft-stop alert. Awaits Telegram + ntfy; returns per-channel success."""
+    if send_in_app:
+        await _insert_notification(db, user_id, event_type, title, body, metadata)
+
+    telegram_ok = True
+    ntfy_ok = True
+    if send_telegram:
+        telegram_ok = await _send_telegram(title, body)
+    if send_ntfy:
+        ntfy_ok = await _send_ntfy(title, body, ntfy_priority)
+
+    return {"telegram": telegram_ok, "ntfy": ntfy_ok, "in_app": send_in_app}

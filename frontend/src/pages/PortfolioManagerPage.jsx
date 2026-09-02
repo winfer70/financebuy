@@ -27,6 +27,18 @@ import AssetDetailPanel from "../components/common/AssetDetailPanel";
 import AlertModal from "../components/common/AlertModal";
 import StaleDataBanner from "../components/common/StaleDataBanner";
 
+function nyDateIso() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+}
+
+function softStopStageLabel(pos) {
+  const today = nyDateIso();
+  const slice = (v) => (v ? String(v).slice(0, 10) : "");
+  if (slice(pos.soft_stop_eod_on) === today) return "EOD";
+  if (slice(pos.soft_stop_intraday_on) === today) return "HIT";
+  return null;
+}
+
 /* -- Asset section config ------------------------------------------------- */
 const SECTIONS = [
   { id: "all",      label: "ALL" },
@@ -2092,9 +2104,18 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
                             <span
                               onClick={() => { setEditingSoftStopLoss(pos.position_id); setSoftStopLossInput(pos.soft_stop_loss ? String(parseFloat(pos.soft_stop_loss)) : ""); }}
                               style={{ cursor: "pointer", color: pos.soft_stop_loss && price != null && price <= parseFloat(pos.soft_stop_loss) ? "var(--amber)" : undefined, fontWeight: pos.soft_stop_loss && price != null && price <= parseFloat(pos.soft_stop_loss) ? 700 : undefined }}
-                              title="Click to edit soft stop loss (Telegram alert)"
+                              title="Click to edit soft stop (Telegram + ntfy). HIT = intraday touch today; EOD = closed below."
                             >
-                              {pos.soft_stop_loss ? formatValue(parseFloat(pos.soft_stop_loss)) : <span style={{ color: "var(--c-muted)" }}>{"\u2014"}</span>}
+                              {pos.soft_stop_loss ? (
+                                <>
+                                  {formatValue(parseFloat(pos.soft_stop_loss))}
+                                  {softStopStageLabel(pos) && (
+                                    <span style={{ marginLeft: 6, fontSize: 9, letterSpacing: 0.5, fontWeight: 700 }}>
+                                      {softStopStageLabel(pos)}
+                                    </span>
+                                  )}
+                                </>
+                              ) : <span style={{ color: "var(--c-muted)" }}>{"\u2014"}</span>}
                             </span>
                           )}
                         </td>

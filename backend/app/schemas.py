@@ -10,7 +10,7 @@ Conventions:
   - Sensitive fields (password_hash, raw tokens) are never included in *Out
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 import re
 from typing import Any, Dict, List, Literal, Optional
@@ -585,6 +585,8 @@ class PositionOut(BaseModel):
     hard_stop_loss: Optional[Decimal] = Field(None, max_digits=18, decimal_places=2)
     soft_stop_loss: Optional[Decimal] = Field(None, max_digits=18, decimal_places=2)
     profit_taking: Optional[Decimal] = Field(None, max_digits=18, decimal_places=2)
+    soft_stop_intraday_on: Optional[date] = None
+    soft_stop_eod_on: Optional[date] = None
     created_at: datetime
 
     class Config:
