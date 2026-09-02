@@ -2104,7 +2104,7 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
                             <span
                               onClick={() => { setEditingSoftStopLoss(pos.position_id); setSoftStopLossInput(pos.soft_stop_loss ? String(parseFloat(pos.soft_stop_loss)) : ""); }}
                               style={{ cursor: "pointer", color: pos.soft_stop_loss && price != null && price <= parseFloat(pos.soft_stop_loss) ? "var(--amber)" : undefined, fontWeight: pos.soft_stop_loss && price != null && price <= parseFloat(pos.soft_stop_loss) ? 700 : undefined }}
-                              title="Click to edit soft stop (Telegram + ntfy). HIT = intraday touch today; EOD = closed below."
+                              title="Notify via Telegram + ntfy when last price hits this level. Click to set. HIT = pinged today; EOD = closed below."
                             >
                               {pos.soft_stop_loss ? (
                                 <>

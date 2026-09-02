@@ -36,6 +36,21 @@ from ..schemas import (
 from .auth_routes import get_current_user
 
 router = APIRouter(prefix="/portfolio-manager", tags=["portfolio-manager"])
+_REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+
+
+async def _enqueue_soft_stop_check(position_id: UUID) -> None:
+    """Ask the alert worker to notify now if last price is already through the stop."""
+    try:
+        from arq.connections import RedisSettings, create_pool
+
+        pool = await create_pool(RedisSettings.from_dsn(_REDIS_URL))
+        await pool.enqueue_job(
+            "evaluate_one_soft_stop", str(position_id), _queue_name="arq:alert"
+        )
+        await pool.close()
+    except Exception:
+        pass
 
 
 # ── Helper ───────────────────────────────────────────────────────────────────
@@ -256,15 +271,20 @@ async def modify_position(
         position.is_excluded = payload.is_excluded
     if payload.hard_stop_loss is not None:
         position.hard_stop_loss = payload.hard_stop_loss if payload.hard_stop_loss > 0 else None
+    soft_changed_to_value = False
     if payload.soft_stop_loss is not None:
         new_soft = payload.soft_stop_loss if payload.soft_stop_loss > 0 else None
         if new_soft != position.soft_stop_loss:
             position.reset_soft_stop_stages()
+            if new_soft is not None:
+                soft_changed_to_value = True
         position.soft_stop_loss = new_soft
     if payload.profit_taking is not None:
         position.profit_taking = payload.profit_taking if payload.profit_taking > 0 else None
     await db.commit()
     await db.refresh(position)
+    if soft_changed_to_value:
+        await _enqueue_soft_stop_check(position.position_id)
     return position
 
 

@@ -366,6 +366,52 @@ async def _check_soft_stops(session: AsyncSession) -> None:
         logger.info("Soft stop stages processed", count=fired)
 
 
+async def evaluate_one_soft_stop(ctx: dict, position_id: str) -> None:
+    """Immediate check after the user sets a soft stop — ignores the RTH gate.
+
+    Used so a newly entered level that last price is already through still
+    notifies (testing, premarket, or a stop set after the breach).
+    """
+    session: AsyncSession = _SessionLocal()
+    try:
+        result = await session.execute(
+            select(PortfolioPosition, Portfolio.user_id)
+            .join(Portfolio, PortfolioPosition.portfolio_id == Portfolio.portfolio_id)
+            .where(
+                PortfolioPosition.position_id == uuid.UUID(position_id),
+                PortfolioPosition.soft_stop_loss.isnot(None),
+                PortfolioPosition.closed_at.is_(None),
+            )
+        )
+        row = result.first()
+        if not row:
+            return
+        pos, user_id = row
+        current_price = await asyncio.to_thread(_fetch_price, pos.ticker)
+        if current_price <= 0:
+            logger.warning("Soft stop immediate check: no price", ticker=pos.ticker)
+            return
+        soft_stop = float(pos.soft_stop_loss)
+        if current_price > soft_stop:
+            return
+        today = _ny_today()
+        if await _fire_soft_stop_stage(
+            session, pos, user_id, "intraday", today, pos.ticker, soft_stop, current_price
+        ):
+            await session.commit()
+            logger.info(
+                "Soft stop immediate notify",
+                ticker=pos.ticker,
+                soft_stop=soft_stop,
+                price=current_price,
+            )
+    except Exception:
+        logger.exception("evaluate_one_soft_stop failed", position_id=position_id)
+        await session.rollback()
+    finally:
+        await session.close()
+
+
 async def evaluate_price_alerts(ctx: dict) -> None:
     """Main worker job: check all active alerts against current prices.
 
@@ -523,7 +569,7 @@ class WorkerSettings:
     Run with: ``arq app.trading.alert_worker.WorkerSettings``
     """
 
-    functions = [evaluate_price_alerts, sync_degiro_portfolio]
+    functions = [evaluate_price_alerts, sync_degiro_portfolio, evaluate_one_soft_stop]
     cron_jobs = [cron(sync_degiro_portfolio, hour=2, minute=0)]
     queue_name = "arq:alert"
     on_startup = startup

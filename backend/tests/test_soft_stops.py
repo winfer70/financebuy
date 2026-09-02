@@ -26,6 +26,7 @@ from app.trading.alert_worker import (
     _check_soft_stops,
     _pending_channels,
     _stage_done,
+    evaluate_one_soft_stop,
     reset_soft_stop_stages,
 )
 from app.trading.notifications import _send_ntfy, _send_telegram, notify_soft_stop
@@ -157,6 +158,58 @@ async def test_stage2_close_above_is_shakeout():
     assert notify.await_count == 0
     assert pos.soft_stop_eod_on is None
     assert pos.soft_stop_loss == 150.0
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_immediate_check_fires_when_market_closed():
+    pos = FakePos(150.0)
+    pos.position_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    session = AsyncMock()
+    result = MagicMock()
+    result.first.return_value = (pos, user_id)
+    session.execute = AsyncMock(return_value=result)
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+    session.close = AsyncMock()
+    notify = AsyncMock(return_value={"telegram": True, "ntfy": True, "in_app": True})
+
+    with (
+        patch("app.trading.alert_worker._SessionLocal", return_value=session),
+        patch("app.trading.alert_worker._is_market_open", return_value=False),
+        patch("app.trading.alert_worker._is_after_rth_close", return_value=False),
+        patch("app.trading.alert_worker._ny_today", return_value=TODAY),
+        patch("app.trading.alert_worker._fetch_price", return_value=140.0),
+        patch("app.trading.alert_worker.notify_soft_stop", notify),
+    ):
+        await evaluate_one_soft_stop({}, str(pos.position_id))
+
+    assert notify.await_count == 1
+    assert pos.soft_stop_loss == 150.0
+    assert pos.soft_stop_intraday_on == TODAY
+    session.commit.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_immediate_check_skips_when_price_above_stop():
+    pos = FakePos(150.0)
+    session = AsyncMock()
+    result = MagicMock()
+    result.first.return_value = (pos, uuid.uuid4())
+    session.execute = AsyncMock(return_value=result)
+    session.commit = AsyncMock()
+    session.close = AsyncMock()
+    notify = AsyncMock()
+
+    with (
+        patch("app.trading.alert_worker._SessionLocal", return_value=session),
+        patch("app.trading.alert_worker._fetch_price", return_value=160.0),
+        patch("app.trading.alert_worker.notify_soft_stop", notify),
+    ):
+        await evaluate_one_soft_stop({}, str(pos.position_id))
+
+    assert notify.await_count == 0
     session.commit.assert_not_awaited()
 
 
