@@ -57,8 +57,9 @@ logger = logging.getLogger("tickertap-worker")
 # Configuration from environment
 # ---------------------------------------------------------------------------
 API_URL = os.getenv("TICKERTAP_API_URL", "http://localhost:8000")
-INTERNAL_KEY = os.getenv("TICKERTAP_INTERNAL_KEY", "")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3:8b-instruct-q4_K_M")
+INTERNAL_KEY = os.getenv("TICKERTAP_INTERNAL_KEY") or os.getenv("INTERNAL_NEWS_KEY", "")
+# llama3:8b is gone with the old worker host; score on the GPU box model that is actually pulled.
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "hermes3:8b")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
 # Internal ingestion endpoint on Server A.

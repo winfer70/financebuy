@@ -1,25 +1,18 @@
 # tickerTap HANDOFF — 2026-09-02
 
-## Date
-- 2026-09-02
+## Branch
+`feature/insider-monitor-briefings` off `main` @ `3c8f937`. Not merged. Do not `release.sh` / do not `docker compose down`.
 
-## What shipped
-- Two-stage soft-stop alerts: Telegram + ntfy retry, in-app notification. Never auto-clears `soft_stop_loss`. Immediate check when a newly saved level is already through last price.
-- Alembic **0032** (`soft_stop_intraday_on`, `soft_stop_eod_on`, `soft_stop_delivery_json`).
-- `POST /positions` persist bug: `add_position` now `db.add` / commit / refresh / return (was falling off the handler → 500).
-- Docs pass: FinBERT / 12-table / 8-migration snapshots removed; no hostnames, LAN IPs, or secret values in tracked files.
+## Shipped (code, tests green)
+- News worker: `hermes3:8b`, `INTERNAL_NEWS_KEY` fallback, `NEWS_QUEUE_DIR`. Live on labserver as `tickertap_news_worker` (docker run, not compose-up).
+- Soft-stop Telegram: last price + % vs stop + 2× volume-leaving + sector ETF + 48h scored news. `market_context.py`.
+- Insider monitor: Form 4 atom→XML parse, Alembic **0033** `insider_filings`, GICS sector/integrity gate, Telegram via `notify_soft_stop`. Cron every 5 min on **trading-worker**.
 
-## Current state
-- Canonical branch: **`main`** (kept in sync with `tradingAI0.1` for `release.sh`).
-- Alembic head: **0032**.
-- News scoring: remote Ollama worker (`server-b-worker/`) POSTs to `POST /api/v1/news/internal/news`. Not FinBERT.
-- Volume-flow Phase 4 auto-scores **3/7** factors (max 15). The /35 rubric is a UI checklist, not enforced in code.
-- `volume_flow_scanner.py` was never in this repo. Scanner lives in `backend/app/trading/scanner_worker.py`.
+## Tests
+`backend\.venv` (not system 3.14): 112 passed (`test_soft_stops`, `test_insider_*`, rules engine, heartbeats) with `--noconftest`. FastAPI conftest still broken on this venv (Pydantic v1 ForwardRef).
 
 ## Next
-1. New features: `git checkout main && git pull && git checkout -b feature/<name>`.
-2. Do **not** run `release.sh` unless you intend a production deploy. It still `docker compose down`s the stack (nginx Docker-DNS 502 unless you reload `tickertap_web` after recreate).
-3. Prefer `docker compose --env-file .env.prod -f docker-compose.labserver.yml` recreate of `app` then `web`, then `nginx -s reload` — never a full `down` on prod.
-
-## Do not put in git
-Secrets live only in gitignored `.env` / `.env.prod`. Placeholders only in `backend/.env.example` and `.env.prod.example`.
+1. Commit/push this branch when asked (if not already).
+2. Deploy without stack recreate: copy `backend/app` + `0033` to labserver; `docker exec tickertap_app alembic upgrade head`; restart `tickertap_trading_worker` only.
+3. Set `SEC_USER_AGENT` (name + contact email) in gitignored `backend/.env` on labserver or the poller no-ops.
+4. Do **not** `compose up` news-worker — it recreates `tickertap_tickertap_net`.

@@ -37,6 +37,7 @@ import httpx
 
 from ..logging_config import configure_structlog
 from .heartbeat import write_worker_heartbeat
+from .insider_monitor import poll_insider_filings  # noqa: F401 — registered in WorkerSettings
 from .scanner_worker import run_scanner  # noqa: F401 — registered in WorkerSettings
 from ..services.degiro_sync import sync_degiro_portfolio  # noqa: F401 — registered in WorkerSettings
 from ..services.chromadb_client import store_analysis
@@ -1015,10 +1016,18 @@ async def weekly_meta_analysis(ctx: dict) -> None:
 
 
 class WorkerSettings:
-    functions = [run_backtest, run_scanner, run_portfolio_rules, sync_degiro_portfolio, evaluate_closed_trade]
+    functions = [
+        run_backtest,
+        run_scanner,
+        run_portfolio_rules,
+        sync_degiro_portfolio,
+        evaluate_closed_trade,
+        poll_insider_filings,
+    ]
     queue_name = "arq:trading"
     cron_jobs = [
         cron(_periodic_heartbeat, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
+        cron(poll_insider_filings, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
         cron(sync_degiro_portfolio, hour=2, minute=0),
         cron(weekly_meta_analysis, weekday=0, hour=3, minute=0),
     ]

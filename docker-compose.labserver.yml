@@ -152,6 +152,32 @@ services:
       - ./backend/app:/app/app:ro
       - ./backend/alembic:/app/alembic:ro
 
+  # News scorer: RSS → Ollama (GPU host) → POST /api/v1/news/internal/news
+  # Replaces the old remote systemd worker (last ingest 2026-08-25).
+  # LIVE STACK: do not `compose up` this service — Compose tries to recreate
+  # tickertap_tickertap_net and errors. Start with docker run --network tickertap_tickertap_net
+  # (container tickertap_news_worker) or `docker start tickertap_news_worker`.
+  news-worker:
+    build:
+      context: .
+      dockerfile: server-b-worker/Dockerfile
+    container_name: tickertap_news_worker
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      TICKERTAP_API_URL: http://app:8000
+      OLLAMA_MODEL: ${NEWS_OLLAMA_MODEL:-hermes3:8b}
+      NEWS_QUEUE_DIR: /data
+      SKIP_MIGRATIONS: "1"
+    networks:
+      - tickertap_net
+    depends_on:
+      app:
+        condition: service_healthy
+    volumes:
+      - news_queue:/data
+
   alert-worker:
     build:
       context: .
@@ -225,3 +251,4 @@ services:
 volumes:
   db_data:
   ml_checkpoints:
+  news_queue:

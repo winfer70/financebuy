@@ -1159,3 +1159,40 @@ class RuleRefinement(Base):
     status = Column(String(16), server_default="pending", nullable=False)
     approved_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class InsiderFiling(Base):
+    """One non-derivative Form 4 transaction ingested from EDGAR.
+
+    Dedup is (accession, txn_index). Telegram is sent at most once per accession
+    (notified_at). Cluster queries use ticker + transaction_code + date window.
+    """
+
+    __tablename__ = "insider_filings"
+    __table_args__ = (
+        UniqueConstraint("accession", "txn_index", name="uq_insider_filings_accession_txn"),
+        Index("idx_insider_filings_ticker_code_date", "ticker", "transaction_code", "transaction_date"),
+        Index("idx_insider_filings_accession", "accession"),
+    )
+
+    filing_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    accession = Column(String(25), nullable=False)
+    txn_index = Column(Integer, nullable=False, server_default="0")
+    ticker = Column(String(20), nullable=False)
+    issuer_cik = Column(String(10), nullable=True)
+    owner_name = Column(String(256), nullable=True)
+    owner_cik = Column(String(10), nullable=True)
+    is_director = Column(Boolean, nullable=False, server_default="false")
+    is_officer = Column(Boolean, nullable=False, server_default="false")
+    is_ten_percent = Column(Boolean, nullable=False, server_default="false")
+    officer_title = Column(String(128), nullable=True)
+    transaction_code = Column(String(4), nullable=False)
+    acquired_disposed = Column(String(1), nullable=True)
+    shares = Column(Numeric(18, 4), nullable=True)
+    price = Column(Numeric(18, 4), nullable=True)
+    notional = Column(Numeric(18, 2), nullable=True)
+    transaction_date = Column(Date, nullable=True)
+    is_10b5_1 = Column(Boolean, nullable=True)
+    filing_url = Column(Text, nullable=True)
+    notified_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

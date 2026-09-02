@@ -29,6 +29,7 @@ from ..models import Notification, PriceAlert, Portfolio, PortfolioPosition
 from .heartbeat import write_worker_heartbeat
 from ..services.degiro_sync import sync_degiro_portfolio  # noqa: F401
 from .notifications import notify_soft_stop
+from .market_context import fetch_ticker_news, fetch_volume_snapshot, format_soft_stop_report
 
 # Configure structlog before any logger is obtained — idempotent guard inside
 configure_structlog()
@@ -47,6 +48,42 @@ _SessionLocal = sessionmaker(_engine, class_=AsyncSession, expire_on_commit=Fals
 
 
 # -- Utility functions ────────────────────────────────────────────────────
+
+
+async def _build_soft_stop_report(
+    session: AsyncSession,
+    ticker: str,
+    price: float,
+    soft_stop: float,
+    stage: str,
+    sector: Optional[str] = None,
+) -> str:
+    """Price vs stop, scanner-style volume, and scored news for Telegram/ntfy."""
+    loop = asyncio.get_running_loop()
+    try:
+        snap = await loop.run_in_executor(
+            None, lambda: fetch_volume_snapshot(ticker, sector)
+        )
+    except Exception:
+        logger.warning("soft-stop volume snapshot failed", ticker=ticker)
+        snap = {
+            "vol_ratio": None,
+            "price_up": None,
+            "leaving": False,
+            "sector": sector,
+            "sector_etf": None,
+            "sector_vol_ratio": None,
+            "sector_price_up": None,
+        }
+    try:
+        news = await fetch_ticker_news(session, ticker)
+    except Exception:
+        logger.warning("soft-stop news digest failed", ticker=ticker)
+        news = []
+    return format_soft_stop_report(ticker, price, soft_stop, stage, snap, news)
+
+
+# -- NYSE session helpers ─────────────────────────────────────────────────
 
 
 def _safe_float(v) -> float:
@@ -250,20 +287,21 @@ async def _fire_soft_stop_stage(
 
     if stage == "intraday":
         title = f"Soft stop hit: {ticker} at ${price:.2f}"
-        body = (
-            f"{ticker} dropped to ${price:.2f} — below your soft stop "
-            f"${soft_stop:.2f}. Review the position (shakeout vs breakdown)."
-        )
         event_type = "soft_stop_loss"
         ntfy_priority = 3
     else:
         title = f"CLOSE BELOW SOFT STOP: {ticker} at ${price:.2f}"
-        body = (
-            f"{ticker} closed at ${price:.2f}, below your soft stop "
-            f"${soft_stop:.2f}. Exit at tomorrow's market open."
-        )
         event_type = "soft_stop_eod"
         ntfy_priority = 5
+
+    body = await _build_soft_stop_report(
+        session,
+        ticker,
+        price,
+        soft_stop,
+        stage,
+        sector=getattr(pos, "sector", None),
+    )
 
     result = await notify_soft_stop(
         db=session,
