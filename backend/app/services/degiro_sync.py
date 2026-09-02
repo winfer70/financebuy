@@ -379,6 +379,9 @@ async def sync_degiro_portfolio(ctx: dict) -> dict:
             name = (product.get("name") or isin)[:256]
             asset_type = _map_product_type(product.get("productType"))
 
+            product_id_int = int(raw_pos["id"])
+            stop_loss_price = stop_orders.get(product_id_int)
+
             result = await db.execute(
                 select(PortfolioPosition).where(
                     PortfolioPosition.portfolio_id == portfolio_id,
@@ -393,6 +396,8 @@ async def sync_degiro_portfolio(ctx: dict) -> dict:
                 existing.purchase_price = avg_price
                 existing.name = name
                 existing.ticker = ticker
+                if stop_loss_price is not None:
+                    existing.hard_stop_loss = stop_loss_price
             else:
                 db.add(
                     PortfolioPosition(
@@ -400,13 +405,14 @@ async def sync_degiro_portfolio(ctx: dict) -> dict:
                         ticker=ticker,
                         name=name,
                         isin=isin,
-                        degiro_product_id=int(raw_pos["id"]),
+                        degiro_product_id=product_id_int,
                         quantity=quantity,
                         purchase_price=avg_price,
                         purchase_date=datetime.now(timezone.utc),
                         group_tag="DEGIRO_SYNC",
                         asset_type=asset_type,
                         is_excluded=False,
+                        hard_stop_loss=stop_loss_price,
                     )
                 )
             synced += 1

@@ -1,7 +1,7 @@
 # TickerTap — News Expansion Feasibility Research
 
-**Date**: 2026-03-16
-**Status**: Research — no code changes
+**Date**: 2026-03-16  
+**Status**: Research (source-expansion options). Live scoring path is already `server-b-worker/` → Ollama → `POST /api/v1/news/internal/news`. **Not FinBERT.**
 
 ---
 
@@ -11,7 +11,7 @@
 
 TickerTap's news system is a two-server pipeline:
 
-1. **Server B (REDACTED_HOST)** runs a single-threaded Python worker (`server-b-worker/worker.py`) that:
+1. **Server B (remote worker host)** runs a single-threaded Python worker (`server-b-worker/worker.py`) that:
    - Fetches raw articles from 4 sources via `sources.py` (Yahoo Finance RSS, Google News RSS, Finviz HTML scrape, MarketWatch RSS)
    - Deduplicates by URL in-memory (capped at 10,000 URLs)
    - Scores each article through a local Ollama LLM (`llama3:8b-instruct-q4_K_M`) which produces a general market score (-5 to +5) and per-ticker scores with reasoning

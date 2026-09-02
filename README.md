@@ -71,7 +71,7 @@ Frontend          Backend
 
 **Frontend** — React 19 (Vite) single-page application. Bloomberg-terminal aesthetic with IBM Plex Mono typography. Page state managed via `App.jsx` (no client-side router).
 
-**Database** — PostgreSQL 15 with Alembic migrations. Schema enforces CHECK constraints, CASCADE deletes, and composite indexes on hot query paths. 12 tables across authentication, trading, portfolio management, and platform operations.
+**Database** — PostgreSQL 15 (TimescaleDB image) with Alembic migrations **0001–0032**. CHECK constraints, CASCADE deletes, composite indexes. Not “12 tables” — that snapshot is obsolete.
 
 **Infrastructure** — Docker Compose with three services (app, db, redis) on a private bridge network. nginx reverse proxy serves the frontend and proxies `/api/v1/` to the backend. Two-stage Dockerfile for deterministic builds.
 
@@ -89,19 +89,17 @@ Frontend          Backend
 - Market status indicator (NYSE open/closed with countdown timer)
 
 ### News Aggregation
-- Multi-source news feed: Yahoo Finance RSS, Google News RSS, Finviz HTML scraping, MarketWatch RSS
-- FinBERT sentiment classification (positive / negative / neutral with confidence scores)
-- Portfolio-first sorting (articles mentioning your holdings appear first)
-- Category filters: ALL, PORTFOLIO, POSITIVE, NEGATIVE
-- Ticker search bar with per-ticker deep fetch
-- Article summaries, source badges, and external links
+- Multi-source ingest on a **remote worker** (`server-b-worker/`): Yahoo Finance RSS, Google News RSS, Finviz HTML, MarketWatch RSS
+- Ollama LLM scores each article −5…+5 (general + per-ticker) and POSTs to `POST /api/v1/news/internal/news`
+- Portfolio-first sorting, category filters, ticker search
+- **Not FinBERT** — that classifier is not in this repo
 
 ### Portfolio Manager
 - Create, rename, and delete custom portfolios
 - Add/edit/remove positions with purchase price, quantity, date, and group tags
 - CSV bulk import with validation
 - Asset type classification (stock, ETF, crypto, commodity, futures)
-- Stop-loss price tracking
+- Hard stop (broker) vs soft stop (TickerTap warning: Telegram + ntfy, two-stage RTH then EOD)
 - Physical commodity type support
 - Section-scoped summary statistics
 - News action button per position (opens News page filtered to that ticker)
@@ -202,34 +200,13 @@ backend/
 │   ├── main.py              # FastAPI app, middleware stack, startup checks
 │   ├── auth.py              # JWT utilities, password hashing
 │   ├── db.py                # Async engine, session factory, get_db() dependency
-│   ├── models.py            # SQLAlchemy ORM models (12 tables)
+│   ├── models.py            # SQLAlchemy ORM models (see alembic 0001–0032)
 │   ├── schemas.py           # Pydantic v1 request/response schemas
 │   ├── email.py             # Async SMTP email helpers
 │   ├── limiter.py           # SlowAPI rate limiter configuration
-│   ├── news_sources.py      # Multi-source RSS/HTML news aggregation
-│   ├── sentiment.py         # FinBERT sentiment classification singleton
-│   └── routes/
-│       ├── auth_routes.py       # /auth/* (register, login, refresh, logout, password reset)
-│       ├── accounts.py          # /accounts/*
-│       ├── transactions.py      # /transactions/*
-│       ├── holdings.py          # /holdings/*
-│       ├── orders.py            # /orders/*
-│       ├── portfolio.py         # /portfolio/* (cross-account positions/summary)
-│       ├── portfolio_manager.py # /portfolio-manager/* (custom portfolio CRUD)
-│       ├── market.py            # /market/* (quotes, OHLCV, SMA, search)
-│       ├── news.py              # /news/* (aggregated feed, per-ticker fetch)
-│       ├── chart_templates.py   # /chart-templates/* (saved chart configs)
-│       └── admin.py             # /admin/* (user/account mgmt, audit logs)
-├── alembic/
-│   └── versions/
-│       ├── 0001_initial.py
-│       ├── 0002_password_reset_tokens.py
-│       ├── 0003_integrity_fixes.py
-│       ├── 0004_refresh_tokens.py
-│       ├── 0005_portfolio_manager.py
-│       ├── 0006_asset_types.py
-│       ├── 0007_stop_loss.py
-│       └── 0008_chart_templates.py
+│   ├── trading/             # arq workers: alerts, scanner, backtests, DeGiro, paper
+│   └── routes/              # /api/v1/* — see main.py include_router list
+├── alembic/versions/        # 0001 … 0032 (head: soft-stop alert state)
 ├── tests/
 │   ├── test_health.py
 │   ├── test_auth.py
@@ -283,8 +260,8 @@ frontend/src/
 │   ├── TransactionsPage.jsx    # Cash deposit/withdrawal history
 │   ├── OrdersPage.jsx          # Buy/sell order management
 │   ├── ChartsPage.jsx          # Advanced charting with technical indicators
-│   ├── NewsPage.jsx            # Multi-source news with sentiment analysis
-│   ├── PortfolioManagerPage.jsx# Custom portfolio CRUD with CSV import
+│   ├── NewsPage.jsx            # LLM-scored news feed (−5…+5)
+│   ├── PortfolioManagerPage.jsx# Custom portfolio CRUD; soft/hard stops
 │   └── ImportPage.jsx          # CSV portfolio import wizard
 └── __tests__/
     ├── setup.js                # @testing-library/jest-dom global setup
@@ -359,16 +336,7 @@ alembic downgrade -1
 
 ### Migration History
 
-| Revision | Description |
-|---|---|
-| `0001_initial` | Core schema — users, accounts, transactions, securities, holdings, orders, audit_log |
-| `0002_password_reset_tokens` | Password reset token table with CASCADE delete |
-| `0003_integrity_fixes` | Fix server_defaults, add CHECK constraints, CASCADE/RESTRICT, composite indexes |
-| `0004_refresh_tokens` | Refresh token table for httpOnly cookie rotation |
-| `0005_portfolio_manager` | Portfolios and portfolio_positions tables |
-| `0006_asset_types` | Asset type column on portfolio positions |
-| `0007_stop_loss` | Stop-loss price column on portfolio positions |
-| `0008_chart_templates` | Chart templates table (drawings, overlays, symbol/interval scoped) |
+Alembic revisions **0001–0032**. Head: `0032_soft_stop_alert_state`. See `backend/alembic/versions/` — do not treat the old 0001–0008 table as complete.
 
 ---
 
@@ -394,8 +362,8 @@ alembic downgrade -1
 
 ## Contributing
 
-1. Branch from `main`.
+1. Branch `feature/<name>` from a pulled `main`.
 2. Make changes and run the relevant tests (`pytest` for backend, `npm test` for frontend).
 3. If `models.py` changes, generate a migration: `alembic revision --autogenerate -m "description"`.
 4. Verify the UI works manually: `npm run dev` + `uvicorn app.main:app --reload`.
-5. Open a pull request with a clear description of what changed and why.
+5. Open a pull request targeting `main`. Do not commit secrets, `.env`, or LAN topology.

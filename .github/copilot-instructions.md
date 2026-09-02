@@ -43,13 +43,13 @@ Frontend          Backend
 |------|---------|
 | `backend/app/main.py` | App init, middleware stack, router registration, `/health` endpoint |
 | `backend/app/db.py` | Async engine, `AsyncSessionLocal`, `get_db()` dependency |
-| `backend/app/models.py` | 12 SQLAlchemy ORM models |
+| `backend/app/models.py` | SQLAlchemy ORM models (alembic 0001–0032) |
 | `backend/app/schemas.py` | Pydantic v1 schemas (`orm_mode = True`) |
 | `backend/app/auth.py` | Argon2 hashing, JWT creation/verification |
 | `backend/app/email.py` | Async SMTP helpers for password reset |
 | `backend/app/limiter.py` | SlowAPI rate limiter configuration |
-| `backend/app/news_sources.py` | Multi-source RSS/HTML news aggregation |
-| `backend/app/sentiment.py` | FinBERT sentiment classification singleton |
+| `backend/app/trading/` | arq workers: alerts, scanner, backtests, DeGiro, paper |
+| `server-b-worker/` | News RSS fetch + Ollama scoring (not in the API process) |
 
 ### Route Modules
 
@@ -63,9 +63,11 @@ Frontend          Backend
 | `routes/portfolio.py` | `/portfolio` | Cross-account positions and summary |
 | `routes/portfolio_manager.py` | `/portfolio-manager` | Custom portfolio CRUD, CSV import, position sell |
 | `routes/market.py` | `/market` | Quotes, OHLCV, SMA, search (yfinance) |
-| `routes/news.py` | `/news` | Aggregated feed with FinBERT sentiment |
+| `routes/news.py` | `/news` | DB-backed scored feed; ingest `POST /internal/news` |
 | `routes/chart_templates.py` | `/chart-templates` | Saved chart configurations |
 | `routes/admin.py` | `/admin` | User/account mgmt, audit logs |
+| `routes/scanner.py` | `/scanner` | Volume-flow scan enqueue |
+| `routes/portfolio_rules.py` | `/portfolio-rules` | `rule_alerts` list/patch |
 
 ### Patterns to Follow
 
@@ -151,7 +153,7 @@ npx vite build       # Production build → dist/
 
 **Engine:** PostgreSQL 15 with Alembic migrations.
 
-**Schema:** 12 tables — users, accounts, transactions, securities, holdings, orders, audit_log, password_reset_tokens, refresh_tokens, portfolios, portfolio_positions, chart_templates.
+**Schema:** Alembic 0001–0032. See `models.py`. Do not use the old “12 tables” snapshot.
 
 **Migration files:** `backend/alembic/versions/0001_initial.py` through `0008_chart_templates.py`.
 

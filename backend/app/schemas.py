@@ -10,7 +10,7 @@ Conventions:
   - Sensitive fields (password_hash, raw tokens) are never included in *Out
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 import re
 from typing import Any, Dict, List, Literal, Optional
@@ -562,7 +562,8 @@ class PositionCreate(BaseModel):
     group_tag: Optional[str] = Field(None, max_length=64, description="Optional group/label for the position.", example="Core")
     asset_type: str = Field("stock", description="Asset type: stock, crypto, etf, or physical.", example="stock")
     physical_type: Optional[str] = Field(None, max_length=20, description="Physical asset sub-type: coin or bar.", example="coin")
-    stop_loss: Optional[Decimal] = Field(None, gt=Decimal("0"), max_digits=18, decimal_places=2, description="Stop-loss price trigger.", example="140.00")
+    hard_stop_loss: Optional[Decimal] = Field(None, gt=Decimal("0"), max_digits=18, decimal_places=2, description="Hard stop-loss (DeGiro standing order).", example="140.00")
+    soft_stop_loss: Optional[Decimal] = Field(None, gt=Decimal("0"), max_digits=18, decimal_places=2, description="Soft stop-loss — triggers Telegram alert when price reaches this.", example="145.00")
     profit_taking: Optional[Decimal] = Field(None, gt=Decimal("0"), max_digits=18, decimal_places=2, description="Profit-taking target price.", example="200.00")
     deduct_cash: bool = Field(False, description="Deduct cost from portfolio cash balance when adding this position.")
 
@@ -581,8 +582,11 @@ class PositionOut(BaseModel):
     is_excluded: bool
     asset_type: str = "stock"
     physical_type: Optional[str] = None
-    stop_loss: Optional[Decimal] = Field(None, max_digits=18, decimal_places=2)
+    hard_stop_loss: Optional[Decimal] = Field(None, max_digits=18, decimal_places=2)
+    soft_stop_loss: Optional[Decimal] = Field(None, max_digits=18, decimal_places=2)
     profit_taking: Optional[Decimal] = Field(None, max_digits=18, decimal_places=2)
+    soft_stop_intraday_on: Optional[date] = None
+    soft_stop_eod_on: Optional[date] = None
     created_at: datetime
 
     class Config:
@@ -596,7 +600,8 @@ class PositionUpdate(BaseModel):
     purchase_price: Optional[Decimal] = Field(None, gt=Decimal("0"), max_digits=18, decimal_places=2)
     group_tag: Optional[str] = Field(None, max_length=64)
     is_excluded: Optional[bool] = None
-    stop_loss: Optional[Decimal] = Field(None, max_digits=18, decimal_places=2)
+    hard_stop_loss: Optional[Decimal] = Field(None, max_digits=18, decimal_places=2)
+    soft_stop_loss: Optional[Decimal] = Field(None, max_digits=18, decimal_places=2)
     profit_taking: Optional[Decimal] = Field(None, max_digits=18, decimal_places=2)
 
 
@@ -1522,7 +1527,7 @@ class PortfolioItem(BaseModel):
     ticker: str
     quantity: float
     purchase_price: float
-    stop_loss: Optional[float] = None
+    hard_stop_loss: Optional[float] = None
     profit_taking: Optional[float] = None
 
 

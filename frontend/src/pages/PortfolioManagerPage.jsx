@@ -27,6 +27,18 @@ import AssetDetailPanel from "../components/common/AssetDetailPanel";
 import AlertModal from "../components/common/AlertModal";
 import StaleDataBanner from "../components/common/StaleDataBanner";
 
+function nyDateIso() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+}
+
+function softStopStageLabel(pos) {
+  const today = nyDateIso();
+  const slice = (v) => (v ? String(v).slice(0, 10) : "");
+  if (slice(pos.soft_stop_eod_on) === today) return "EOD";
+  if (slice(pos.soft_stop_intraday_on) === today) return "HIT";
+  return null;
+}
+
 /* -- Asset section config ------------------------------------------------- */
 const SECTIONS = [
   { id: "all",      label: "ALL" },
@@ -100,7 +112,7 @@ function CreatePortfolioModal({ onClose, onCreated, token }) {
    MODAL: Add Stock Position
 ========================================================================= */
 function AddStockModal({ portfolioId, portfolio, onClose, onAdded, token }) {
-  const [form, setForm] = useState({ ticker: "", quantity: "", purchase_date: "", purchase_price: "", group_tag: "", stop_loss: "", profit_taking: "" });
+  const [form, setForm] = useState({ ticker: "", quantity: "", purchase_date: "", purchase_price: "", group_tag: "", hard_stop_loss: "", profit_taking: "" });
   const [deductCash, setDeductCash] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -123,7 +135,7 @@ function AddStockModal({ portfolioId, portfolio, onClose, onAdded, token }) {
         purchase_date:  new Date(form.purchase_date).toISOString(),
         group_tag:      form.group_tag.trim() || null,
         asset_type:     "stock",
-        stop_loss:      form.stop_loss && !isNaN(+form.stop_loss) && +form.stop_loss > 0 ? parseFloat(form.stop_loss) : null,
+        hard_stop_loss: form.hard_stop_loss && !isNaN(+form.hard_stop_loss) && +form.hard_stop_loss > 0 ? parseFloat(form.hard_stop_loss) : null,
         profit_taking:  form.profit_taking && !isNaN(+form.profit_taking) && +form.profit_taking > 0 ? parseFloat(form.profit_taking) : null,
         deduct_cash:    deductCash,
       };
@@ -167,8 +179,8 @@ function AddStockModal({ portfolioId, portfolio, onClose, onAdded, token }) {
               <input className="form-control" placeholder="Core, Speculative..." value={form.group_tag} onChange={e => set("group_tag", e.target.value)} maxLength={64} />
             </div>
             <div className="form-field">
-              <label className="form-label">Stop Loss</label>
-              <input className="form-control" type="number" min="0.01" step="any" placeholder="140.00" value={form.stop_loss} onChange={e => set("stop_loss", e.target.value)} />
+              <label className="form-label">Hard Stop Loss</label>
+              <input className="form-control" type="number" min="0.01" step="any" placeholder="140.00" value={form.hard_stop_loss} onChange={e => set("hard_stop_loss", e.target.value)} />
             </div>
           </div>
           <div className="form-row">
@@ -205,7 +217,7 @@ function AddStockModal({ portfolioId, portfolio, onClose, onAdded, token }) {
    MODAL: Add Crypto Position
 ========================================================================= */
 function AddCryptoModal({ portfolioId, portfolio, onClose, onAdded, token }) {
-  const [form, setForm] = useState({ ticker: "", quantity: "", purchase_date: "", purchase_price: "", stop_loss: "", profit_taking: "" });
+  const [form, setForm] = useState({ ticker: "", quantity: "", purchase_date: "", purchase_price: "", hard_stop_loss: "", profit_taking: "" });
   const [deductCash, setDeductCash] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -228,7 +240,7 @@ function AddCryptoModal({ portfolioId, portfolio, onClose, onAdded, token }) {
         purchase_date:  new Date(form.purchase_date).toISOString(),
         group_tag:      null,
         asset_type:     "crypto",
-        stop_loss:      form.stop_loss && !isNaN(+form.stop_loss) && +form.stop_loss > 0 ? parseFloat(form.stop_loss) : null,
+        hard_stop_loss: form.hard_stop_loss && !isNaN(+form.hard_stop_loss) && +form.hard_stop_loss > 0 ? parseFloat(form.hard_stop_loss) : null,
         profit_taking:  form.profit_taking && !isNaN(+form.profit_taking) && +form.profit_taking > 0 ? parseFloat(form.profit_taking) : null,
         deduct_cash:    deductCash,
       };
@@ -268,8 +280,8 @@ function AddCryptoModal({ portfolioId, portfolio, onClose, onAdded, token }) {
             </div>
           </div>
           <div className="form-field">
-            <label className="form-label">Stop Loss</label>
-            <input className="form-control" type="number" min="0.01" step="any" placeholder="38000.00" value={form.stop_loss} onChange={e => set("stop_loss", e.target.value)} />
+            <label className="form-label">Hard Stop Loss</label>
+            <input className="form-control" type="number" min="0.01" step="any" placeholder="38000.00" value={form.hard_stop_loss} onChange={e => set("hard_stop_loss", e.target.value)} />
           </div>
           <div className="form-field">
             <label className="form-label">Profit Taking</label>
@@ -302,7 +314,7 @@ function AddCryptoModal({ portfolioId, portfolio, onClose, onAdded, token }) {
    MODAL: Add ETF Position
 ========================================================================= */
 function AddETFModal({ portfolioId, portfolio, onClose, onAdded, token }) {
-  const [form, setForm] = useState({ ticker: "", quantity: "", purchase_date: "", purchase_price: "", stop_loss: "", profit_taking: "" });
+  const [form, setForm] = useState({ ticker: "", quantity: "", purchase_date: "", purchase_price: "", hard_stop_loss: "", profit_taking: "" });
   const [deductCash, setDeductCash] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -325,7 +337,7 @@ function AddETFModal({ portfolioId, portfolio, onClose, onAdded, token }) {
         purchase_date:  new Date(form.purchase_date).toISOString(),
         group_tag:      null,
         asset_type:     "etf",
-        stop_loss:      form.stop_loss && !isNaN(+form.stop_loss) && +form.stop_loss > 0 ? parseFloat(form.stop_loss) : null,
+        hard_stop_loss: form.hard_stop_loss && !isNaN(+form.hard_stop_loss) && +form.hard_stop_loss > 0 ? parseFloat(form.hard_stop_loss) : null,
         profit_taking:  form.profit_taking && !isNaN(+form.profit_taking) && +form.profit_taking > 0 ? parseFloat(form.profit_taking) : null,
         deduct_cash:    deductCash,
       };
@@ -365,8 +377,8 @@ function AddETFModal({ portfolioId, portfolio, onClose, onAdded, token }) {
             </div>
           </div>
           <div className="form-field">
-            <label className="form-label">Stop Loss</label>
-            <input className="form-control" type="number" min="0.01" step="any" placeholder="170.00" value={form.stop_loss} onChange={e => set("stop_loss", e.target.value)} />
+            <label className="form-label">Hard Stop Loss</label>
+            <input className="form-control" type="number" min="0.01" step="any" placeholder="170.00" value={form.hard_stop_loss} onChange={e => set("hard_stop_loss", e.target.value)} />
           </div>
           <div className="form-field">
             <label className="form-label">Profit Taking</label>
@@ -399,7 +411,7 @@ function AddETFModal({ portfolioId, portfolio, onClose, onAdded, token }) {
    MODAL: Add Physical Asset
 ========================================================================= */
 function AddPhysicalModal({ portfolioId, portfolio, onClose, onAdded, token }) {
-  const [form, setForm] = useState({ metal: METALS[0].symbol, quantity: "", purchase_date: "", purchase_price: "", physical_type: "coin", name: "", stop_loss: "", profit_taking: "" });
+  const [form, setForm] = useState({ metal: METALS[0].symbol, quantity: "", purchase_date: "", purchase_price: "", physical_type: "coin", name: "", hard_stop_loss: "", profit_taking: "" });
   const [deductCash, setDeductCash] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -422,7 +434,7 @@ function AddPhysicalModal({ portfolioId, portfolio, onClose, onAdded, token }) {
         group_tag:      null,
         asset_type:     "physical",
         physical_type:  form.physical_type,
-        stop_loss:      form.stop_loss && !isNaN(+form.stop_loss) && +form.stop_loss > 0 ? parseFloat(form.stop_loss) : null,
+        hard_stop_loss: form.hard_stop_loss && !isNaN(+form.hard_stop_loss) && +form.hard_stop_loss > 0 ? parseFloat(form.hard_stop_loss) : null,
         profit_taking:  form.profit_taking && !isNaN(+form.profit_taking) && +form.profit_taking > 0 ? parseFloat(form.profit_taking) : null,
         deduct_cash:    deductCash,
       };
@@ -479,8 +491,8 @@ function AddPhysicalModal({ portfolioId, portfolio, onClose, onAdded, token }) {
               <input className="form-control" type="date" value={form.purchase_date} onChange={e => set("purchase_date", e.target.value)} />
             </div>
             <div className="form-field">
-              <label className="form-label">Stop Loss</label>
-              <input className="form-control" type="number" min="0.01" step="any" placeholder="1800.00" value={form.stop_loss} onChange={e => set("stop_loss", e.target.value)} />
+              <label className="form-label">Hard Stop Loss</label>
+              <input className="form-control" type="number" min="0.01" step="any" placeholder="1800.00" value={form.hard_stop_loss} onChange={e => set("hard_stop_loss", e.target.value)} />
             </div>
           </div>
           <div className="form-row">
@@ -644,7 +656,8 @@ function ModifyPositionModal({ position, onClose, onModified, token }) {
     quantity:       String(parseFloat(position.quantity)),
     purchase_price: String(parseFloat(position.purchase_price)),
     group_tag:      position.group_tag || "",
-    stop_loss:      position.stop_loss ? String(parseFloat(position.stop_loss)) : "",
+    hard_stop_loss: position.hard_stop_loss ? String(parseFloat(position.hard_stop_loss)) : "",
+    soft_stop_loss: position.soft_stop_loss ? String(parseFloat(position.soft_stop_loss)) : "",
     profit_taking:  position.profit_taking ? String(parseFloat(position.profit_taking)) : "",
   });
   const [loading, setLoading] = useState(false);
@@ -654,7 +667,8 @@ function ModifyPositionModal({ position, onClose, onModified, token }) {
   const submit = async () => {
     if (!form.quantity || isNaN(+form.quantity) || +form.quantity <= 0) { setErr("Quantity must be a positive number."); return; }
     if (!form.purchase_price || isNaN(+form.purchase_price) || +form.purchase_price <= 0) { setErr("Purchase price must be a positive number."); return; }
-    if (form.stop_loss && (isNaN(+form.stop_loss) || +form.stop_loss < 0)) { setErr("Stop loss must be a non-negative number."); return; }
+    if (form.hard_stop_loss && (isNaN(+form.hard_stop_loss) || +form.hard_stop_loss < 0)) { setErr("Hard stop loss must be a non-negative number."); return; }
+    if (form.soft_stop_loss && (isNaN(+form.soft_stop_loss) || +form.soft_stop_loss < 0)) { setErr("Soft stop loss must be a non-negative number."); return; }
     if (form.profit_taking && (isNaN(+form.profit_taking) || +form.profit_taking < 0)) { setErr("Profit taking must be a non-negative number."); return; }
     setLoading(true); setErr("");
     try {
@@ -662,7 +676,8 @@ function ModifyPositionModal({ position, onClose, onModified, token }) {
         quantity:       parseFloat(form.quantity),
         purchase_price: parseFloat(form.purchase_price),
         group_tag:      form.group_tag.trim() || null,
-        stop_loss:      form.stop_loss ? parseFloat(form.stop_loss) : null,
+        hard_stop_loss: form.hard_stop_loss ? parseFloat(form.hard_stop_loss) : null,
+        soft_stop_loss: form.soft_stop_loss ? parseFloat(form.soft_stop_loss) : null,
         profit_taking:  form.profit_taking ? parseFloat(form.profit_taking) : null,
       }, token);
       onModified(updated);
@@ -690,13 +705,20 @@ function ModifyPositionModal({ position, onClose, onModified, token }) {
           </div>
           <div className="form-row">
             <div className="form-field">
-              <label className="form-label">Stop Loss (optional)</label>
-              <input className="form-control" type="number" min="0" step="any" placeholder="e.g. 145.00" value={form.stop_loss} onChange={e => set("stop_loss", e.target.value)} />
+              <label className="form-label">Hard Stop Loss (optional)</label>
+              <input className="form-control" type="number" min="0" step="any" placeholder="e.g. 145.00" value={form.hard_stop_loss} onChange={e => set("hard_stop_loss", e.target.value)} />
             </div>
+            <div className="form-field">
+              <label className="form-label">Soft Stop Loss (optional)</label>
+              <input className="form-control" type="number" min="0" step="any" placeholder="e.g. 150.00" value={form.soft_stop_loss} onChange={e => set("soft_stop_loss", e.target.value)} />
+            </div>
+          </div>
+          <div className="form-row">
             <div className="form-field">
               <label className="form-label">Profit Taking (optional)</label>
               <input className="form-control" type="number" min="0" step="any" placeholder="e.g. 200.00" value={form.profit_taking} onChange={e => set("profit_taking", e.target.value)} />
             </div>
+            <div className="form-field" />
           </div>
           <div className="form-row">
             <div className="form-field">
@@ -859,8 +881,10 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
   const [activeSection,      setActiveSection]      = useState("all");
   const [smaData,            setSmaData]            = useState({});   // { AAPL: { 50: 180.12, 200: 165.30 }, ... }
   const [customSmaPeriod,    setCustomSmaPeriod]    = useState(200);
-  const [editingStopLoss,    setEditingStopLoss]    = useState(null); // position_id or null
-  const [stopLossInput,      setStopLossInput]      = useState("");
+  const [editingStopLoss,      setEditingStopLoss]      = useState(null); // position_id or null
+  const [stopLossInput,        setStopLossInput]        = useState("");
+  const [editingSoftStopLoss,  setEditingSoftStopLoss]  = useState(null); // position_id or null
+  const [softStopLossInput,    setSoftStopLossInput]    = useState("");
   const [editingProfitTaking, setEditingProfitTaking] = useState(null); // position_id or null
   const [profitTakingInput,   setProfitTakingInput]   = useState("");
 
@@ -1190,7 +1214,8 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
                               bv = ((quotes[b.ticker]?.price || 0) - parseFloat(b.purchase_price)) * parseFloat(b.quantity); break;
         case "sma50":         av = smaData[a.ticker]?.[50] ?? -Infinity; bv = smaData[b.ticker]?.[50] ?? -Infinity; break;
         case "smaCustom":     av = smaData[a.ticker]?.[customSmaPeriod] ?? -Infinity; bv = smaData[b.ticker]?.[customSmaPeriod] ?? -Infinity; break;
-        case "stoploss":      av = parseFloat(a.stop_loss) || -Infinity; bv = parseFloat(b.stop_loss) || -Infinity; break;
+        case "hardstoploss":  av = parseFloat(a.hard_stop_loss) || -Infinity; bv = parseFloat(b.hard_stop_loss) || -Infinity; break;
+        case "softstoploss":  av = parseFloat(a.soft_stop_loss) || -Infinity; bv = parseFloat(b.soft_stop_loss) || -Infinity; break;
         case "profittaking":  av = parseFloat(a.profit_taking) || -Infinity; bv = parseFloat(b.profit_taking) || -Infinity; break;
         default:              av = 0; bv = 0;
       }
@@ -1265,12 +1290,23 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
   const handleSaveStopLoss = async (pos) => {
     const val = stopLossInput.trim();
     const numVal = val === "" ? 0 : parseFloat(val);
-    if (val !== "" && (isNaN(numVal) || numVal < 0)) { setGlobalErr("Stop loss must be a positive number or empty."); return; }
+    if (val !== "" && (isNaN(numVal) || numVal < 0)) { setGlobalErr("Hard stop loss must be a positive number or empty."); return; }
     try {
-      const updated = await api.modifyPosition(pos.position_id, { stop_loss: numVal || 0 }, token);
+      const updated = await api.modifyPosition(pos.position_id, { hard_stop_loss: numVal || 0 }, token);
       setPositions(prev => prev.map(p => p.position_id === pos.position_id ? updated : p));
       setEditingStopLoss(null);
-    } catch (e) { setGlobalErr(e.message || "Failed to update stop loss."); }
+    } catch (e) { setGlobalErr(e.message || "Failed to update hard stop loss."); }
+  };
+
+  const handleSaveSoftStopLoss = async (pos) => {
+    const val = softStopLossInput.trim();
+    const numVal = val === "" ? 0 : parseFloat(val);
+    if (val !== "" && (isNaN(numVal) || numVal < 0)) { setGlobalErr("Soft stop loss must be a positive number or empty."); return; }
+    try {
+      const updated = await api.modifyPosition(pos.position_id, { soft_stop_loss: numVal || 0 }, token);
+      setPositions(prev => prev.map(p => p.position_id === pos.position_id ? updated : p));
+      setEditingSoftStopLoss(null);
+    } catch (e) { setGlobalErr(e.message || "Failed to update soft stop loss."); }
   };
 
   /**
@@ -1300,7 +1336,7 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
    * quotes map for live pricing. No backend call required.
    */
   const handleExportCSV = () => {
-    const header = ["Name","Ticker","Type","Date","Qty","BEP","Price","Value","Gain/Loss","Gain%","Stop Loss","Profit Taking","Group"];
+    const header = ["Name","Ticker","Type","Date","Qty","BEP","Price","Value","Gain/Loss","Gain%","Hard Stop Loss","Soft Stop Loss","Profit Taking","Group"];
     const rows = sortedPositions.map(pos => {
       const q = quotes[pos.ticker];
       const price = q?.price;
@@ -1323,7 +1359,8 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
         value != null ? value.toFixed(2) : "",
         gainLoss != null ? gainLoss.toFixed(2) : "",
         gainPct != null ? gainPct.toFixed(2) + "%" : "",
-        pos.stop_loss ? parseFloat(pos.stop_loss).toFixed(2) : "",
+        pos.hard_stop_loss ? parseFloat(pos.hard_stop_loss).toFixed(2) : "",
+        pos.soft_stop_loss ? parseFloat(pos.soft_stop_loss).toFixed(2) : "",
         pos.profit_taking ? parseFloat(pos.profit_taking).toFixed(2) : "",
         pos.group_tag || "",
       ];
@@ -1400,7 +1437,7 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
         ticker:         p.ticker,
         quantity:       parseFloat(p.quantity),
         purchase_price: parseFloat(p.purchase_price),
-        stop_loss:      p.stop_loss ? parseFloat(p.stop_loss) : null,
+        hard_stop_loss: p.hard_stop_loss ? parseFloat(p.hard_stop_loss) : null,
         profit_taking:  p.profit_taking ? parseFloat(p.profit_taking) : null,
       }));
       const results = await api.scorePortfolioDetailed(positionItems, token);
@@ -1857,12 +1894,13 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
               {/* Column visibility picker — toggles optional columns */}
               {(() => {
                 const OPTIONAL_COLS = [
-                  { id: "50sma",         label: "50 SMA" },
-                  { id: "stop_loss",     label: "Stop Loss" },
-                  { id: "profit_taking", label: "Prof. Take" },
-                  { id: "group",         label: "Group" },
-                  { id: "type",          label: "Type" },
-                  { id: "purchase_date", label: "Date" },
+                  { id: "50sma",           label: "50 SMA" },
+                  { id: "hard_stop_loss",  label: "Hard Stop" },
+                  { id: "soft_stop_loss",  label: "Soft Stop" },
+                  { id: "profit_taking",   label: "Prof. Take" },
+                  { id: "group",           label: "Group" },
+                  { id: "type",            label: "Type" },
+                  { id: "purchase_date",   label: "Date" },
                 ];
                 return (
                   <div style={{ position: "relative", display: "inline-block", marginLeft: "auto" }}>
@@ -1922,8 +1960,9 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
                         style={{ marginLeft: 4, width: 42, background: "var(--c-surface)", border: "1px solid var(--c-border)", color: "var(--c-text)", fontFamily: "var(--font-mono)", fontSize: 10, borderRadius: 2, padding: "1px 3px", textAlign: "center" }}
                       />
                     </th>
-                    {visibleCols.has("stop_loss")     && <SortTh label="STOP LOSS"    col="stoploss"    sortCol={sortCol} sortDir={sortDir} onSort={handleSort} right />}
-                    {visibleCols.has("profit_taking") && <SortTh label="PROFIT TAKING" col="profittaking" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} right />}
+                    {visibleCols.has("hard_stop_loss") && <SortTh label="HARD STOP"    col="hardstoploss" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} right />}
+                    {visibleCols.has("soft_stop_loss") && <SortTh label="SOFT STOP"    col="softstoploss" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} right />}
+                    {visibleCols.has("profit_taking")  && <SortTh label="PROFIT TAKING" col="profittaking" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} right />}
                     <th className="right" title="Allocation % relative to current view">ALLOC %</th>
                     <th className="right" onClick={() => handleSort("change")}
                       style={{ whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }}>
@@ -2019,8 +2058,8 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
                           {smaData[pos.ticker]?.[customSmaPeriod] != null ? formatValue(smaData[pos.ticker][customSmaPeriod]) : <span style={{ color: "var(--c-muted)", fontSize: 11 }}>...</span>}
                         </td>
 
-                        {visibleCols.has("stop_loss") && (
-                        <td data-label="STOP LOSS" className="right" style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                        {visibleCols.has("hard_stop_loss") && (
+                        <td data-label="HARD STOP" className="right" style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
                           {editingStopLoss === pos.position_id ? (
                             <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                               <input
@@ -2036,11 +2075,47 @@ export function PortfolioManagerPage({ token, onViewChart, onViewNews, onTradeAI
                             </span>
                           ) : (
                             <span
-                              onClick={() => { setEditingStopLoss(pos.position_id); setStopLossInput(pos.stop_loss ? String(parseFloat(pos.stop_loss)) : ""); }}
-                              style={{ cursor: "pointer", color: pos.stop_loss && price != null && price <= parseFloat(pos.stop_loss) ? "var(--red)" : undefined, fontWeight: pos.stop_loss && price != null && price <= parseFloat(pos.stop_loss) ? 700 : undefined }}
-                              title="Click to edit stop loss"
+                              onClick={() => { setEditingStopLoss(pos.position_id); setStopLossInput(pos.hard_stop_loss ? String(parseFloat(pos.hard_stop_loss)) : ""); }}
+                              style={{ cursor: "pointer", color: pos.hard_stop_loss && price != null && price <= parseFloat(pos.hard_stop_loss) ? "var(--red)" : undefined, fontWeight: pos.hard_stop_loss && price != null && price <= parseFloat(pos.hard_stop_loss) ? 700 : undefined }}
+                              title="Click to edit hard stop loss (DeGiro standing order)"
                             >
-                              {pos.stop_loss ? formatValue(parseFloat(pos.stop_loss)) : <span style={{ color: "var(--c-muted)" }}>{"\u2014"}</span>}
+                              {pos.hard_stop_loss ? formatValue(parseFloat(pos.hard_stop_loss)) : <span style={{ color: "var(--c-muted)" }}>{"\u2014"}</span>}
+                            </span>
+                          )}
+                        </td>
+                        )}
+
+                        {visibleCols.has("soft_stop_loss") && (
+                        <td data-label="SOFT STOP" className="right" style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                          {editingSoftStopLoss === pos.position_id ? (
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                              <input
+                                type="number" min="0" step="any"
+                                value={softStopLossInput}
+                                onChange={e => setSoftStopLossInput(e.target.value)}
+                                onKeyDown={e => { if (e.key === "Enter") handleSaveSoftStopLoss(pos); if (e.key === "Escape") setEditingSoftStopLoss(null); }}
+                                autoFocus
+                                style={{ width: 72, background: "var(--c-surface)", border: "1px solid var(--c-border)", color: "var(--c-text)", fontFamily: "var(--font-mono)", fontSize: 11, borderRadius: 2, padding: "2px 4px", textAlign: "right" }}
+                              />
+                              <button onClick={() => handleSaveSoftStopLoss(pos)} style={{ background: "none", border: "none", color: "var(--green)", cursor: "pointer", padding: 0, fontSize: 14, lineHeight: 1 }} title="Save">{"\u2713"}</button>
+                              <button onClick={() => setEditingSoftStopLoss(null)} style={{ background: "none", border: "none", color: "var(--red)", cursor: "pointer", padding: 0, fontSize: 14, lineHeight: 1 }} title="Cancel">{"\u2717"}</button>
+                            </span>
+                          ) : (
+                            <span
+                              onClick={() => { setEditingSoftStopLoss(pos.position_id); setSoftStopLossInput(pos.soft_stop_loss ? String(parseFloat(pos.soft_stop_loss)) : ""); }}
+                              style={{ cursor: "pointer", color: pos.soft_stop_loss && price != null && price <= parseFloat(pos.soft_stop_loss) ? "var(--amber)" : undefined, fontWeight: pos.soft_stop_loss && price != null && price <= parseFloat(pos.soft_stop_loss) ? 700 : undefined }}
+                              title="Notify via Telegram + ntfy when last price hits this level. Click to set. HIT = pinged today; EOD = closed below."
+                            >
+                              {pos.soft_stop_loss ? (
+                                <>
+                                  {formatValue(parseFloat(pos.soft_stop_loss))}
+                                  {softStopStageLabel(pos) && (
+                                    <span style={{ marginLeft: 6, fontSize: 9, letterSpacing: 0.5, fontWeight: 700 }}>
+                                      {softStopStageLabel(pos)}
+                                    </span>
+                                  )}
+                                </>
+                              ) : <span style={{ color: "var(--c-muted)" }}>{"\u2014"}</span>}
                             </span>
                           )}
                         </td>

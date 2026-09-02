@@ -1,12 +1,12 @@
 # docker-compose.prod.yml — TickerTap production service definitions
 #
 # Key differences from docker-compose.yml (dev):
-#   - Port 8000 bound to 0.0.0.0 (LAN-accessible for Server B worker)
+#   - Port 8000 bound to 0.0.0.0 (LAN-accessible for the remote worker host)
 #   - restart: always (auto-restart on reboot)
 #   - No bind-mount volumes on app (runs from built image only)
 #
 # Usage:
-#   POSTGRES_USER=REDACTED_admin POSTGRES_PASSWORD=REDACTED \
+#   POSTGRES_USER=postgres POSTGRES_PASSWORD=your_secure_password_here \
 #     docker compose -f docker-compose.prod.yml up -d --build
 
 networks:
@@ -14,7 +14,7 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: REDACTED/16
+        - subnet: 10.50.0.0/16
 
 services:
   db:
@@ -83,7 +83,8 @@ services:
     # Mac/Windows but requires this explicit mapping on Linux).
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # Bind to all interfaces — Server B worker connects via LAN IP.
+    # Bind to all interfaces — the remote worker host connects via the
+    # configured API URL.
     ports:
       - "0.0.0.0:8000:8000"
     networks:

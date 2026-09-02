@@ -326,8 +326,20 @@ class PortfolioPosition(Base):
     is_excluded = Column(Boolean, server_default="false", nullable=False)
     asset_type = Column(String(20), server_default="stock", nullable=False)
     physical_type = Column(String(20), nullable=True)
-    stop_loss = Column(Numeric(18, 2), nullable=True)
+    hard_stop_loss = Column(Numeric(18, 2), nullable=True)
+    soft_stop_loss = Column(Numeric(18, 2), nullable=True)
+    # Two-stage soft-stop delivery: NY dates last successfully pinged (at least
+    # one of Telegram/ntfy). Stop itself is never auto-cleared.
+    soft_stop_intraday_on = Column(Date, nullable=True)
+    soft_stop_eod_on = Column(Date, nullable=True)
+    soft_stop_delivery_json = Column(JSONB, nullable=True)
     profit_taking = Column(Numeric(18, 2), nullable=True)
+
+    def reset_soft_stop_stages(self) -> None:
+        """Clear two-stage alert state so a new soft-stop level can fire again."""
+        self.soft_stop_intraday_on = None
+        self.soft_stop_eod_on = None
+        self.soft_stop_delivery_json = None
     # Rule-engine fields (added migration 0023) --------------------------------
     # T+2 settlement value in USD
     t2_usd = Column(Numeric(18, 2), nullable=True)
@@ -1057,4 +1069,93 @@ class RuleAlert(Base):
     state = Column(String(16), nullable=False, default="active")  # active | snoozed | actioned | expired
     snoozed_until = Column(DateTime(timezone=True), nullable=True)
     expires_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ── Trade Analysis Models ─────────────────────────────────────────────────
+
+
+class TradeAnalysis(Base):
+    """AI-generated trade analysis for a ticker, optionally linked to a position.
+
+    Captures the full lifecycle of an Ollama-driven analysis: the market data
+    and rules used as input, the recommendation produced, suggested entry/stop/
+    target levels, and post-trade outcome data for learning and evaluation.
+
+    Attributes:
+        analysis_id:           UUID primary key.
+        position_id:           Optional FK to portfolio_positions (SET NULL on delete).
+        portfolio_id:          Optional FK to portfolios (CASCADE on delete).
+        ticker:                Ticker symbol analysed (e.g. "AAPL").
+        requested_at:          UTC timestamp when the analysis was requested.
+        rules_snapshot:        Snapshot of investment_rules.json at analysis time.
+        market_data_snapshot:  Price, RSI, SMA50, SMA200, PE, sector, etc.
+        analysis_json:         Full Ollama response payload.
+        recommendation:        BUY | HOLD | AVOID | WATCH.
+        suggested_entry:       Suggested entry price.
+        suggested_stop:        Suggested stop-loss price.
+        suggested_target:      Suggested price target.
+        risk_reward_ratio:     Pre-computed risk/reward ratio.
+        actual_entry:          Actual entry price (filled when position opened).
+        actual_exit:           Actual exit price (filled when position closed).
+        actual_pnl_pct:        Realised P&L percentage (filled post-close).
+        outcome:               WIN | LOSS | BREAK_EVEN | OPEN.
+        evaluation_json:       Ollama post-trade critique payload.
+        chromadb_id:           ChromaDB embedding document ID.
+        created_at:            UTC timestamp when the record was inserted.
+    """
+
+    __tablename__ = "trade_analyses"
+
+    analysis_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    position_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("portfolio_positions.position_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    portfolio_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("portfolios.portfolio_id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    ticker = Column(String(20), nullable=False)
+    requested_at = Column(DateTime(timezone=True), server_default=func.now())
+    rules_snapshot = Column(JSON, nullable=True)
+    market_data_snapshot = Column(JSON, nullable=True)
+    analysis_json = Column(JSON, nullable=True)
+    recommendation = Column(String(16), nullable=True)
+    suggested_entry = Column(Numeric(18, 4), nullable=True)
+    suggested_stop = Column(Numeric(18, 4), nullable=True)
+    suggested_target = Column(Numeric(18, 4), nullable=True)
+    risk_reward_ratio = Column(Numeric(8, 2), nullable=True)
+    actual_entry = Column(Numeric(18, 4), nullable=True)
+    actual_exit = Column(Numeric(18, 4), nullable=True)
+    actual_pnl_pct = Column(Numeric(8, 4), nullable=True)
+    outcome = Column(String(16), nullable=True)
+    evaluation_json = Column(JSON, nullable=True)
+    chromadb_id = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class RuleRefinement(Base):
+    """AI-generated rule change suggestion from weekly meta-analysis.
+
+    Status: pending → approved | rejected.
+    Rules never auto-update — user must approve via /approve_refinement bot command.
+    """
+
+    __tablename__ = "rule_refinements"
+
+    refinement_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    generated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    period_start = Column(DateTime(timezone=True), nullable=True)
+    period_end = Column(DateTime(timezone=True), nullable=True)
+    trade_count = Column(Integer, nullable=True)
+    win_rate_pct = Column(Numeric(5, 2), nullable=True)
+    avg_pnl_pct = Column(Numeric(8, 4), nullable=True)
+    pattern_summary = Column(Text, nullable=True)
+    suggested_rules = Column(JSONB, nullable=True)
+    raw_ollama_response = Column(Text, nullable=True)
+    status = Column(String(16), server_default="pending", nullable=False)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

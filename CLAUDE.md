@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-TickerTap is a Bloomberg-terminal-inspired stock trading platform. FastAPI async backend + React 19 SPA frontend, backed by PostgreSQL 15 and Redis 7, orchestrated via Docker Compose on a private bridge network.
+TickerTap is a Bloomberg-terminal-inspired stock trading platform. FastAPI async backend + React 19 SPA frontend, backed by PostgreSQL 15 (TimescaleDB) and Redis 7, orchestrated via Docker Compose on a private bridge network.
+
+Canonical git branch: **`main`**. New work starts as `feature/<name>` from a pulled `main`. Alembic head is **0032**.
 
 ### Request Flow
 ```
@@ -92,7 +94,7 @@ In Docker: `docker compose exec backend alembic upgrade head`
 ```
 nginx (reverse proxy)
   ├── Frontend (React 19 SPA, Vite) — port 3000/5173
-  └── Backend (FastAPI) — port 8000, binds 127.0.0.1 only
+  └── Backend (FastAPI) — port 8000 (private Docker network in prod)
         ├── PostgreSQL 15 — port 5432 (private network only)
         └── Redis 7 — port 6379 (private network only)
 ```
@@ -101,7 +103,7 @@ All business API routes live under `/api/v1`. The `/health` endpoint is unversio
 
 ### Backend layering (`backend/app/`)
 - **`main.py`** — FastAPI app creation, middleware stack (rate limit → CORS → security headers → body size → request logging), startup validation (JWT_SECRET check, DB connection)
-- **`routes/`** — 11 route modules mounted under `/api/v1`. Each uses `Depends()` for DB sessions and auth. Key routes: `auth_routes.py` (register/login/refresh/password-reset), `orders.py` (buy/sell with position tracking), `market.py` (yfinance price lookups)
+- **`routes/`** — 20+ route modules under `/api/v1` (`main.py` `include_router` list). Auth, portfolios, DeGiro, news ingest, scanner, analysis, alerts, trading, etc.
 - **`models.py`** — SQLAlchemy ORM models. UUIDs as PKs. Decimal precision for financial amounts. CHECK constraints on balance/amount/quantity
 - **`schemas.py`** — Pydantic v1 request/response validation (`orm_mode = True`, `condecimal`). EmailStr for emails, field limits enforce business rules
 - **`auth.py`** — JWT creation/verification (python-jose), Argon2id password hashing, `get_current_user`/`get_current_admin` dependencies
@@ -114,8 +116,8 @@ All business API routes live under `/api/v1`. The `/health` endpoint is unversio
 - **`pages/`** — One component per route. No client-side router library; `App.jsx` manages page state directly
 - **`components/common/index.jsx`** — Shared UI: SkeletonRow, ApiError, ToastContainer, Clock, Footer, TickerStrip
 
-### Database schema (11 tables)
-Core entities: `users` → `accounts` → `transactions`, `holdings`, `orders`. Supporting: `securities`, `audit_log`, `password_reset_tokens`, `refresh_tokens`, `portfolio_managers`, `chart_templates`. Foreign keys use CASCADE on user deletion for owned data, SET NULL on audit_log to preserve trails.
+### Database schema
+Alembic **0001–0032**. Core: users, accounts, holdings, orders. Portfolio manager: `portfolios` / `portfolio_positions` (UUID PKs, `hard_stop_loss` + `soft_stop_loss`). News: `news_articles` + `news_article_tickers` (Ollama scores −5…+5). Scanner: `scan_results`. Rule engine: `rule_alerts` (migration 0024, `RuleAlert` model). AI: `trade_analyses`, `rule_refinements`. Do not treat README “12 tables” snapshots as current.
 
 ### Middleware stack (order matters)
 SlowAPI rate limiter → CORSMiddleware → SecurityHeadersMiddleware (HSTS, X-Frame-Options DENY) → RequestBodySizeMiddleware (10MB) → RequestLoggingMiddleware (redacts passwords/tokens)
@@ -137,7 +139,15 @@ SlowAPI rate limiter → CORSMiddleware → SecurityHeadersMiddleware (HSTS, X-F
 
 Required: `JWT_SECRET` (>=32 chars, app refuses to start with default placeholder), `DATABASE_URL` (async connection string).
 
-Optional: `ALLOWED_ORIGINS` (CORS), `ADMIN_EMAILS`, `SMTP_*` (email), `APP_URL`, `LOG_LEVEL`, `VITE_API_URL`.
+Optional: `ALLOWED_ORIGINS` (CORS), `ADMIN_EMAILS`, `SMTP_*` (email), `APP_URL`, `LOG_LEVEL`, `VITE_API_URL`, `OLLAMA_URL` / `OLLAMA_MODEL` (analysis LLM), `INTERNAL_NEWS_KEY` (news worker ingest), `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`, `NTFY_URL` / `NTFY_TOPIC` / `NTFY_TOKEN`. Placeholders only in `*.example` files — never commit real values.
+
+### News vs analysis LLMs
+- **News scoring** is not in the FastAPI request path. `server-b-worker/worker.py` fetches RSS, scores via local Ollama, POSTs `POST /api/v1/news/internal/news`. There is **no FinBERT** module (`sentiment.py` does not exist).
+- **Trade analysis** is `analysis_routes.py` + Telegram bot → Ollama (`qwen3:14b` in `AI_ARCHITECTURE.md`). Separate from news.
+
+### Soft stops vs scanner rubric
+- Soft-stop notify: `backend/app/trading/alert_worker.py` + `notifications.py` (Telegram + ntfy). Level stays armed.
+- Volume-flow scanner: `backend/app/trading/scanner_worker.py` (there is no `volume_flow_scanner.py`). Phase 4 auto-scores revenue momentum, volume confirm, analyst consensus (0–5 each, max 15). Thesis clarity / R:R / sector tailwind / entry zone are **null in code** — Research UI text only (≥25/35 is not enforced).
 
 ## CI
 

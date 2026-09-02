@@ -1,6 +1,13 @@
 # TickerTap Integration Plan — Portfolio Rules Engine + Scanner
-**Date: May 14, 2026**
-**Scope: Integrating portfolio_manager.py + volume_flow_scanner.py into TickerTap**
+**Date: May 14, 2026**  
+**Status as of 2026-09-02: IMPLEMENTED in this repo.** Treat this file as historical design notes, not a todo.
+
+Shipped equivalents:
+- Rules engine → `backend/app/trading/worker.py` `run_portfolio_rules` + `backend/app/routes/portfolio_rules.py`
+- `rule_alerts` table → Alembic **0024**, ORM `RuleAlert` in `models.py`
+- Scanner → `backend/app/trading/scanner_worker.py` (there is **no** `volume_flow_scanner.py` and no standalone `SCANNER.md` / `MANAGER.md` in git)
+
+**Scope (original):** Integrating portfolio_manager.py + volume_flow_scanner.py into TickerTap
 
 ---
 
@@ -368,7 +375,7 @@ of who generated them.
 ## Hardware — Dedicated Ollama Node for Rule Builder
 
 ### Current setup
-- **REDACTED_HOST laptop (Server B):** runs `llama3:8b-instruct-q4_K_M` for news scoring
+- **Dedicated news-scoring host (Server B):** runs `llama3:8b-instruct-q4_K_M` for news scoring
   (continuous pipeline, high token volume, open-ended generation — needs the 8B)
 
 ### Proposed addition
@@ -422,8 +429,8 @@ Separate env var so rule builder and news scoring never contend:
 
 ```env
 # .env.prod
-OLLAMA_URL=http://reduser-laptop:11434         # existing — llama3:8b news scoring
-OLLAMA_RULES_URL=http://i5-laptop:11434    # new — phi3.5:mini rule generation
+OLLAMA_URL=http://<YOUR_NEWS_OLLAMA_HOST>:11434      # existing — llama3:8b news scoring
+OLLAMA_RULES_URL=http://<YOUR_RULES_OLLAMA_HOST>:11434  # new — phi3.5:mini rule generation
 ```
 
 The i5 laptop sits idle ~95% of the time (rule generation is user-triggered,
@@ -448,11 +455,11 @@ async def run_rule_generation(ctx, user_id: str, prompt: str) -> dict:
 ### Fallback behaviour
 
 If the i5 laptop is offline, `run_rule_generation` falls back to `OLLAMA_URL`
-(the REDACTED_HOST news laptop) with the same model call. The news pipeline is unaffected
+(the configured news-scoring host) with the same model call. The news pipeline is unaffected
 because rule generation jobs are infrequent. Add a 30-second timeout so a
 slow/offline node doesn't block the arq queue.
 
 ---
 
 *Related files: portfolio_manager.py, volume_flow_scanner.py, SCANNER.md, MANAGER.md, ARCHITECTURE.md*
-*TickerTap branch: tradingAI0.1 | Root: /home/REDACTED420/projects/finance/tickerTap*
+*Historical plan. Live code is on `main`. Scanner: `scanner_worker.py`. Rules: `run_portfolio_rules` + `rule_alerts`.*

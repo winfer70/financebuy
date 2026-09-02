@@ -1,17 +1,17 @@
 #!/bin/bash
 # release.sh - tickerTap production release
-# Run from local dev machine. Merges tradingAI0.1 -> main, tags, deploys to REDACTED.
-# Usage: ./release.sh
+# Run from a trusted local dev machine. Merges tradingAI0.1 -> main, tags, and deploys to the configured target host.
+# Usage: NODE_HOST=your-server-hostname NODE_USER=your-ssh-user TARGET_DIR=/path/to/deployment ./release.sh
 set -e
 
-NODE_IP="REDACTED"
-NODE_USER="REDACTED420"
-TARGET_DIR="/home/REDACTED420/projects/finance/tickerTap"
+NODE_HOST="${NODE_HOST:-your-server-hostname}"
+NODE_USER="${NODE_USER:-<YOUR_SSH_USER>}"
+TARGET_DIR="${TARGET_DIR:-/path/to/deployment}"
 INTEGRATION_BRANCH="tradingAI0.1"
 DB_SERVICE="db"
 DB_NAME="tickertap"
 DB_USER="postgres"
-KUMA_PUSH_URL=""  # TODO: create Push monitor in REDACTED:3001, paste URL here
+KUMA_PUSH_URL="${KUMA_PUSH_URL:-}"  # Optional Push monitor URL
 
 # ── 1. Tag and push ──────────────────────────────────────────────────────────
 echo "[1/6] Merging $INTEGRATION_BRANCH -> main..."
@@ -26,8 +26,8 @@ git stash pop 2>/dev/null || true
 echo "Tagged $VERSION"
 
 # ── 2-6. Remote deploy ───────────────────────────────────────────────────────
-echo "[2/6] Connecting to $NODE_USER@$NODE_IP..."
-ssh "$NODE_USER@$NODE_IP" bash << ENDSSH
+echo "[2/6] Connecting to $NODE_USER@$NODE_HOST..."
+ssh "$NODE_USER@$NODE_HOST" bash << ENDSSH
 set -e
 cd "$TARGET_DIR"
 

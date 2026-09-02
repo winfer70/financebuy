@@ -1,8 +1,10 @@
 # TickerTap — Full Project Summary
 
-Generated: 2026-05-13  
-Branch: `tradingAI0.1`  
-Root: `/home/REDACTED420/projects/finance/tickerTap`
+Generated: 2026-09-02  
+Branch: `main` (legacy alias `tradingAI0.1` kept in sync)  
+Alembic head: **0032**
+
+> Older snapshots in this file (table counts, worker lists, pending work) were updated 2026-09-02. Prefer `CLAUDE.md` + code if anything still disagrees.
 
 ---
 
@@ -18,10 +20,10 @@ Root: `/home/REDACTED420/projects/finance/tickerTap`
 | Cache / Queue | Redis 7 |
 | Background Jobs | arq (async Redis queue) |
 | Frontend | React 19, Vite 7.x |
-| Reverse Proxy | Host nginx (serves `frontend/dist` directly, proxies `/api/v1/` to :8000) |
+| Reverse Proxy | nginx (Docker `web` service or host) |
 | Market Data | yfinance (prices, OHLCV, fundamentals, events) |
-| LLM (Guide) | Ollama (llama3:8b-instruct-q4_K_M) on REDACTED_HOST/Server B |
-| LLM (News) | Ollama news-scoring worker on REDACTED_HOST/Server B |
+| LLM (analysis) | Ollama — model from `OLLAMA_MODEL` / `AI_ARCHITECTURE.md` |
+| LLM (news) | Separate Ollama process in `server-b-worker/` |
 
 ---
 
@@ -31,9 +33,9 @@ Root: `/home/REDACTED420/projects/finance/tickerTap`
 |---|---|---|
 | `db` | `timescale/timescaledb:latest-pg15` | PostgreSQL 15 + TimescaleDB; private network only |
 | `redis` | `redis:7-alpine` | Cache + arq job queue; private network only |
-| `app` | Built `backend/Dockerfile` | FastAPI on :8000; 0.0.0.0 bind (LAN access for Server B) |
-| `alert-worker` | Built `backend/Dockerfile` | arq worker for price alerts |
-| `trading-worker` | Built `backend/Dockerfile` | arq worker for backtests + volume flow scanner |
+| `app` | Built `backend/Dockerfile` | FastAPI on :8000 |
+| `alert-worker` | Built `backend/Dockerfile` | arq `arq:alert`: price alerts + two-stage soft stops + DeGiro cron |
+| `trading-worker` | Built `backend/Dockerfile` | arq `arq:trading`: backtests, scanner, portfolio rules, trade eval |
 | `paper-worker` | Built `backend/Dockerfile` | arq worker for paper trading sessions |
 | `trading-ml` | Built `backend/Dockerfile` | ML strategy worker |
 
@@ -65,7 +67,9 @@ Browser → nginx (host, :443) → FastAPI /api/v1/* → SQLAlchemy async → Po
 
 ---
 
-## Database Schema — 34 ORM Models (22 migrations)
+## Database Schema — ORM models through Alembic 0032
+
+(Previously “34 models / 22 migrations” — that count is obsolete. Head is **0032**.)
 
 ### Core Auth & Users
 | Model | Table | Key Columns |
@@ -129,6 +133,7 @@ Browser → nginx (host, :443) → FastAPI /api/v1/* → SQLAlchemy async → Po
 | PriceAlert | `price_alerts` | user_id, symbol, condition (above/below/crosses), target_price, is_active |
 | Notification | `notifications` | user_id, event_type, title, body, is_read |
 | UserWebhook | `user_webhooks` | user_id, url, is_active |
+| RuleAlert | `rule_alerts` | user_id, position_id (soft ref), rule_type, severity, state |
 
 ### Admin & Reporting
 | Model | Table | Key Columns |
@@ -219,7 +224,7 @@ Browser → nginx (host, :443) → FastAPI /api/v1/* → SQLAlchemy async → Po
 ### News (`/api/v1/news`)
 - GET `/feed` — paginated feed; filters: portfolio, sentiment, ticker, source; 25/50/75/100 per page
 - GET `/tickers/{ticker}` — articles by ticker
-- POST `/internal/news` — news ingestion (X-Internal-Key auth)
+- POST `/internal/news` — news ingestion (`X-Internal-Key` / `INTERNAL_NEWS_KEY`)
 
 ### Charts (`/api/v1/chart-templates`)
 - GET/POST `/` — list / create template
@@ -280,24 +285,23 @@ Browser → nginx (host, :443) → FastAPI /api/v1/* → SQLAlchemy async → Po
 
 ## Background Workers
 
-### trading-worker (arq: `app.trading.worker.WorkerSettings`)
-- `run_backtest` — full backtest pipeline: load strategy → fetch OHLCV → run engine → compute metrics (Sharpe, Sortino, drawdown, win rate, profit factor) → benchmark vs buy-and-hold → store results + audit log
-- `run_scanner` — 5-phase volume flow scan (see Scanner section below)
+### alert-worker (arq: `app.trading.alert_worker.WorkerSettings`, queue `arq:alert`)
+- `evaluate_price_alerts` — active `PriceAlert` rows; in-app notify; also runs `_check_soft_stops`
+- `evaluate_one_soft_stop` — immediate check when a newly saved soft stop is already through last price
+- Two-stage soft stop: RTH last_price ≤ soft → quiet Telegram+ntfy; after 16:00 ET daily Close still ≤ soft → loud ntfy. Level is **not** auto-cleared
+- Cron: `sync_degiro_portfolio` 02:00
+- Re-enqueues: 60s market hours, 300s closed
+- Max 50 active price alerts per user
+
+### trading-worker (arq: `app.trading.worker.WorkerSettings`, queue `arq:trading`)
+- `run_backtest`, `run_scanner`, `run_portfolio_rules`, `sync_degiro_portfolio`, `evaluate_closed_trade`
+- Cron: `weekly_meta_analysis` Monday 03:00
 - max_jobs: 10 | job_timeout: 300s
 
-### paper-worker (arq: `app.trading.paper_worker.WorkerSettings`)
-- `run_paper_evaluation` — evaluates active paper trade sessions every ~60s
-- Fetches live price, runs strategy signal function, manages position entry/exit
+### paper-worker (arq: `app.trading.paper_worker.WorkerSettings`, queue `arq:paper`)
+- `evaluate_paper_trades` — evaluates active paper trade sessions every ~60s
 - Circuit breaker: auto-stops if drawdown > 15% from peak
 - Self-re-enqueues after each run
-
-### alert-worker (arq: `app.trading.alert_worker.WorkerSettings`)
-- Polls all active `PriceAlert` rows
-- Fetches prices via yfinance
-- Evaluates: above / below / crosses conditions
-- Fires in-app `Notification` on trigger; deactivates alert
-- Re-enqueues: 60s market hours, 300s closed
-- Max 50 active alerts per user
 
 ---
 
@@ -317,12 +321,11 @@ Same 2× volume + up-day filter.
 Per active industry: check representative stocks (e.g. Semiconductors → NVDA, AMD, AVGO…).  
 Auto-disqualifiers: price > analyst target × 1.05 | rev growth < 15% YoY | earnings within 5 days | market cap < $500M.
 
-### Phase 4 — Auto Scoring (3/7 factors)
-- Revenue momentum: 1-5 based on YoY growth tiers (≥40%=5, ≥25%=4, ≥15%=3…)
-- Volume confirm: 1-5 (≥4×=5, ≥3×=4, ≥2.5×=3…)
-- Analyst consensus: 1-5 (strong buy=5, buy=4, hold=3…)
-- Manual factors (not auto-computed): thesis clarity, risk/reward, sector tailwind, entry zone quality
-- Threshold: ≥25/35 proceed full size; 18-24 half size; <18 skip
+### Phase 4 — Auto Scoring (3 of 7 factors in `_score_candidate`)
+Implemented in `backend/app/trading/scanner_worker.py` (there is **no** `volume_flow_scanner.py` in this repo):
+- Auto (0–5 each, `auto_score_max` 15 or 10 if no analyst data): revenue momentum, volume confirm, analyst consensus
+- Stored as `null`: thesis_clarity, risk_reward, sector_tailwind, entry_zone_quality
+- **≥25/35 / half-size bands are UI copy only** (`ResearchPage.jsx`). No backend gate, no persistence of the four manual scores.
 
 ### Phase 5 — Position Sizing
 - Risk model: 1.5% of portfolio per trade
@@ -459,46 +462,32 @@ Trading: PineScriptEditor, ParameterEditor, CompositionEditor, StrategyCompariso
 | `SMTP_*` | No | Email sending (verification, reset) |
 | `APP_URL` | No | Base URL for email links |
 | `LOG_LEVEL` | No | DEBUG rejected in production |
-| `OLLAMA_URL` | No | Default: `http://localhost:11434` |
-| `OLLAMA_MODEL` | No | Default: `llama3:8b-instruct-q4_K_M` |
+| `OLLAMA_URL` | No | Analysis LLM base URL |
+| `OLLAMA_MODEL` | No | Analysis model tag (see `AI_ARCHITECTURE.md`) |
+| `INTERNAL_NEWS_KEY` | News ingest | Shared secret for `POST /api/v1/news/internal/news` |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Soft-stop + bot | Gitignored `.env` only |
+| `NTFY_URL` / `NTFY_TOPIC` / `NTFY_TOKEN` | Soft-stop backup | Gitignored `.env` only |
 | `VITE_API_URL` | No | Frontend API base (build-time) |
 
 ---
 
-## Alembic Migration History (22 migrations)
+## Alembic Migration History (0001–0032)
 
-```
-0001 initial — users, accounts, transactions, holdings, orders, securities
-0002 password_reset_tokens
-0003 integrity_fixes
-0004 refresh_tokens
-0005 portfolio_manager — portfolios, portfolio_positions
-0006 asset_types — add asset_type to positions
-0007 stop_loss — add stop_loss to positions
-0008 chart_templates
-0009 news_articles — news_articles, news_article_tickers
-0010 score_feedback — score_outcomes, scoring_rules
-0011 user_preferences — add preferences_json to users
-0012 reports_email_verify_account_mgmt — user_reports, email_verification_tokens
-0013 watchlists_account_lockout — watchlists, watchlist_items
-0014 profit_taking — add profit_taking to positions
-0015 trading_strategies — strategies, strategy_versions, backtest_results, trading_signals, strategy_ratings, strategy_usage
-0016 intraday_bars
-0017 notifications — notifications, user_webhooks, price_alerts
-0018 social_strategies — marketplace + paper trading tables
-0019 paper_trading — paper_trades, paper_trade_positions, paper_trade_equity_snapshots
-0020 portfolio_cash_tracking — add cash_balance to portfolios
-0021 portfolio_trade_cost_basis — add cost_basis to portfolio_trades
-0022 add_scan_results — scan_results table
-```
+See `backend/alembic/versions/`. Notable later revisions:
+- **0024** `rule_alerts`
+- **0029** `hard_stop_loss` / `soft_stop_loss`
+- **0030** `trade_analyses`
+- **0031** `rule_refinements`
+- **0032** soft-stop stage dates + delivery JSON (current head)
 
 ---
 
 ## Pending / In-Progress Work
 
-- **Rate limits on trading endpoints**: 19 `@limiter.limit` decorators commented out in `trading.py` — deferred intentionally
-- **Volume Flow Scanner enhancements**: configurable volume threshold, portfolio rules analyzer, watchlist add from scanner results (in INNOVATE/PLAN phase)
-- **PortfolioTracker integration**: portfolio_manager.py rules engine (stop proximity, house money, analyst target, time stop) to be adapted as arq job reading TickerTap portfolio positions
+- **Rate limits on trading endpoints**: some `@limiter.limit` decorators remain commented in `trading.py` — deferred intentionally
+- **Scanner rubric /35**: four subjective factors are still a manual checklist (see Phase 4)
+- **nginx Docker DNS**: recreating `app` without reloading `web` can 502 until `nginx -s reload`. Do not `compose down` the whole prod stack
+- Portfolio **rule engine is live** (`run_portfolio_rules` on `arq:trading`, `rule_alerts` table) — not a future integration item
 
 ---
 

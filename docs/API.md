@@ -1176,19 +1176,19 @@ Delete a saved chart template.
 
 ## 11. News
 
-All news endpoints require authentication. Articles are fetched from four
-sources (Yahoo Finance RSS, Google News RSS, Finviz HTML scraping, MarketWatch
-RSS), classified by FinBERT sentiment, and annotated with portfolio flags.
-Results are cached in memory with a 5-minute TTL.
+All public news read endpoints require authentication. Articles are ingested
+by the remote `server-b-worker/` process (Yahoo Finance RSS, Google News RSS,
+Finviz HTML, MarketWatch RSS), scored by a local Ollama LLM (−5…+5), and stored
+in PostgreSQL. The API serves the DB; it does **not** run FinBERT (that module
+is not in this repo).
 
 Route prefix: `/news`
 
 ### 11.1 Aggregated feed — GET `/news/feed`
 
 Return a news feed for the authenticated user's portfolio tickers. Articles
-from all four sources are deduplicated by URL, classified by FinBERT, and
-sorted by publication date descending. Articles mentioning holdings are
-flagged with `in_portfolio: true`.
+are served from `news_articles` (already scored). Articles mentioning holdings
+are flagged with `in_portfolio: true`.
 
 **200 OK**
 

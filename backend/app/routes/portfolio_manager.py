@@ -9,6 +9,7 @@ Route prefix: /api/v1/portfolio-manager  (registered in main.py)
 """
 
 import asyncio
+import os
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Dict, List
@@ -20,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..models import Portfolio, PortfolioPosition, PortfolioTrade
+from ..models import Portfolio, PortfolioPosition, PortfolioTrade, TradeAnalysis
 from ..schemas import (
     CashAdjustmentRequest,
     PerformancePointOut,
@@ -35,6 +36,21 @@ from ..schemas import (
 from .auth_routes import get_current_user
 
 router = APIRouter(prefix="/portfolio-manager", tags=["portfolio-manager"])
+_REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+
+
+async def _enqueue_soft_stop_check(position_id: UUID) -> None:
+    """Ask the alert worker to notify now if last price is already through the stop."""
+    try:
+        from arq.connections import RedisSettings, create_pool
+
+        pool = await create_pool(RedisSettings.from_dsn(_REDIS_URL))
+        await pool.enqueue_job(
+            "evaluate_one_soft_stop", str(position_id), _queue_name="arq:alert"
+        )
+        await pool.close()
+    except Exception:
+        pass
 
 
 # ── Helper ───────────────────────────────────────────────────────────────────
@@ -188,7 +204,8 @@ async def add_position(
         group_tag=payload.group_tag,
         asset_type=payload.asset_type,
         physical_type=payload.physical_type,
-        stop_loss=payload.stop_loss,
+        hard_stop_loss=payload.hard_stop_loss,
+        soft_stop_loss=payload.soft_stop_loss,
         profit_taking=payload.profit_taking,
     )
     db.add(position)
@@ -226,7 +243,8 @@ async def bulk_import_positions(
             group_tag=p.group_tag,
             asset_type=p.asset_type,
             physical_type=p.physical_type,
-            stop_loss=p.stop_loss,
+            hard_stop_loss=p.hard_stop_loss,
+            soft_stop_loss=p.soft_stop_loss,
             profit_taking=p.profit_taking,
         )
         for p in payload
@@ -255,12 +273,22 @@ async def modify_position(
         position.group_tag = payload.group_tag
     if payload.is_excluded is not None:
         position.is_excluded = payload.is_excluded
-    if payload.stop_loss is not None:
-        position.stop_loss = payload.stop_loss if payload.stop_loss > 0 else None
+    if payload.hard_stop_loss is not None:
+        position.hard_stop_loss = payload.hard_stop_loss if payload.hard_stop_loss > 0 else None
+    soft_changed_to_value = False
+    if payload.soft_stop_loss is not None:
+        new_soft = payload.soft_stop_loss if payload.soft_stop_loss > 0 else None
+        if new_soft != position.soft_stop_loss:
+            position.reset_soft_stop_stages()
+            if new_soft is not None:
+                soft_changed_to_value = True
+        position.soft_stop_loss = new_soft
     if payload.profit_taking is not None:
         position.profit_taking = payload.profit_taking if payload.profit_taking > 0 else None
     await db.commit()
     await db.refresh(position)
+    if soft_changed_to_value:
+        await _enqueue_soft_stop_check(position.position_id)
     return position
 
 
@@ -308,6 +336,15 @@ async def sell_position(
         quantity_sold = float(position.quantity)
         sell_total = quantity_sold * sell_price
 
+        # Check for linked open AI analysis before position is deleted
+        analysis_result = await db.execute(
+            select(TradeAnalysis).where(
+                TradeAnalysis.position_id == position.position_id,
+                TradeAnalysis.outcome == "OPEN",
+            )
+        )
+        linked_analysis = analysis_result.scalar_one_or_none()
+
         # Always record the trade regardless of cash credit preference
         trade = PortfolioTrade(
             portfolio_id=position.portfolio_id,
@@ -325,6 +362,18 @@ async def sell_position(
 
         await db.delete(position)
         await db.commit()
+
+        if linked_analysis is not None:
+            try:
+                from arq import create_pool
+                from arq.connections import RedisSettings
+                _redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
+                pool = await create_pool(RedisSettings.from_dsn(_redis_url))
+                await pool.enqueue_job("evaluate_closed_trade", str(linked_analysis.analysis_id), _queue_name="arq:trading")
+                await pool.aclose()
+            except Exception:
+                pass
+
         return None
 
     # Partial sell

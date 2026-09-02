@@ -10,12 +10,12 @@ This document lists the edits and CI/agent work performed by the AI assistant. U
 
 #### 1. Server B Worker — News Scoring Pipeline (new)
 
-Created the `server-b-worker/` directory with a complete Ollama-based news scoring worker that runs on Server B (REDACTED_HOST, REDACTED):
+Created the `server-b-worker/` directory with a complete Ollama-based news scoring worker that runs on Server B (remote worker host):
 
 - **`sources.py`** — RSS/Atom feed aggregator. Fetches articles from configurable financial news sources (Reuters, Bloomberg, MarketWatch, etc.), deduplicates by URL, and returns normalized article dicts.
-- **`article_queue.py`** — Local SQLite queue for retry resilience. Articles that fail to POST to Server A are stored locally and retried on subsequent cycles.
-- **`worker.py`** — Main scoring worker. Runs on a configurable cycle (default 15 min). Fetches articles via `sources.py`, scores each with Ollama/Llama 3 8B using a structured prompt, POSTs scored articles to Server A's `/api/v1/news/internal/articles` endpoint. Supports dynamic scoring rules fetched from Server A's feedback API.
-- **`learner.py`** — Weekly analysis script. Fetches outcome data from Server A, uses Ollama to analyze scoring accuracy patterns, and POSTs new calibration rules back to Server A.
+- **`article_queue.py`** — Local SQLite queue for retry resilience. Articles that fail to POST to the primary app host are stored locally and retried on subsequent cycles.
+- **`worker.py`** — Main scoring worker. Runs on a configurable cycle (default 15 min). Fetches articles via `sources.py`, scores each with Ollama/Llama 3 8B using a structured prompt, POSTs scored articles to the primary app host's `/api/v1/news/internal/articles` endpoint. Supports dynamic scoring rules fetched from the primary app host's feedback API.
+- **`learner.py`** — Weekly analysis script. Fetches outcome data from the primary app host, uses Ollama to analyze scoring accuracy patterns, and POSTs new calibration rules back to the primary app host.
 - **`requirements.txt`** — Python dependencies for the worker environment.
 - **`tickertap-worker.service`** — systemd unit (Type=simple) for the worker daemon.
 - **`tickertap-learner.service`** — systemd unit (Type=oneshot) for the learner script.
@@ -46,7 +46,7 @@ Created the `server-b-worker/` directory with a complete Ollama-based news scori
 
 - **`docker-compose.prod.yml`**:
   - Added `INTERNAL_NEWS_KEY` environment variable to the `app` service (required for news ingestion and feedback API authentication).
-  - Changed port binding from `127.0.0.1:8000:8000` to `0.0.0.0:8000:8000` so the API is accessible from both localhost (nginx reverse proxy) and the LAN (REDACTED_HOST worker/learner).
+  - Changed port binding from `127.0.0.1:8000:8000` to `0.0.0.0:8000:8000` so the API is accessible from both localhost (nginx reverse proxy) and the LAN (remote worker/learner host).
 - **`.env.prod.example`** — Added `INTERNAL_NEWS_KEY` placeholder.
 - **`backend/.env.example`** — Updated with news key example.
 - **`backend/requirements.txt`** — Added `yfinance` dependency for outcome checker.
@@ -139,7 +139,7 @@ Created the `server-b-worker/` directory with a complete Ollama-based news scori
 ### Architecture — Two-Server Setup
 
 ```
-Server A (REDACTED_HOST, REDACTED)        Server B (REDACTED_HOST, REDACTED)
+Server A (<YOUR_APP_HOST>, <YOUR_APP_SERVER_IP>)        Server B (<YOUR_WORKER_HOST>, <YOUR_WORKER_HOST_IP>)
 ┌─────────────────────────────┐              ┌──────────────────────────────┐
 │  Docker Compose             │              │  systemd services            │
 │  ├── FastAPI (port 8000)    │◄── HTTP ────►│  ├── tickertap-worker        │
@@ -155,7 +155,7 @@ Server A (REDACTED_HOST, REDACTED)        Server B (REDACTED_HOST, REDACTED)
 **Server A — Apply migrations and rebuild:**
 
 ```bash
-cd /home/REDACTED420/projects/finance/tickerTap
+cd /path/to/tickerTap
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 docker compose -f docker-compose.prod.yml --env-file .env.prod exec app alembic upgrade head
 ```
@@ -163,10 +163,10 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod exec app alembic 
 **Server B — Deploy worker and learner:**
 
 ```bash
-# Copy files to REDACTED_HOST
-scp -r server-b-worker/ reduser@REDACTED:~/ticker-tap/tickertap-worker/
+# Copy files to the worker host
+scp -r server-b-worker/ <YOUR_SSH_USER>@<YOUR_WORKER_HOST_IP>:~/ticker-tap/tickertap-worker/
 
-# On REDACTED_HOST: install deps, enable services
+# On the worker host: install deps, enable services
 cd ~/ticker-tap/tickertap-worker
 pip install -r requirements.txt
 sudo cp tickertap-worker.service /etc/systemd/system/
@@ -180,7 +180,7 @@ sudo systemctl enable --now tickertap-learner.timer
 **Verify:**
 
 ```bash
-# Check worker status on REDACTED_HOST
+# Check worker status on the worker host
 sudo systemctl status tickertap-worker
 sudo journalctl -u tickertap-worker --since "10 min ago"
 
@@ -236,7 +236,7 @@ Fixed two bugs that broke authentication session persistence:
 ### Deployment
 
 ```bash
-cd /home/REDACTED420/projects/finance/tickerTap/frontend
+cd /path/to/tickerTap/frontend
 npm run build
 ```
 

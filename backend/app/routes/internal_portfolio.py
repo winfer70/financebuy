@@ -54,7 +54,7 @@ class InternalPositionOut(BaseModel):
     name: Optional[str] = None
     quantity: Decimal
     purchase_price: Decimal
-    stop_loss: Optional[Decimal] = None
+    hard_stop_loss: Optional[Decimal] = None
     profit_taking: Optional[Decimal] = None
     sector: Optional[str] = None
     asset_type: str = "stock"
@@ -101,7 +101,7 @@ async def internal_portfolio_positions(
             name=p.name,
             quantity=p.quantity,
             purchase_price=p.purchase_price,
-            stop_loss=p.stop_loss,
+            hard_stop_loss=p.hard_stop_loss,
             profit_taking=p.profit_taking,
             sector=p.sector,
             asset_type=p.asset_type,

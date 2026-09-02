@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# deploy-services.sh — Deploy TickerTap systemd services on Server B (REDACTED_HOST).
+# deploy-services.sh — Deploy TickerTap systemd services on the remote worker host.
 #
 # This script:
 #   1. Copies the service/timer files into /etc/systemd/system/
@@ -19,7 +19,7 @@ set -euo pipefail
 # ── Validate arguments ─────────────────────────────────────────────────────
 if [ $# -lt 2 ]; then
     echo "Usage: sudo bash deploy-services.sh <APP_SERVER_IP> <INTERNAL_KEY>"
-    echo "  APP_SERVER_IP  — IP address of Server A (e.g. REDACTED)"
+    echo "  APP_SERVER_IP  — IP address of Server A (e.g. <YOUR_APP_SERVER_IP>)"
     echo "  INTERNAL_KEY   — Must match INTERNAL_NEWS_KEY on Server A"
     exit 1
 fi
@@ -31,7 +31,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SYSTEMD_DIR="/etc/systemd/system"
 
 echo "═══════════════════════════════════════════════════════════"
-echo " TickerTap Service Deployment — Server B (REDACTED_HOST)"
+echo " TickerTap Service Deployment — Remote Worker Host"
 echo "═══════════════════════════════════════════════════════════"
 echo " User:           $USERNAME"
 echo " App Server IP:  $APP_SERVER_IP"

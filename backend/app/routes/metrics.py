@@ -2,7 +2,7 @@
 metrics.py — Internal observability endpoints for TickerTap monitoring.
 
 These endpoints are unauthenticated and excluded from API docs.
-They are intended for internal monitoring tools (n8n, REDACTED_HOST dashboard).
+They are intended for internal monitoring tools and dashboards.
 """
 
 import os

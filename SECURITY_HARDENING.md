@@ -1,7 +1,9 @@
 # Security Hardening Plan — tickerTap
 
-**Date:** January 8, 2026
-**Purpose:** Ensure the application and databases follow industry best practices so the network is not exposed and sensitive information is protected.
+**Date:** January 8, 2026  
+**Status as of 2026-09-02:** Aspirational cloud/VPC checklist. It is **not** a description of the current Docker Compose deployment. Do not treat AWS KMS / VPC / RDS items as implemented.
+
+What is actually in this repo: Argon2id, JWT + hashed refresh cookies, SlowAPI, security headers, secrets in gitignored `.env` (placeholders only in `*.example`), request-log redaction. No secrets belong in git.
 
 ---
 

@@ -40,6 +40,7 @@ from .routes import (
     accounts,
     admin,
     alerts,
+    analysis_routes,
     auth_routes,
     chart_templates,
     degiro_routes,
@@ -64,6 +65,7 @@ from .routes import (
 from .routes.auth_routes import get_current_admin, register_deletion_purge
 from .routes.feedback import register_outcome_checker
 from .routes.news import register_retention_task
+from .telegram_bot.bot import start_bot, stop_bot
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 configure_structlog()
@@ -176,6 +178,14 @@ async def _startup_checks():
     # Seed system strategies from templates on first run
     await _seed_system_strategies()
 
+    # Start Telegram bot (no-op if TELEGRAM_BOT_TOKEN not set)
+    await start_bot()
+
+
+@app.on_event("shutdown")
+async def _shutdown():
+    await stop_bot()
+
 
 # ── Middleware stack (registered last → executes first) ──────────────────────
 
@@ -189,7 +199,7 @@ app.add_middleware(
     allow_origins=[o.strip() for o in _origins.split(",")],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "X-Correlation-ID"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Correlation-ID", "X-Bot-Api-Key"],
 )
 
 
@@ -351,6 +361,7 @@ app.include_router(degiro_routes.router, prefix=_V1)
 app.include_router(scanner.router, prefix=_V1)
 app.include_router(metrics_routes.router, prefix=_V1)
 app.include_router(internal_portfolio.router, prefix=_V1)
+app.include_router(analysis_routes.router, prefix=_V1)
 
 # Register the 30-day news retention cleanup background task (Phase 9).
 register_retention_task(app)

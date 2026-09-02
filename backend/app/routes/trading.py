@@ -2410,10 +2410,10 @@ async def _analyze_single_symbol(
         current_value = float(pnl_price * position.quantity)
         unrealized_pnl = current_value - cost_basis
         unrealized_pnl_pct = (unrealized_pnl / cost_basis * 100) if cost_basis else None
-        if position.stop_loss:
-            if pnl_price < position.stop_loss:
+        if position.hard_stop_loss:
+            if pnl_price < position.hard_stop_loss:
                 stop_loss_recommendation = "TRIGGERED: Price below stop loss"
-            elif pnl_price < position.stop_loss * 1.05:
+            elif pnl_price < position.hard_stop_loss * 1.05:
                 stop_loss_recommendation = "WARNING: Within 5% of stop loss"
             else:
                 stop_loss_recommendation = "OK"

@@ -42,35 +42,13 @@ backend/
 │   ├── main.py              # FastAPI app, middleware stack, startup checks
 │   ├── auth.py              # JWT utilities, Argon2id password hashing
 │   ├── db.py                # Async engine, session factory, get_db() dependency
-│   ├── models.py            # SQLAlchemy ORM models (12 tables)
+│   ├── models.py            # SQLAlchemy ORM models (alembic 0001–0032)
 │   ├── schemas.py           # Pydantic v1 request/response schemas
 │   ├── email.py             # Async SMTP email helpers
 │   ├── limiter.py           # SlowAPI rate limiter configuration
-│   ├── news_sources.py      # Multi-source RSS/HTML news aggregation
-│   ├── sentiment.py         # FinBERT sentiment classification singleton
-│   └── routes/
-│       ├── auth_routes.py       # /auth/* (register, login, refresh, logout, password reset)
-│       ├── accounts.py          # /accounts/*
-│       ├── transactions.py      # /transactions/*
-│       ├── holdings.py          # /holdings/*
-│       ├── orders.py            # /orders/*
-│       ├── portfolio.py         # /portfolio/* (cross-account positions/summary)
-│       ├── portfolio_manager.py # /portfolio-manager/* (custom portfolio CRUD)
-│       ├── market.py            # /market/* (quotes, OHLCV, SMA, search)
-│       ├── news.py              # /news/* (aggregated feed, per-ticker fetch)
-│       ├── chart_templates.py   # /chart-templates/* (saved chart configs)
-│       └── admin.py             # /admin/* (user/account mgmt, audit logs)
-├── alembic/
-│   ├── env.py
-│   └── versions/
-│       ├── 0001_initial.py
-│       ├── 0002_password_reset_tokens.py
-│       ├── 0003_integrity_fixes.py
-│       ├── 0004_refresh_tokens.py
-│       ├── 0005_portfolio_manager.py
-│       ├── 0006_asset_types.py
-│       ├── 0007_stop_loss.py
-│       └── 0008_chart_templates.py
+│   ├── trading/             # arq workers (alerts, scanner, backtests, DeGiro)
+│   └── routes/              # /api/v1/* — see main.py
+├── alembic/versions/        # 0001 … 0032
 ├── tests/
 │   ├── test_health.py
 │   ├── test_auth.py
