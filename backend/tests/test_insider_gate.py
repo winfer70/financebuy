@@ -234,6 +234,7 @@ def test_format_insider_report_includes_filing_volume_news():
     assert "LEAVING" in body
     assert "BEAR" in body
     assert "Filing:" in body
+    assert "Advice" in body
 
 
 def test_sector_exposure_uses_gics_not_is_semi():

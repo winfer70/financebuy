@@ -16,7 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import NewsArticle, NewsArticleTicker
 
-# Same map as scanner_worker.SECTOR_ETFS
+from .briefing_advice import (
+    EVENT_INSIDER_BUY,
+    EVENT_INSIDER_SELL,
+    EVENT_SOFT_STOP,
+    format_advice_block,
+)
 SECTOR_ETFS = {
     "Technology": "XLK",
     "Communication Services": "XLC",
@@ -190,6 +195,10 @@ def format_soft_stop_report(
     stage: str,
     snap: dict,
     news: list[dict],
+    *,
+    held: bool = True,
+    ticker_sector: Optional[str] = None,
+    rules: Optional[dict] = None,
 ) -> str:
     """Telegram/ntfy body. Keep under Telegram's 4096-char limit."""
     pct = ((price - soft_stop) / soft_stop * 100) if soft_stop else 0.0
@@ -207,6 +216,19 @@ def format_soft_stop_report(
     parts.extend(format_volume_lines(snap))
     parts.append("")
     parts.extend(format_news_lines(news))
+    advice = format_advice_block(
+        ticker=ticker,
+        event=EVENT_SOFT_STOP,
+        held=held,
+        ticker_sector=ticker_sector or snap.get("sector"),
+        snap=snap,
+        news=news,
+        rules=rules,
+        stage=stage,
+    )
+    if advice:
+        parts.append("")
+        parts.append(advice)
     text = "\n".join(parts)
     return text[:3500]
 
@@ -222,6 +244,8 @@ def format_insider_report(
     sector_cap: Optional[float] = None,
     ticker_sector: Optional[str] = None,
     notional: Optional[float] = None,
+    held: bool = False,
+    rules: Optional[dict] = None,
 ) -> str:
     """Telegram/ntfy body for a gated Form 4. Reuses volume + scored-news lines."""
     ticker = (filing.get("ticker") or "").upper()
@@ -256,4 +280,20 @@ def format_insider_report(
     parts.extend(format_volume_lines(snap))
     parts.append("")
     parts.extend(format_news_lines(news))
+    event = EVENT_INSIDER_SELL if code == "S" else EVENT_INSIDER_BUY
+    advice = format_advice_block(
+        ticker=ticker,
+        event=event,
+        held=held,
+        sector_pct=sector_pct,
+        sector_cap=sector_cap,
+        ticker_sector=ticker_sector or snap.get("sector"),
+        snap=snap,
+        news=news,
+        rules=rules,
+        cluster_count=cluster_count,
+    )
+    if advice:
+        parts.append("")
+        parts.append(advice)
     return "\n".join(parts)[:3500]

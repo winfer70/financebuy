@@ -7,12 +7,10 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import json
 import os
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from pathlib import Path
 from typing import Callable, Optional, Protocol
 
 import httpx
@@ -22,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from ..models import InsiderFiling, Portfolio, PortfolioPosition, RuleAlert
+from .briefing_advice import load_investment_rules
 from .heartbeat import write_worker_heartbeat
 from .insider_edgar import FORM4_ATOM_URL, parse_atom_accessions, parse_form4_xml, xml_doc_url_from_index_html
 from .insider_gate import BookSnapshot, GateResult, Integrity, evaluate_filing, sector_exposure
@@ -35,7 +34,6 @@ _DATABASE_URL = os.getenv(
     "postgresql+asyncpg://postgres:postgres@db:5432/tickerTap",
 )
 _REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
-_RULES_PATH = Path(__file__).resolve().parent.parent / "config" / "investment_rules.json"
 _MAX_NEW_PER_CYCLE = 10
 _REQUEST_PAUSE_S = 0.25
 
@@ -217,12 +215,7 @@ def _txn_date(row: dict) -> Optional[date]:
 
 
 def load_avoid_tickers() -> set:
-    try:
-        data = json.loads(_RULES_PATH.read_text(encoding="utf-8"))
-        return {str(t).upper() for t in data.get("avoid_tickers", [])}
-    except Exception:
-        logger.warning("investment_rules_load_failed")
-        return set()
+    return {str(t).upper() for t in load_investment_rules().get("avoid_tickers", [])}
 
 
 async def load_book(session: AsyncSession) -> tuple[BookSnapshot, object, dict]:
@@ -370,6 +363,7 @@ async def run_insider_cycle(
                         sector_cap=float(book.sector_cap),
                         ticker_sector=sector,
                         notional=float(gate.notional),
+                        held=ticker in book.held_tickers,
                     )
                 if gate.in_app:
                     await store.add_rule_alert(deps.user_id, gate, row, body)
