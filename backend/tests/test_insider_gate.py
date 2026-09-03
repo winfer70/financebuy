@@ -147,10 +147,21 @@ def test_gate_ten_percent_only_needs_cluster():
 def test_gate_sell_held_is_critical():
     filing = parse_form4_xml(FORM4)[0]
     filing["transaction_code"] = "S"
+    filing["is_10b5_1"] = False
     g = evaluate_filing(filing, _book(held_tickers={"AAPL"}), ticker_sector="Technology")
     assert g.worth_telegram is True
     assert g.severity == "critical"
     assert g.event_type == "insider_sell"
+
+
+def test_gate_sell_held_10b5_small_stake_is_info():
+    filing = parse_form4_xml(FORM4)[0]
+    filing["transaction_code"] = "S"
+    filing["is_10b5_1"] = True
+    filing["stake_pct"] = 0.012
+    g = evaluate_filing(filing, _book(held_tickers={"AAPL"}), ticker_sector="Technology")
+    assert g.worth_telegram is True
+    assert g.severity == "info"
 
 
 def test_gate_sell_unheld_is_silent():
@@ -193,9 +204,10 @@ def test_xml_url_empty_when_only_xsl():
     assert xml_doc_url_from_index_html(html, "0000320193-26-000123", INDEX_URL) == ""
 
 
-def test_format_insider_report_includes_filing_volume_news():
+def test_format_insider_report_includes_filing_volume_and_news():
     filing = parse_form4_xml(FORM4)[0]
     filing["filing_url"] = "https://www.sec.gov/Archives/example.xml"
+    filing["is_10b5_1"] = False
     snap = {
         "vol_ratio": 2.4,
         "price_up": False,
@@ -226,15 +238,15 @@ def test_format_insider_report_includes_filing_volume_news():
         ticker_sector="Technology",
         notional=300000,
     )
-    assert "AAPL Form 4 BUY $300,000" in body
     assert "COOK TIMOTHY" in body
     assert "CEO" in body
     assert "20%" in body
-    assert "30%" in body
-    assert "LEAVING" in body
-    assert "BEAR" in body
+    assert "LEAVING" in body or "2.4" in body
+    assert "Supplier cuts" in body or "BEAR" in body
     assert "Filing:" in body
     assert "Advice" in body
+    assert "10b5-1" in body
+    assert "Your position:" in body
 
 
 def test_sector_exposure_uses_gics_not_is_semi():

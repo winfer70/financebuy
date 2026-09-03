@@ -24,6 +24,8 @@ class BookSnapshot:
     avoid_tickers: set
     sector_cap: Decimal = DEFAULT_SECTOR_CAP
     min_buy_usd: Decimal = DEFAULT_MIN_BUY_USD
+    # ticker -> {quantity, purchase_price, hard_stop, soft_stop}
+    positions: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -80,8 +82,13 @@ def evaluate_filing(
     if code == "S":
         if held:
             reasons.append("insider sell on a name we hold")
+            # Still Telegram — concern_level in the body distinguishes 10b5-1 routine vs dump.
+            sev = "warning" if filing.get("is_10b5_1") is True else "critical"
+            stake = filing.get("stake_pct")
+            if filing.get("is_10b5_1") is True and stake is not None and float(stake) < 0.05:
+                sev = "info"
             return GateResult(
-                True, True, "critical", "insider_sell", reasons, cluster_count, sector_pct, notional
+                True, True, sev, "insider_sell", reasons, cluster_count, sector_pct, notional
             )
         return GateResult(False, False, "info", "insider_sell", ["sell on unheld name — log only"], cluster_count, sector_pct, notional)
 

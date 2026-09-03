@@ -4,9 +4,10 @@
 `feature/insider-monitor-briefings` (off `main`). Not pushed. Do not `release.sh` / do not `docker compose down`.
 
 ## Live
-- Form 4 poller ingesting. `SEC_USER_AGENT` set.
-- Telegram briefs now include an **Advice** block from `investment_rules.json` (no LLM): don't chase, watchlist tier, vol class, sector cap room, no averaging down, FOMO checklist. Soft-stop + insider.
-- Alert-worker restart crash (alembic 0033 missing in image) fixed by docker-cp of 0033. Compose now has `SKIP_MIGRATIONS=1` on alert-worker (takes effect on next recreate).
+- Alembic **0034** applied (`shares_after`, `stake_pct`, owner-history index).
+- Insider Telegram redesigned: 10b5-1 (`aff10b5One`), stake %, 12mo owner pattern from ingested filings, your BEP/stop, LOW/MED/HIGH concern, article-count news digest, consensus best-effort via yfinance.
+- News scoring is enough for Telegram (title + score + BULL/BEAR); empty vs query-error distinguished.
+- Trading + alert workers healthy after deploy.
 
 ## Next
 Push when asked. Do not compose-up news-worker.

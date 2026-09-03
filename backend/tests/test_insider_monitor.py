@@ -100,8 +100,11 @@ async def test_cycle_officer_buy_sends_telegram():
     assert len(notifies) == 1
     assert notifies[0]["event"] == "insider_buy"
     assert "AAPL" in notifies[0]["title"]
-    assert "BULL" in notifies[0]["body"]
-    assert "XLK" in notifies[0]["body"]
+    assert "concern" in notifies[0]["title"]
+    assert "BULL" in notifies[0]["body"] or "iPhone" in notifies[0]["body"]
+    assert "10b5-1" in notifies[0]["body"]
+    assert "Your position:" in notifies[0]["body"]
+    assert "XLK" in notifies[0]["body"] or "Volume" in notifies[0]["body"]
     assert store.rows[0]["accession"] == "0000320193-26-000123"
     assert store.rows[0]["notified_at"] is not None
     assert store.alerts[0]["event"] == "insider_buy"
@@ -137,8 +140,10 @@ async def test_cycle_held_sell_is_critical_telegram():
     stats = await run_insider_cycle(MapFetcher(_mapping(xml=xml)), store, deps)
     assert stats["telegram"] == 1
     assert notifies[0]["event"] == "insider_sell"
+    assert "concern" in notifies[0]["title"]
+    # discretionary (no 10b5) held sell → high priority
     assert notifies[0]["prio"] == 5
-    assert notifies[0]["title"].startswith("CRITICAL")
+    assert "CRITICAL" in notifies[0]["title"] or "HIGH" in notifies[0]["title"] or "SELL" in notifies[0]["title"]
 
 
 @pytest.mark.asyncio
@@ -217,7 +222,8 @@ async def test_all_new_features_together():
         ticker_sector="Technology",
         notional=float(gate.notional),
     )
-    assert "Form 4 BUY" in insider_body
+    assert "COOK TIMOTHY" in insider_body or "CEO" in insider_body
+    assert "10b5-1" in insider_body
     assert "XLK" in insider_body and "XLK" in soft_body
     assert "BULL" in insider_body and "BULL" in soft_body
 

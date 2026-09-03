@@ -77,10 +77,14 @@ async def _build_soft_stop_report(
         }
     try:
         news = await fetch_ticker_news(session, ticker)
+        news_status = "empty" if not news else "ok"
     except Exception:
         logger.warning("soft-stop news digest failed", ticker=ticker)
         news = []
-    return format_soft_stop_report(ticker, price, soft_stop, stage, snap, news)
+        news_status = "error"
+    return format_soft_stop_report(
+        ticker, price, soft_stop, stage, snap, news, news_status=news_status, ticker_sector=sector
+    )
 
 
 # -- NYSE session helpers ─────────────────────────────────────────────────

@@ -172,19 +172,27 @@ def format_volume_lines(snap: dict) -> list[str]:
     return lines
 
 
-def format_news_lines(items: list[dict]) -> list[str]:
-    if not items:
-        lines = ["News (48h scored): none in DB — worker was down since 25 Aug until restarted"]
-        return lines
+def format_news_lines(items: list[dict], *, status: str = "ok") -> list[str]:
+    """status ok|empty|error. Prefer titles; keep scores for soft-stop detail."""
+    from .insider_briefing import format_news_digest
+
+    # Soft-stop still wants score lines when present; digests handle empty/error.
+    if status != "ok" or not items:
+        return format_news_digest(items or [], status=status if status != "ok" else "empty")
     scores = [i["score"] for i in items]
     avg = sum(scores) / len(scores)
-    lines = [f"News (48h, {len(items)} scored): avg {avg:+.1f} {_score_label(round(avg))}"]
-    for i in items[:4]:
-        lines.append(
-            f"  {i['score']:+d} {i['label']} ({i['severity']}) {i['title']}"
-        )
+    lines = [f"News (48h): {len(items)} articles — avg {avg:+.1f} {_score_label(round(avg))}"]
+    titles = [(i.get("title") or "").strip() for i in items[:4] if (i.get("title") or "").strip()]
+    if titles:
+        joined = ", ".join(t[:60] for t in titles)
+        if len(joined) <= 180:
+            lines.append(f"  {joined}")
+        else:
+            for t in titles:
+                lines.append(f"  • {t[:90]}")
+    for i in items[:3]:
         if i.get("reasoning"):
-            lines.append(f"      {i['reasoning']}")
+            lines.append(f"  {i['score']:+d} {i['label']}: {i['reasoning'][:120]}")
     return lines
 
 
@@ -199,6 +207,7 @@ def format_soft_stop_report(
     held: bool = True,
     ticker_sector: Optional[str] = None,
     rules: Optional[dict] = None,
+    news_status: str = "ok",
 ) -> str:
     """Telegram/ntfy body. Keep under Telegram's 4096-char limit."""
     pct = ((price - soft_stop) / soft_stop * 100) if soft_stop else 0.0
@@ -215,7 +224,7 @@ def format_soft_stop_report(
     parts = [head, ""]
     parts.extend(format_volume_lines(snap))
     parts.append("")
-    parts.extend(format_news_lines(news))
+    parts.extend(format_news_lines(news, status=news_status))
     advice = format_advice_block(
         ticker=ticker,
         event=EVENT_SOFT_STOP,
@@ -246,43 +255,18 @@ def format_insider_report(
     notional: Optional[float] = None,
     held: bool = False,
     rules: Optional[dict] = None,
+    pattern=None,
+    position=None,
+    consensus=None,
+    news_status: str = "ok",
 ) -> str:
-    """Telegram/ntfy body for a gated Form 4. Reuses volume + scored-news lines."""
-    ticker = (filing.get("ticker") or "").upper()
+    """Telegram/ntfy body for a gated Form 4 (redesigned template)."""
+    from .insider_briefing import format_insider_telegram
+
     code = (filing.get("transaction_code") or "").upper()
-    action = "BUY" if code == "P" else "SELL" if code == "S" else code or "TXN"
-    owner = filing.get("owner_name") or "unknown"
-    if filing.get("officer_title"):
-        role = filing["officer_title"]
-    elif filing.get("is_director"):
-        role = "director"
-    elif filing.get("is_officer"):
-        role = "officer"
-    elif filing.get("is_ten_percent"):
-        role = "10% owner"
-    else:
-        role = "insider"
-    usd = float(notional) if notional is not None else float(filing.get("shares") or 0) * float(filing.get("price") or 0)
-    head = f"{ticker} Form 4 {action} ${usd:,.0f} — {owner} ({role})"
-    parts = [head, ""]
-    parts.append(f"Code {code} | {filing.get('shares') or 0:g} sh @ ${float(filing.get('price') or 0):.2f}")
-    parts.append(f"Cluster: {cluster_count} unique owners / 30d")
-    if sector_pct is not None:
-        cap_s = f" vs cap {sector_cap:.0%}" if sector_cap is not None else ""
-        sector = ticker_sector or snap.get("sector") or "sector"
-        parts.append(f"Sector {sector} {sector_pct:.0%}{cap_s}")
-    if reasons:
-        parts.append("Gate: " + "; ".join(reasons))
-    url = filing.get("filing_url") or ""
-    if url:
-        parts.append(f"Filing: {url}")
-    parts.append("")
-    parts.extend(format_volume_lines(snap))
-    parts.append("")
-    parts.extend(format_news_lines(news))
     event = EVENT_INSIDER_SELL if code == "S" else EVENT_INSIDER_BUY
     advice = format_advice_block(
-        ticker=ticker,
+        ticker=(filing.get("ticker") or ""),
         event=event,
         held=held,
         sector_pct=sector_pct,
@@ -293,7 +277,41 @@ def format_insider_report(
         rules=rules,
         cluster_count=cluster_count,
     )
-    if advice:
-        parts.append("")
-        parts.append(advice)
-    return "\n".join(parts)[:3500]
+    _title, body = format_insider_telegram(
+        filing,
+        snap=snap,
+        news=news,
+        news_status=news_status,
+        cluster_count=cluster_count,
+        cluster_kind="sellers" if code == "S" else "buyers",
+        pattern=pattern,
+        position=position,
+        consensus=consensus,
+        advice=advice,
+        sector_pct=sector_pct,
+        sector_cap=sector_cap,
+        ticker_sector=ticker_sector,
+        notional=notional,
+        reasons=reasons,
+    )
+    return body
+
+
+def format_insider_title(
+    filing: dict,
+    *,
+    notional: Optional[float] = None,
+    cluster_count: int = 1,
+    pattern=None,
+) -> str:
+    from .insider_briefing import concern_level
+
+    ticker = (filing.get("ticker") or "").upper()
+    code = (filing.get("transaction_code") or "").upper()
+    action = "BUY" if code == "P" else "SELL" if code == "S" else code or "TXN"
+    usd = float(notional) if notional is not None else float(filing.get("shares") or 0) * float(
+        filing.get("price") or 0
+    )
+    concern = concern_level(filing, cluster_count=cluster_count, pattern=pattern)
+    emoji = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🔴"}.get(concern, "⚪")
+    return f"{emoji} {ticker} insider {action} — ${usd:,.0f} ({concern} concern)"

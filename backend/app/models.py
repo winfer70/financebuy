@@ -1173,6 +1173,13 @@ class InsiderFiling(Base):
         UniqueConstraint("accession", "txn_index", name="uq_insider_filings_accession_txn"),
         Index("idx_insider_filings_ticker_code_date", "ticker", "transaction_code", "transaction_date"),
         Index("idx_insider_filings_accession", "accession"),
+        Index(
+            "idx_insider_filings_owner_hist",
+            "owner_cik",
+            "ticker",
+            "transaction_code",
+            "transaction_date",
+        ),
     )
 
     filing_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1191,6 +1198,8 @@ class InsiderFiling(Base):
     shares = Column(Numeric(18, 4), nullable=True)
     price = Column(Numeric(18, 4), nullable=True)
     notional = Column(Numeric(18, 2), nullable=True)
+    shares_after = Column(Numeric(18, 4), nullable=True)
+    stake_pct = Column(Numeric(8, 6), nullable=True)
     transaction_date = Column(Date, nullable=True)
     is_10b5_1 = Column(Boolean, nullable=True)
     filing_url = Column(Text, nullable=True)

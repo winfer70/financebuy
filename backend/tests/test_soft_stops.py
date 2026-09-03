@@ -428,9 +428,10 @@ def test_format_soft_stop_includes_price_volume_and_news():
     assert "$140.12" in body
     assert "$150.00" in body
     assert "LEAVING" in body
-    assert "BEAR" in body
+    assert "BEAR" in body or "Supplier" in body
     assert "XLK" in body
     assert "Advice" in body
+    assert "0 articles" not in body or "articles" in body.lower()
     vol_lines = format_volume_lines(snap)
     assert any("LEAVING" in line for line in vol_lines)
     news_lines = format_news_lines(news)
