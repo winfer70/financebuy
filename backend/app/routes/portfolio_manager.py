@@ -11,7 +11,6 @@ Route prefix: /api/v1/portfolio-manager  (registered in main.py)
 import asyncio
 import os
 from datetime import date, datetime
-from decimal import Decimal
 from typing import Dict, List
 from uuid import UUID
 
@@ -86,6 +85,51 @@ async def _get_position_or_404(
             PortfolioPosition.position_id == position_id,
             Portfolio.user_id == current_user.user_id,
         )
+    )
+    position = result.scalar_one_or_none()
+    if position is None:
+        raise HTTPException(status_code=404, detail="Position not found.")
+    return position
+
+
+async def _get_portfolio_locked_or_404(
+    portfolio_id: UUID,
+    db: AsyncSession,
+    current_user,
+) -> Portfolio:
+    """Load and row-lock (SELECT ... FOR UPDATE) a portfolio for a cash-mutating
+    operation; raise 404 if not found or not owned. Must be called as the first
+    statement inside an ``async with db.begin():`` block."""
+    result = await db.execute(
+        select(Portfolio)
+        .where(
+            Portfolio.portfolio_id == portfolio_id,
+            Portfolio.user_id == current_user.user_id,
+        )
+        .with_for_update()
+    )
+    portfolio = result.scalar_one_or_none()
+    if portfolio is None:
+        raise HTTPException(status_code=404, detail="Portfolio not found.")
+    return portfolio
+
+
+async def _get_position_locked_or_404(
+    position_id: UUID,
+    db: AsyncSession,
+    current_user,
+) -> PortfolioPosition:
+    """Load and row-lock (SELECT ... FOR UPDATE) a position for a cash-mutating
+    operation; raise 404 if not found or not owned. Must be called as the first
+    statement inside an ``async with db.begin():`` block."""
+    result = await db.execute(
+        select(PortfolioPosition)
+        .join(Portfolio, Portfolio.portfolio_id == PortfolioPosition.portfolio_id)
+        .where(
+            PortfolioPosition.position_id == position_id,
+            Portfolio.user_id == current_user.user_id,
+        )
+        .with_for_update(of=PortfolioPosition)
     )
     position = result.scalar_one_or_none()
     if position is None:
@@ -174,42 +218,43 @@ async def add_position(
     the portfolio's cash balance and a BUY trade record is created.  Returns 400
     if the portfolio has insufficient cash.
     """
-    portfolio = await _get_portfolio_or_404(portfolio_id, db, current_user)
+    async with db.begin():
+        portfolio = await _get_portfolio_locked_or_404(portfolio_id, db, current_user)
 
-    if payload.deduct_cash:
-        cost = float(payload.quantity * payload.purchase_price)
-        if float(portfolio.cash_balance) < cost:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Insufficient cash balance. Available: ${float(portfolio.cash_balance):.2f}",
+        if payload.deduct_cash:
+            cost = payload.quantity * payload.purchase_price
+            if portfolio.cash_balance < cost:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Insufficient cash balance. Available: ${portfolio.cash_balance:.2f}",
+                )
+            portfolio.cash_balance = portfolio.cash_balance - cost
+            trade = PortfolioTrade(
+                portfolio_id=portfolio_id,
+                trade_type="BUY",
+                ticker=payload.ticker.strip().upper(),
+                quantity=payload.quantity,
+                price=payload.purchase_price,
+                total_value=payload.quantity * payload.purchase_price,
             )
-        portfolio.cash_balance = float(portfolio.cash_balance) - cost
-        trade = PortfolioTrade(
-            portfolio_id=portfolio_id,
-            trade_type="BUY",
-            ticker=payload.ticker.strip().upper(),
-            quantity=payload.quantity,
-            price=payload.purchase_price,
-            total_value=payload.quantity * payload.purchase_price,
-        )
-        db.add(trade)
+            db.add(trade)
 
-    position = PortfolioPosition(
-        portfolio_id=portfolio_id,
-        ticker=payload.ticker.upper(),
-        name=payload.name,
-        quantity=payload.quantity,
-        purchase_date=payload.purchase_date,
-        purchase_price=payload.purchase_price,
-        group_tag=payload.group_tag,
-        asset_type=payload.asset_type,
-        physical_type=payload.physical_type,
-        hard_stop_loss=payload.hard_stop_loss,
-        soft_stop_loss=payload.soft_stop_loss,
-        profit_taking=payload.profit_taking,
-    )
-    db.add(position)
-    await db.commit()
+        position = PortfolioPosition(
+            portfolio_id=portfolio_id,
+            ticker=payload.ticker.upper(),
+            name=payload.name,
+            quantity=payload.quantity,
+            purchase_date=payload.purchase_date,
+            purchase_price=payload.purchase_price,
+            group_tag=payload.group_tag,
+            asset_type=payload.asset_type,
+            physical_type=payload.physical_type,
+            hard_stop_loss=payload.hard_stop_loss,
+            soft_stop_loss=payload.soft_stop_loss,
+            profit_taking=payload.profit_taking,
+        )
+        db.add(position)
+
     await db.refresh(position)
     return position
 
@@ -318,51 +363,77 @@ async def sell_position(
     - When ``payload.credit_cash`` is True, the sale proceeds are added to the
       portfolio's cash balance and a SELL trade record is created.
     """
-    position = await _get_position_or_404(position_id, db, current_user)
+    linked_analysis = None
+    fully_sold = False
 
-    # Load the parent portfolio for cash balance tracking
-    port_result = await db.execute(
-        select(Portfolio).where(Portfolio.portfolio_id == position.portfolio_id)
-    )
-    portfolio = port_result.scalar_one_or_none()
+    async with db.begin():
+        position = await _get_position_locked_or_404(position_id, db, current_user)
 
-    # Use the provided sell price if supplied, otherwise fall back to purchase price
-    sell_price = float(payload.sell_price) if payload.sell_price is not None else float(position.purchase_price)
-    # Capture average cost basis at sell time for realized P&L calculation
-    cost_basis = float(position.purchase_price)
+        # Lock the parent portfolio for cash balance tracking. Locked after the
+        # position (consistent lock order across this router) to avoid deadlocks.
+        port_result = await db.execute(
+            select(Portfolio).where(Portfolio.portfolio_id == position.portfolio_id).with_for_update()
+        )
+        portfolio = port_result.scalar_one_or_none()
 
-    if payload.quantity >= position.quantity:
-        # Fully sold — record quantity before deletion
-        quantity_sold = float(position.quantity)
-        sell_total = quantity_sold * sell_price
+        # Use the provided sell price if supplied, otherwise fall back to purchase price
+        sell_price = payload.sell_price if payload.sell_price is not None else position.purchase_price
+        # Capture average cost basis at sell time for realized P&L calculation
+        cost_basis = position.purchase_price
 
-        # Check for linked open AI analysis before position is deleted
-        analysis_result = await db.execute(
-            select(TradeAnalysis).where(
-                TradeAnalysis.position_id == position.position_id,
-                TradeAnalysis.outcome == "OPEN",
+        if payload.quantity >= position.quantity:
+            # Fully sold — record quantity before deletion
+            fully_sold = True
+            quantity_sold = position.quantity
+            sell_total = quantity_sold * sell_price
+
+            # Check for linked open AI analysis before position is deleted
+            analysis_result = await db.execute(
+                select(TradeAnalysis).where(
+                    TradeAnalysis.position_id == position.position_id,
+                    TradeAnalysis.outcome == "OPEN",
+                )
             )
-        )
-        linked_analysis = analysis_result.scalar_one_or_none()
+            linked_analysis = analysis_result.scalar_one_or_none()
 
-        # Always record the trade regardless of cash credit preference
-        trade = PortfolioTrade(
-            portfolio_id=position.portfolio_id,
-            trade_type="SELL",
-            ticker=position.ticker,
-            quantity=Decimal(str(quantity_sold)),
-            price=Decimal(str(sell_price)),
-            cost_basis=Decimal(str(cost_basis)),
-            total_value=Decimal(str(sell_total)),
-        )
-        db.add(trade)
+            # Always record the trade regardless of cash credit preference
+            trade = PortfolioTrade(
+                portfolio_id=position.portfolio_id,
+                trade_type="SELL",
+                ticker=position.ticker,
+                quantity=quantity_sold,
+                price=sell_price,
+                cost_basis=cost_basis,
+                total_value=sell_total,
+            )
+            db.add(trade)
 
-        if payload.credit_cash and portfolio is not None:
-            portfolio.cash_balance = float(portfolio.cash_balance) + sell_total
+            if payload.credit_cash and portfolio is not None:
+                portfolio.cash_balance = portfolio.cash_balance + sell_total
 
-        await db.delete(position)
-        await db.commit()
+            await db.delete(position)
+        else:
+            # Partial sell
+            quantity_sold = payload.quantity
+            sell_total = quantity_sold * sell_price
+            position.quantity = position.quantity - payload.quantity
 
+            # Always record the trade regardless of cash credit preference
+            trade = PortfolioTrade(
+                portfolio_id=position.portfolio_id,
+                trade_type="SELL",
+                ticker=position.ticker,
+                quantity=quantity_sold,
+                price=sell_price,
+                cost_basis=cost_basis,
+                total_value=sell_total,
+            )
+            db.add(trade)
+
+            if payload.credit_cash and portfolio is not None:
+                portfolio.cash_balance = portfolio.cash_balance + sell_total
+
+    if fully_sold:
         if linked_analysis is not None:
             try:
                 from arq import create_pool
@@ -373,30 +444,8 @@ async def sell_position(
                 await pool.aclose()
             except Exception:
                 pass
-
         return None
 
-    # Partial sell
-    quantity_sold = float(payload.quantity)
-    sell_total = quantity_sold * sell_price
-    position.quantity = Decimal(str(position.quantity)) - payload.quantity
-
-    # Always record the trade regardless of cash credit preference
-    trade = PortfolioTrade(
-        portfolio_id=position.portfolio_id,
-        trade_type="SELL",
-        ticker=position.ticker,
-        quantity=Decimal(str(quantity_sold)),
-        price=Decimal(str(sell_price)),
-        cost_basis=Decimal(str(cost_basis)),
-        total_value=Decimal(str(sell_total)),
-    )
-    db.add(trade)
-
-    if payload.credit_cash and portfolio is not None:
-        portfolio.cash_balance = float(portfolio.cash_balance) + sell_total
-
-    await db.commit()
     await db.refresh(position)
     return position
 
@@ -647,18 +696,19 @@ async def adjust_cash(
         HTTPException 400: If the resulting balance would be negative.
         HTTPException 404: Portfolio not found or not owned by user.
     """
-    portfolio = await _get_portfolio_or_404(portfolio_id, db, current_user)
+    async with db.begin():
+        portfolio = await _get_portfolio_locked_or_404(portfolio_id, db, current_user)
 
-    new_balance = float(portfolio.cash_balance) + request.amount
-    if new_balance < 0:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Insufficient funds. Current balance: ${float(portfolio.cash_balance):.2f}",
-        )
+        new_balance = portfolio.cash_balance + request.amount
+        if new_balance < 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Insufficient funds. Current balance: ${portfolio.cash_balance:.2f}",
+            )
 
-    portfolio.cash_balance = new_balance
-    await db.commit()
-    return {"cash_balance": new_balance}
+        portfolio.cash_balance = new_balance
+
+    return {"cash_balance": float(new_balance)}
 
 
 @router.get("/{portfolio_id}/performance", response_model=List[PerformancePointOut])
