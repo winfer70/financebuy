@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# deploy-services.sh — Deploy TickerTap systemd services on the remote worker host.
+# deploy-services.sh — LEGACY. Deploy TickerTap systemd services on the
+# remote worker host.
+#
+# SUPERSEDED (worker only): news ingestion now runs as the `news-worker`
+# container in docker-compose.labserver.yml instead of tickertap-worker.service
+# installed by this script. The learner service/timer this script also
+# installs has no containerized equivalent yet and may still be needed —
+# see tickertap-worker.service for details.
 #
 # This script:
 #   1. Copies the service/timer files into /etc/systemd/system/
