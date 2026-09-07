@@ -9,8 +9,10 @@ NODE_USER="${NODE_USER:-<YOUR_SSH_USER>}"
 TARGET_DIR="${TARGET_DIR:-/path/to/deployment}"
 INTEGRATION_BRANCH="tradingAI0.1"
 DB_SERVICE="db"
-DB_NAME="tickertap"
-DB_USER="postgres"
+# Must match the compose file actually deployed on TARGET_DIR (labserver setup
+# uses docker-compose.labserver.yml, not the bare default docker-compose.yml —
+# running `docker compose` without -f here would target the wrong stack).
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.labserver.yml}"
 KUMA_PUSH_URL="${KUMA_PUSH_URL:-}"  # Optional Push monitor URL
 
 # ── 1. Tag and push ──────────────────────────────────────────────────────────
@@ -33,8 +35,15 @@ cd "$TARGET_DIR"
 
 echo "[3/6] Backing up postgres..."
 mkdir -p ./backups
-if docker compose --env-file .env.prod ps -q "$DB_SERVICE" 2>/dev/null | grep -q .; then
-  docker compose --env-file .env.prod exec -T "$DB_SERVICE" pg_dump -U "$DB_USER" "$DB_NAME" \
+# Read the real POSTGRES_DB/POSTGRES_USER off this host's .env.prod instead of
+# guessing — a hardcoded DB name here previously drifted from the actual
+# POSTGRES_DB default ("tickerTap", not "tickertap") and would have silently
+# backed up the wrong (nonexistent) database.
+set -a; source ./.env.prod 2>/dev/null || true; set +a
+_db_name="\${POSTGRES_DB:-tickerTap}"
+_db_user="\${POSTGRES_USER:-postgres}"
+if docker compose -f "$COMPOSE_FILE" --env-file .env.prod ps -q "$DB_SERVICE" 2>/dev/null | grep -q .; then
+  docker compose -f "$COMPOSE_FILE" --env-file .env.prod exec -T "$DB_SERVICE" pg_dump -U "\$_db_user" "\$_db_name" \
     > ./backups/backup_\$(date +%Y%m%d_%H%M%S).sql && echo "Backup saved." || echo "WARNING: Backup failed, continuing."
 else
   echo "WARNING: DB container not running, skipping backup."
@@ -44,11 +53,11 @@ echo "[4/6] Pulling code..."
 git fetch --tags && git checkout main && git pull origin main
 
 echo "[5/6] Rebuilding containers..."
-docker compose --env-file .env.prod down && docker compose --env-file .env.prod up -d --build
+docker compose -f "$COMPOSE_FILE" --env-file .env.prod down && docker compose -f "$COMPOSE_FILE" --env-file .env.prod up -d --build
 
 echo "[6/6] Running Alembic migrations..."
 sleep 4
-docker compose --env-file .env.prod exec -T app alembic upgrade head
+docker compose -f "$COMPOSE_FILE" --env-file .env.prod exec -T app alembic upgrade head
 echo "Migrations done."
 ENDSSH
 

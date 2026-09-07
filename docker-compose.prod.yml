@@ -1,4 +1,10 @@
-# docker-compose.prod.yml — TickerTap production service definitions
+# docker-compose.prod.yml — LEGACY TickerTap production service definitions.
+#
+# SUPERSEDED: current production deploys use docker-compose.labserver.yml,
+# which is self-contained (adds trading-ml, a containerized web tier, and
+# Cloudflare Tunnel — see that file's header). This file predates that setup
+# and pairs with the also-legacy deploy.sh (host nginx + certbot). Kept for
+# reference; use docker-compose.labserver.yml for a new deployment host.
 #
 # Key differences from docker-compose.yml (dev):
 #   - Port 8000 bound to 0.0.0.0 (LAN-accessible for the remote worker host)
