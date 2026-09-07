@@ -15,16 +15,82 @@ User preferences are stored in User.preferences JSONB:
   }
 """
 
+import asyncio
+import ipaddress
 import os
+import socket
 import uuid
 import logging
 from typing import Optional, Dict, Any
+from urllib.parse import urlparse
 
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger("trading.notifications")
+
+
+# ── Webhook SSRF guards ─────────────────────────────────────────────────────
+#
+# User-registered webhooks are fetched server-side (see _fire_webhooks below),
+# so an unrestricted URL lets a user turn this server into an SSRF proxy
+# against internal services (e.g. cloud metadata endpoints, admin APIs on the
+# private network). Two checks are needed, not one:
+#   1. At registration (routes/trading.py create_webhook/update_webhook) —
+#      reject obviously-unsafe URLs up front.
+#   2. Immediately before every send (here) — DNS can change between
+#      registration and send (DNS rebinding), so a registration-time check
+#      alone is not sufficient.
+
+
+def _is_disallowed_ip(ip_str: str) -> bool:
+    """True if this address is private, loopback, link-local (this also
+    covers the 169.254.169.254 cloud-metadata endpoint), reserved,
+    multicast, or unspecified — i.e. not a normal public address."""
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return True
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
+def validate_webhook_url_shape(url: str) -> str:
+    """Reject obviously-invalid webhook URLs (scheme, missing host, localhost).
+
+    Returns the parsed hostname on success. Does not check DNS — callers must
+    also call check_webhook_host_safe (async) for the resolve-and-check step.
+
+    Raises:
+        ValueError: with a user-facing reason.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        raise ValueError("Webhook URL must use HTTPS.")
+    host = parsed.hostname
+    if not host:
+        raise ValueError("Webhook URL must include a hostname.")
+    if host.lower() == "localhost":
+        raise ValueError("Webhook URL may not target localhost.")
+    return host
+
+
+async def check_webhook_host_safe(host: str) -> bool:
+    """Resolve `host` and return False if any resolved address is unsafe
+    (see _is_disallowed_ip) or resolution fails."""
+    try:
+        infos = await asyncio.to_thread(socket.getaddrinfo, host, None)
+    except socket.gaierror:
+        return False
+    addrs = {info[4][0] for info in infos}
+    return bool(addrs) and not any(_is_disallowed_ip(a) for a in addrs)
 
 
 async def notify(
@@ -173,11 +239,19 @@ async def _fire_webhooks(
         "metadata": metadata or {},
     }
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
         for wh in webhooks:
             # Check if this webhook subscribes to this event type
             events = wh.events or []
             if event_type not in events:
+                continue
+            # Re-check the host immediately before sending — DNS may have
+            # changed since registration (rebinding). follow_redirects=False
+            # above stops a malicious endpoint from redirecting us to an
+            # internal address after this check passes.
+            host = urlparse(wh.url).hostname
+            if not host or not await check_webhook_host_safe(host):
+                logger.warning("Webhook skipped — unsafe host: url=%s", wh.url)
                 continue
             try:
                 resp = await client.post(
