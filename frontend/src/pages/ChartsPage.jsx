@@ -113,6 +113,52 @@ function calcSMA(data, period) {
   });
 }
 
+/**
+ * Project future SMA via linear trend on recent closes.
+ * Model: close(t) ≈ a + b·t  (OLS over last `lookback` bars),
+ * then SMA_P(t) = mean of the rolling window that may mix history + projected closes.
+ * Returns points with chart index relative to `data.length` (0 = first future bar).
+ */
+function projectSMA(data, period, horizon = 30, lookback = 50) {
+  const n = data.length;
+  if (n < 5 || period < 2 || horizon < 1) return [];
+  const L = Math.min(lookback, n);
+  const start = n - L;
+  let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+  for (let i = 0; i < L; i++) {
+    const x = i;
+    const y = data[start + i].close;
+    sumX += x; sumY += y; sumXY += x * y; sumXX += x * x;
+  }
+  const denom = L * sumXX - sumX * sumX;
+  const b = denom === 0 ? 0 : (L * sumXY - sumX * sumY) / denom;
+  const a = (sumY - b * sumX) / L;
+
+  const extended = data.map((d) => d.close);
+  for (let j = 0; j < horizon; j++) {
+    const localX = (n + j) - start;
+    extended.push(a + b * localX);
+  }
+
+  const out = [];
+  // Seed with last historical SMA so the dashed line connects cleanly
+  if (n >= period) {
+    let s = 0;
+    for (let k = n - period; k < n; k++) s += extended[k];
+    out.push({ offset: -1, value: +(s / period).toFixed(2) });
+  }
+  for (let j = 0; j < horizon; j++) {
+    const i = n + j;
+    if (i < period - 1) continue;
+    let s = 0;
+    for (let k = i - period + 1; k <= i; k++) s += extended[k];
+    out.push({ offset: j, value: +(s / period).toFixed(2) });
+  }
+  return out;
+}
+
+const PROJ_HORIZON = 30;
+
 /* ─── BREAKOUT DETECTION ────────────────────────────────────────────────────── */
 function detectBreakouts(data, sma50) {
   const breakouts = [];
@@ -201,7 +247,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
   const [crosshair, setCrosshair] = useState(null);
   const [tooltip, setTooltip] = useState(null);
   const [period, setPeriod] = useState("1Y");
-  const [overlays, setOverlays] = useState({ sma50: true, sma150: true, smaCustom: true, volume: true, breakouts: true, events: true });
+  const [overlays, setOverlays] = useState({ sma50: true, sma150: true, smaCustom: true, smaProj: true, volume: true, breakouts: true, events: true });
   const [customPeriod, setCustomPeriod] = useState(20);
   const [chartType, setChartType] = useState("candle");
   const [interval, setIntervalState] = useState("1d");
@@ -392,7 +438,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
   }, [isIntraday]); // eslint-disable-line
 
   // Visible slice — respects period preset OR manual zoom
-  // totalSlots includes future empty slots when panned past data end
+  // totalSlots includes future empty slots when panned past data end or SMA proj is on
   const { visibleData, visibleStart, totalSlots } = useMemo(() => {
     let start, count;
     if (zoom) {
@@ -403,8 +449,15 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
       start = allData.length - count;
     }
     const data = allData.slice(start, start + count);
-    return { visibleData: data, visibleStart: start, totalSlots: count };
-  }, [allData, period, zoom]);
+    const atEnd = start + data.length >= allData.length;
+    const panFuture = Math.max(0, count - data.length);
+    const projPad = overlays.smaProj && atEnd ? PROJ_HORIZON : 0;
+    return {
+      visibleData: data,
+      visibleStart: start,
+      totalSlots: data.length + Math.max(panFuture, projPad),
+    };
+  }, [allData, period, zoom, overlays.smaProj]);
 
   // When period changes, clear manual zoom
   const handlePeriod = (p) => { setPeriod(p); setZoom(null); };
@@ -418,6 +471,23 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
   const sma50     = useMemo(() => allSma50.slice(visibleStart, visibleStart + visibleData.length),     [allSma50,     visibleStart, visibleData.length]);
   const sma150    = useMemo(() => allSma150.slice(visibleStart, visibleStart + visibleData.length),    [allSma150,    visibleStart, visibleData.length]);
   const smaCustom = useMemo(() => allSmaCustom.slice(visibleStart, visibleStart + visibleData.length), [allSmaCustom, visibleStart, visibleData.length]);
+
+  // Future SMA projections (linear close trend → rolling SMA); only when viewing the right edge
+  const atDataEnd = visibleStart + visibleData.length >= allData.length;
+  const projSma50 = useMemo(
+    () => (overlays.smaProj && overlays.sma50 && atDataEnd ? projectSMA(allData, 50, PROJ_HORIZON) : []),
+    [allData, overlays.smaProj, overlays.sma50, atDataEnd],
+  );
+  const projSma150 = useMemo(
+    () => (overlays.smaProj && overlays.sma150 && atDataEnd ? projectSMA(allData, 150, PROJ_HORIZON) : []),
+    [allData, overlays.smaProj, overlays.sma150, atDataEnd],
+  );
+  const projSmaCustom = useMemo(
+    () => (overlays.smaProj && overlays.smaCustom && atDataEnd
+      ? projectSMA(allData, Math.max(2, customPeriod), PROJ_HORIZON)
+      : []),
+    [allData, overlays.smaProj, overlays.smaCustom, atDataEnd, customPeriod],
+  );
 
   // Breakouts computed on full history using full SMA50
   const breakouts = useMemo(() => {
@@ -457,9 +527,12 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
 
   const priceMin = n > 0 ? Math.min(...visibleData.map(d => d.low))  : 0;
   const priceMax = n > 0 ? Math.max(...visibleData.map(d => d.high)) : 1;
-  const pricePad = (priceMax - priceMin) * 0.07;
-  const pLo = priceMin - pricePad;
-  const pHi = priceMax + pricePad;
+  const projVals = [...projSma50, ...projSma150, ...projSmaCustom].map(p => p.value).filter(v => v != null);
+  const priceMinAdj = projVals.length ? Math.min(priceMin, ...projVals) : priceMin;
+  const priceMaxAdj = projVals.length ? Math.max(priceMax, ...projVals) : priceMax;
+  const pricePad = (priceMaxAdj - priceMinAdj) * 0.07;
+  const pLo = priceMinAdj - pricePad;
+  const pHi = priceMaxAdj + pricePad;
   const volMax = n > 0 ? Math.max(...visibleData.map(d => d.volume)) : 1;
 
   const xOf  = i => PAD.left + (i + 0.5) * candleGap;
@@ -511,6 +584,19 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
       if (!smaData[i].value) continue;
       const x = xOf(i), y = yOf(smaData[i].value);
       path += `${!path || !smaData[i - 1]?.value ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+    }
+    return path;
+  };
+
+  /** Dashed future SMA: offsets are relative to first future bar (offset -1 = last historical). */
+  const projSmaPath = (pts) => {
+    if (!pts.length || n < 1) return "";
+    let path = "";
+    for (let i = 0; i < pts.length; i++) {
+      const idx = n + pts[i].offset;
+      if (idx < 0 || idx >= totalSlots) continue;
+      const x = xOf(idx), y = yOf(pts[i].value);
+      path += `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
     }
     return path;
   };
@@ -890,6 +976,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
     { key: "sma50",     label: "SMA 50",              color: "#3d7ef5" },
     { key: "sma150",    label: "SMA 150",              color: "#0fc0d0" },
     { key: "smaCustom", label: `SMA ${customPeriod}`,  color: "#a78bfa" },
+    { key: "smaProj",   label: "SMA PROJ",             color: "#f59e0b" },
     { key: "breakouts", label: "BREAKOUTS",            color: "#0f7d40" },
     { key: "volume",    label: "VOLUME",               color: "#4a5568" },
     { key: "events",    label: t("charts.events"),      color: "#e879f9" },
@@ -1128,6 +1215,7 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
             {overlays.sma50     && <div className="legend-item"><div className="legend-line" style={{ background: "#3d7ef5" }}/>SMA50</div>}
             {overlays.sma150    && <div className="legend-item"><div className="legend-line" style={{ background: "#0fc0d0" }}/>SMA150</div>}
             {overlays.smaCustom && <div className="legend-item"><div className="legend-line" style={{ background: "#a78bfa" }}/>SMA{customPeriod}</div>}
+            {overlays.smaProj   && <div className="legend-item"><div className="legend-line" style={{ background: "#f59e0b", backgroundImage: "repeating-linear-gradient(90deg,#f59e0b 0 3px,transparent 3px 6px)" }}/>PROJ</div>}
             {overlays.breakouts && <div className="legend-item"><div style={{ width: 8, height: 8, background: "#00d97e", clipPath: "polygon(50% 0,100% 100%,0 100%)", flexShrink: 0 }}/>{t("charts.breakout")}</div>}
             {overlays.events && <div className="legend-item"><div style={{ width: 8, height: 8, background: "#e879f9", borderRadius: 1, flexShrink: 0 }}/>{t("charts.events")}</div>}
           </div>
@@ -1345,6 +1433,15 @@ function StockChart({ symbol, stockInfo, onClose, token }) {
               {overlays.sma50     && <path d={smaPath(sma50)}     fill="none" stroke="#3d7ef5" strokeWidth="1.3" opacity="0.9" />}
               {overlays.sma150    && <path d={smaPath(sma150)}    fill="none" stroke="#0fc0d0" strokeWidth="1.3" opacity="0.9" />}
               {overlays.smaCustom && <path d={smaPath(smaCustom)} fill="none" stroke="#a78bfa" strokeWidth="1.2" strokeDasharray="5,4" opacity="0.9" />}
+              {overlays.smaProj && projSma50.length > 0 && (
+                <path d={projSmaPath(projSma50)} fill="none" stroke="#3d7ef5" strokeWidth="1.4" strokeDasharray="2,4" opacity="0.75" />
+              )}
+              {overlays.smaProj && projSma150.length > 0 && (
+                <path d={projSmaPath(projSma150)} fill="none" stroke="#0fc0d0" strokeWidth="1.4" strokeDasharray="2,4" opacity="0.75" />
+              )}
+              {overlays.smaProj && projSmaCustom.length > 0 && (
+                <path d={projSmaPath(projSmaCustom)} fill="none" stroke="#a78bfa" strokeWidth="1.3" strokeDasharray="2,4" opacity="0.75" />
+              )}
             </g>
 
             {/* ── BREAKOUTS ── */}
