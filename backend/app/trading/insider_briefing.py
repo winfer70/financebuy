@@ -253,6 +253,14 @@ def format_insider_telegram(
     price = float(filing.get("price") or 0)
     parts: list[str] = []
     parts.append(f"{owner}, {role}")
+    txn_date = filing.get("transaction_date")
+    if txn_date is not None:
+        if hasattr(txn_date, "isoformat"):
+            txn_s = txn_date.isoformat()[:10]
+        else:
+            txn_s = str(txn_date)[:10]
+        if txn_s:
+            parts.append(f"Trade date: {txn_s}")
     parts.append(f"{shares:g} sh @ ${price:,.2f} | {_plan_line(filing.get('is_10b5_1'))}")
 
     stake = filing.get("stake_pct")

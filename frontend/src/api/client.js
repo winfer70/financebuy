@@ -341,6 +341,31 @@ const api = {
   getNewsByTicker: (ticker, token, limit = 25, offset = 0) =>
     apiFetch(`/news/tickers/${encodeURIComponent(ticker)}?limit=${limit}&offset=${offset}`, { token }),
 
+  // ── Insider (Form 4) ───────────────────────────────────────────────────────
+  /**
+   * Paginated Form 4 filings with sort/filter.
+   * @returns {Promise<{total: number, items: Array}>}
+   */
+  getInsiderFilings: (token, {
+    ticker = null, owner_cik = null, code = null, days = 90,
+    sort = "transaction_date", order = "desc", limit = 50, offset = 0,
+  } = {}) => {
+    let url = `/insider/filings?days=${days}&sort=${encodeURIComponent(sort)}&order=${encodeURIComponent(order)}&limit=${limit}&offset=${offset}`;
+    if (ticker) url += `&ticker=${encodeURIComponent(ticker)}`;
+    if (owner_cik) url += `&owner_cik=${encodeURIComponent(owner_cik)}`;
+    if (code) url += `&code=${encodeURIComponent(code)}`;
+    return apiFetch(url, { token });
+  },
+
+  /**
+   * Per-person Form 4 breakdown (buys/sells, cadence, 10b5-1 share).
+   */
+  getInsiderOwner: (ownerCik, token, { ticker = null, days = 365 } = {}) => {
+    let url = `/insider/owners/${encodeURIComponent(ownerCik)}?days=${days}`;
+    if (ticker) url += `&ticker=${encodeURIComponent(ticker)}`;
+    return apiFetch(url, { token });
+  },
+
   // ── Guide ──────────────────────────────────────────────────────────────────
   /**
    * Submit a question to the AI guide (Ollama proxy).

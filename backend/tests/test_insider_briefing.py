@@ -159,6 +159,7 @@ def test_telegram_template_shek_style():
     assert "LOW concern" in title
     assert "SNDK" in title
     assert "$915,360" in title
+    assert "Trade date:" in body
     assert "10b5-1 plan: YES" in body
     assert "Stake sold: 1.2%" in body
     assert "Pattern:" in body
