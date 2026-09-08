@@ -207,6 +207,68 @@ def parse_form4_xml(xml_text: str, accession: str = "", filing_url: str = "") ->
     return rows
 
 
+def parse_form3_xml(xml_text: str, accession: str = "", filing_url: str = "") -> Optional[dict]:
+    """Parse a Form 3 (Initial Statement of Beneficial Ownership) — same
+    ownershipDocument XML family as Form 4, but nonDerivativeHolding (a
+    starting position) instead of nonDerivativeTransaction (a trade), since
+    nothing was actually transacted yet. Reuses the same namespace-free
+    helpers as parse_form4_xml. One record per filing (unlike Form 4's
+    multi-row shape) — a Form 3 states a single point-in-time position, so
+    holdings across multiple nonDerivativeHolding blocks (e.g. direct +
+    indirect) are summed into one shares_owned total.
+    """
+    root = ET.fromstring(xml_text)
+    ticker = _text(_find(root, "issuerTradingSymbol")).upper()
+    cik = _text(_find(root, "issuerCik")) or _text(_find(root, "cik"))
+    owner_name = _text(_find(root, "rptOwnerName"))
+    owner_cik = _text(_find(root, "rptOwnerCik"))
+    if not ticker or not owner_cik:
+        return None
+
+    rel = _find(root, "reportingOwnerRelationship")
+    is_director = _flag(rel, "isDirector")
+    is_officer = _flag(rel, "isOfficer")
+    is_ten = _flag(rel, "isTenPercentOwner")
+    officer_title = ""
+    if rel is not None:
+        officer_title = _text(_find(rel, "officerTitle")) or _text(_find(root, "officerTitle"))
+
+    shares_owned = 0.0
+    for holding in _findall(root, "nonDerivativeHolding"):
+        post = _find(holding, "postTransactionAmounts")
+        if post is None:
+            continue
+        owned = _find(post, "sharesOwnedFollowingTransaction")
+        if owned is not None:
+            shares_owned += _num(owned)
+
+    period_el = _find(root, "periodOfReport")
+    period_of_report = ""
+    if period_el is not None:
+        period_of_report = _text(_find(period_el, "value")) or _text(period_el)
+
+    signature = _find(root, "ownerSignature")
+    signature_date = ""
+    if signature is not None:
+        signature_date = _text(_find(signature, "signatureDate"))
+
+    return {
+        "accession": accession,
+        "ticker": ticker,
+        "issuer_cik": cik,
+        "owner_name": owner_name,
+        "owner_cik": owner_cik,
+        "is_director": is_director,
+        "is_officer": is_officer,
+        "is_ten_percent": is_ten,
+        "officer_title": officer_title,
+        "shares_owned": shares_owned,
+        "period_of_report": period_of_report,
+        "signature_date": signature_date,
+        "filing_url": filing_url,
+    }
+
+
 def _flag(rel: Optional[ET.Element], name: str) -> bool:
     if rel is None:
         return False

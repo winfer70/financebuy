@@ -39,6 +39,7 @@ from ..logging_config import configure_structlog
 from .heartbeat import write_worker_heartbeat
 from .insider_monitor import poll_insider_filings  # noqa: F401 — registered in WorkerSettings
 from .form144_monitor import poll_form144_filings  # noqa: F401 — registered in WorkerSettings
+from .form3_monitor import poll_form3_filings  # noqa: F401 — registered in WorkerSettings
 from .finra_short_interest import poll_short_interest  # noqa: F401 — registered in WorkerSettings
 from .scanner_worker import run_scanner  # noqa: F401 — registered in WorkerSettings
 from ..services.degiro_sync import sync_degiro_portfolio  # noqa: F401 — registered in WorkerSettings
@@ -1026,6 +1027,7 @@ class WorkerSettings:
         evaluate_closed_trade,
         poll_insider_filings,
         poll_form144_filings,
+        poll_form3_filings,
         poll_short_interest,
     ]
     queue_name = "arq:trading"
@@ -1036,6 +1038,9 @@ class WorkerSettings:
         # (see form144_monitor.py), it just needs to be on file before the
         # matching Form 4 sell shows up so that alert can reference it.
         cron(poll_form144_filings, minute={0, 15, 30, 45}),
+        # Same reasoning as 144 — a Form 3 alone doesn't alert, it just needs
+        # to be on file before that owner's first Form 4 sell shows up.
+        cron(poll_form3_filings, minute={5, 20, 35, 50}),
         # FINRA only republishes every two weeks — daily is plenty, and the
         # settlement-date scan is cached per-day regardless.
         cron(poll_short_interest, hour=6, minute=0),

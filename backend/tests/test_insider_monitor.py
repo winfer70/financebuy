@@ -92,6 +92,7 @@ def _deps_multi(
     fetch_track_record=None,
     fetch_144_notice=None,
     fetch_short_interest=None,
+    fetch_form3_baseline=None,
 ):
     """Multi-user CycleDeps — exercises the new load_books path directly,
     as production code (poll_insider_filings) now does."""
@@ -113,6 +114,7 @@ def _deps_multi(
         fetch_track_record=fetch_track_record,
         fetch_144_notice=fetch_144_notice,
         fetch_short_interest=fetch_short_interest,
+        fetch_form3_baseline=fetch_form3_baseline,
         ticker_sectors={"AAPL": "Technology", "OGN": "Healthcare"},
         pause_s=0.0,
     ), notifies
@@ -447,6 +449,74 @@ async def test_no_short_interest_note_when_none_on_file():
 
 
 @pytest.mark.asyncio
+async def test_form3_baseline_note_appended_to_sell_telegram_body():
+    """FORM4 fixture sells 2000 shares — a Form 3 baseline of 20000 shares
+    means this sale is exactly 10% of the owner's initial stake."""
+    xml = FORM4.replace("<transactionCode>P</transactionCode>", "<transactionCode>S</transactionCode>")
+
+    class _FakeBaseline:
+        shares_owned = Decimal("20000")
+        period_of_report = None
+
+    async def _fetch_form3(owner_cik, ticker):
+        return _FakeBaseline()
+
+    store = MemoryFilingStore()
+    holder = uuid.uuid4()
+    deps, notifies = _deps_multi(
+        {holder: _book(held_tickers={"AAPL"})}, fetch_form3_baseline=_fetch_form3
+    )
+    await run_insider_cycle(MapFetcher(_mapping(xml=xml)), store, deps)
+
+    assert len(notifies) == 1
+    body = notifies[0]["body"]
+    assert "10%" in body
+    assert "initial 20,000-share stake" in body
+
+
+@pytest.mark.asyncio
+async def test_no_form3_lookup_attempted_for_buy_filings():
+    called = False
+
+    async def _fetch_form3(owner_cik, ticker):
+        nonlocal called
+        called = True
+        return None
+
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi({}, primary_user_id=uuid.uuid4(), fetch_form3_baseline=_fetch_form3)
+    await run_insider_cycle(MapFetcher(_mapping()), store, deps)  # default FORM4 is a "P" buy
+    assert len(notifies) == 1
+    assert called is False
+
+
+@pytest.mark.asyncio
+async def test_no_form3_note_when_no_baseline_on_file():
+    xml = FORM4.replace("<transactionCode>P</transactionCode>", "<transactionCode>S</transactionCode>")
+
+    async def _fetch_form3(owner_cik, ticker):
+        return None
+
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi(
+        {uuid.uuid4(): _book(held_tickers={"AAPL"})}, fetch_form3_baseline=_fetch_form3
+    )
+    await run_insider_cycle(MapFetcher(_mapping(xml=xml)), store, deps)
+    assert len(notifies) == 1
+    assert "initial" not in notifies[0]["body"].lower()
+
+
+@pytest.mark.asyncio
+async def test_no_form3_note_when_fetch_form3_baseline_unset():
+    xml = FORM4.replace("<transactionCode>P</transactionCode>", "<transactionCode>S</transactionCode>")
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi({uuid.uuid4(): _book(held_tickers={"AAPL"})})
+    await run_insider_cycle(MapFetcher(_mapping(xml=xml)), store, deps)
+    assert len(notifies) == 1
+    assert "initial" not in notifies[0]["body"].lower()
+
+
+@pytest.mark.asyncio
 async def test_poll_skips_without_user_agent(monkeypatch):
     monkeypatch.delenv("SEC_USER_AGENT", raising=False)
     result = await poll_insider_filings({})
@@ -487,6 +557,14 @@ def test_worker_registers_short_interest_job():
     assert any(getattr(fn, "__name__", "") == "poll_short_interest" for fn in WorkerSettings.functions)
     cron_fns = [c.coroutine.__name__ if hasattr(c, "coroutine") else str(c) for c in WorkerSettings.cron_jobs]
     assert "poll_short_interest" in cron_fns
+
+
+def test_worker_registers_form3_job():
+    from app.trading.worker import WorkerSettings
+
+    assert any(getattr(fn, "__name__", "") == "poll_form3_filings" for fn in WorkerSettings.functions)
+    cron_fns = [c.coroutine.__name__ if hasattr(c, "coroutine") else str(c) for c in WorkerSettings.cron_jobs]
+    assert "poll_form3_filings" in cron_fns
 
 
 def test_news_worker_defaults_to_hermes_and_key_fallback():

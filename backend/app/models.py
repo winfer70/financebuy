@@ -1307,3 +1307,41 @@ class Form144Notice(Base):
     notice_date = Column(Date, nullable=True)
     filing_url = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class Form3Statement(Base):
+    """One Form 3 (Initial Statement of Beneficial Ownership) ingested from
+    EDGAR — filed when someone *becomes* an insider (new officer, director,
+    or 10%+ owner), stating their starting position before any Form 4
+    activity exists.
+
+    Same ownershipDocument XML family as Form 4 (parse_form3_xml reuses its
+    helpers) — a single point-in-time holding, not a transaction, so there's
+    no price/date/code, just shares_owned as of period_of_report.
+
+    Gives a baseline for a first-ever Form 4 sale — insider_monitor.py's
+    sell-gate path correlates by (owner_cik, ticker) and computes what
+    fraction of this starting position a sale represents ("sold 10% of
+    initial grant" vs "sold 80%").
+    """
+
+    __tablename__ = "form3_statements"
+    __table_args__ = (
+        UniqueConstraint("accession", name="uq_form3_statements_accession"),
+        Index("idx_form3_statements_owner_ticker", "owner_cik", "ticker"),
+    )
+
+    statement_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    accession = Column(String(25), nullable=False)
+    ticker = Column(String(20), nullable=False)
+    issuer_cik = Column(String(10), nullable=True)
+    owner_name = Column(String(256), nullable=True)
+    owner_cik = Column(String(10), nullable=True)
+    is_director = Column(Boolean, nullable=False, server_default="false")
+    is_officer = Column(Boolean, nullable=False, server_default="false")
+    is_ten_percent = Column(Boolean, nullable=False, server_default="false")
+    officer_title = Column(String(128), nullable=True)
+    shares_owned = Column(Numeric(18, 4), nullable=True)
+    period_of_report = Column(Date, nullable=True)
+    filing_url = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

@@ -13,6 +13,16 @@ a 90-day window and appends a "Pre-announced via Form 144 on <date> for
 <shares> sh ... — not a surprise" line to the Telegram advice. Also surfaced
 as `pending_144` in `GET /insider/owners/{cik}`.
 
+**Shipped (2026-09-08)**: Form 3 — same `ownershipDocument` XML family as
+Form 4 (verified against a real live filing: First Breach, Inc. / Andrew
+Pearlman), just `nonDerivativeHolding` (a starting position) instead of
+`nonDerivativeTransaction`. `parse_form3_xml()` added directly to
+`insider_edgar.py` alongside `parse_form4_xml()` since they share every
+helper; `form3_monitor.py` polls at the same cadence as Form 144.
+`Form3Statement` table (migration 0038). `insider_monitor.py`'s sell-gate
+path correlates by (owner_cik, ticker) and appends "This sale is X% of
+their initial N-share stake" to the advice.
+
 **Shipped (2026-09-08)**: FINRA biweekly short interest — the api.finra.org
 Query API turned out to require registered API credentials for anything
 past ~2020 (verified live: `group/otcMarket/name/consolidatedShortInterest`
@@ -194,8 +204,7 @@ These aren't SEC filings and need their own poller module (not a fit for
 
 1. ~~**Form 144**~~ — shipped 2026-09-08, see top of doc.
 2. ~~**FINRA short interest**~~ — shipped 2026-09-08, see top of doc.
-3. **Form 3** — small addition, mostly for owner-history context rather than a new
-   alert type; do it opportunistically once #1 is in.
+3. ~~**Form 3**~~ — shipped 2026-09-08, see top of doc.
 4. **Form 13D/13G** — highest per-filing signal value but more parsing/judgment
    work (free-text "Item 4"); worth it once the above are stable.
 5. **Form 8-K** — valuable but only if the portfolio-ticker filter is built first;

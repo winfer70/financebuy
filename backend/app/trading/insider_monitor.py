@@ -36,6 +36,7 @@ from .insider_edgar import (
 )
 from .finra_short_interest import get_latest_short_interest
 from .form144_monitor import get_recent_144_notice
+from .form3_monitor import get_form3_baseline
 from .insider_gate import BookSnapshot, GateResult, Integrity, evaluate_filing, sector_exposure
 from .insider_track_record import compute_track_record
 from .market_context import (
@@ -269,6 +270,10 @@ class CycleDeps:
     # from FINRA's biweekly data. Optional so existing tests/callers are
     # unaffected.
     fetch_short_interest: Optional[Callable] = None
+    # (owner_cik, ticker) -> Form3Statement | None — the owner's starting
+    # position, used to show what fraction of it a sell represents.
+    # Optional so existing tests/callers are unaffected.
+    fetch_form3_baseline: Optional[Callable] = None
     # New, multi-user path: returns dict[user_id, BookSnapshot], one book per
     # user who has open positions. When set, run_insider_cycle evaluates and
     # notifies each *holder* of the filed ticker separately (their own
@@ -437,6 +442,20 @@ def _format_144_note(notice) -> str:
     return " ".join(parts)
 
 
+def _format_form3_note(baseline, shares_sold: float) -> Optional[str]:
+    """Turns a matched Form3Statement into a 'fraction of initial stake'
+    line — 'sold 10% of their initial grant' reads very differently than
+    'sold 80%', and neither is visible from the Form 4 sale alone."""
+    if not baseline or not baseline.shares_owned or shares_sold <= 0:
+        return None
+    initial = float(baseline.shares_owned)
+    if initial <= 0:
+        return None
+    pct = (shares_sold / initial) * 100
+    as_of = f" (Form 3, {baseline.period_of_report.isoformat()})" if baseline.period_of_report else " (Form 3)"
+    return f"This sale is {pct:.0f}% of their initial {initial:,.0f}-share stake{as_of}."
+
+
 async def run_insider_cycle(
     fetcher: EdgarFetcher,
     store: FilingStore,
@@ -546,6 +565,7 @@ async def run_insider_cycle(
                 track_record_label = None
                 notice_144_label = None
                 short_interest = None
+                form3_label = None
                 fetched_shared = False
 
                 for uid, book in targets.items():
@@ -593,6 +613,14 @@ async def run_insider_cycle(
                                     notice_144_label = _format_144_note(notice)
                             if deps.fetch_short_interest:
                                 short_interest = await _maybe_await(deps.fetch_short_interest(ticker))
+                            if code == "S" and deps.fetch_form3_baseline:
+                                baseline = await _maybe_await(
+                                    deps.fetch_form3_baseline(row.get("owner_cik") or "", ticker)
+                                )
+                                if baseline is not None:
+                                    form3_label = _format_form3_note(
+                                        baseline, float(row.get("shares") or 0)
+                                    )
                             fetched_shared = True
                         pos_raw = (book.positions or {}).get(ticker)
                         position = PositionBrief(**pos_raw) if pos_raw else None
@@ -623,6 +651,8 @@ async def run_insider_cycle(
                             body = f"{body}\n\nTrack record: {track_record_label}"
                         if notice_144_label:
                             body = f"{body}\n\n{notice_144_label}"
+                        if form3_label:
+                            body = f"{body}\n\n{form3_label}"
                     if gate.in_app:
                         await store.add_rule_alert(uid, gate, row, body)
                         stats["in_app"] += 1
@@ -722,6 +752,7 @@ async def poll_insider_filings(ctx: dict) -> dict:
             fetch_track_record=lambda rows, t: loop.run_in_executor(None, _track_record, rows, t),
             fetch_144_notice=lambda cik, t: get_recent_144_notice(session, cik, t),
             fetch_short_interest=lambda t: get_latest_short_interest(session, t),
+            fetch_form3_baseline=lambda cik, t: get_form3_baseline(session, cik, t),
             notify=_notify,
             primary_user_id=primary_user_id,
             ticker_sectors=sectors,
