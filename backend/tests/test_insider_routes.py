@@ -23,9 +23,9 @@ COVERAGE SCOPE:
 """
 import os
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 os.environ.setdefault(
     "JWT_SECRET",
@@ -212,6 +212,93 @@ class TestOwnerBreakdown:
         resp = client.get("/api/v1/insider/owners/0001214156")
         assert resp.status_code == 404
 
+class TestOwnerBreakdownTrackRecord:
+    def test_win_rate_and_label_computed_from_forward_returns(self, auth_client):
+        from app.routes.market import OHLCVBar, OHLCVResponse
+
+        client, db, _user = auth_client
+        today = date.today()
+        d_p, d_p_future = today - timedelta(days=60), today - timedelta(days=30)
+        d_s, d_s_future = today - timedelta(days=45), today - timedelta(days=15)
+
+        rows = [
+            _mock_filing(transaction_code="P", acquired_disposed="A", transaction_date=d_p, shares=Decimal("1000")),
+            _mock_filing(transaction_code="S", acquired_disposed="D", transaction_date=d_s, shares=Decimal("500")),
+        ]
+        db.execute.return_value = make_scalars_result(rows)
+
+        bars = sorted(
+            [
+                OHLCVBar(date=d_p.isoformat(), open=100, high=100, low=100, close=100, volume=0),
+                OHLCVBar(date=d_s.isoformat(), open=105, high=105, low=105, close=105, volume=0),
+                OHLCVBar(date=d_s_future.isoformat(), open=95, high=95, low=95, close=95, volume=0),
+                OHLCVBar(date=d_p_future.isoformat(), open=110, high=110, low=110, close=110, volume=0),
+            ],
+            key=lambda b: b.date,
+        )
+        series = OHLCVResponse(bars=bars)
+
+        with patch("app.routes.insider.get_ohlcv_series", AsyncMock(return_value=series)):
+            resp = client.get("/api/v1/insider/owners/0001214156", params={"ticker": "AAPL"})
+
+        assert resp.status_code == 200
+        tr = resp.json()["track_record"]
+        assert tr is not None
+        assert tr["sample_size"] == 2
+        assert tr["evaluated"] == 2
+        # Buy +10% (100->110), sell -9.52% price move but aligned +9.52% (a
+        # decline after a sell is the "correct" outcome for that direction).
+        assert tr["win_rate"] == 1.0
+        assert tr["avg_aligned_return_pct"] == pytest.approx(9.76, abs=0.01)
+        assert "Favorable" in tr["label"]
+
+    def test_none_without_ticker_filter(self, auth_client):
+        client, db, _user = auth_client
+        rows = [
+            _mock_filing(transaction_code="P", acquired_disposed="A"),
+            _mock_filing(transaction_code="S", acquired_disposed="D"),
+        ]
+        db.execute.return_value = make_scalars_result(rows)
+
+        resp = client.get("/api/v1/insider/owners/0001214156")
+        assert resp.status_code == 200
+        assert resp.json()["track_record"] is None
+
+    def test_none_when_fewer_than_two_open_market_trades(self, auth_client):
+        client, db, _user = auth_client
+        rows = [_mock_filing(transaction_code="P", acquired_disposed="A")]
+        db.execute.return_value = make_scalars_result(rows)
+
+        resp = client.get("/api/v1/insider/owners/0001214156", params={"ticker": "AAPL"})
+        assert resp.status_code == 200
+        assert resp.json()["track_record"] is None
+
+    def test_too_recent_to_score_returns_explanatory_label_not_none(self, auth_client):
+        from app.routes.market import OHLCVBar, OHLCVResponse
+
+        client, db, _user = auth_client
+        today = date.today()
+        rows = [
+            _mock_filing(transaction_code="P", acquired_disposed="A", transaction_date=today - timedelta(days=5)),
+            _mock_filing(transaction_code="S", acquired_disposed="D", transaction_date=today - timedelta(days=2)),
+        ]
+        db.execute.return_value = make_scalars_result(rows)
+        series = OHLCVResponse(bars=[
+            OHLCVBar(date=today.isoformat(), open=100, high=100, low=100, close=100, volume=0)
+        ])
+
+        with patch("app.routes.insider.get_ohlcv_series", AsyncMock(return_value=series)):
+            resp = client.get("/api/v1/insider/owners/0001214156", params={"ticker": "AAPL"})
+
+        assert resp.status_code == 200
+        tr = resp.json()["track_record"]
+        assert tr is not None
+        assert tr["evaluated"] == 0
+        assert tr["win_rate"] is None
+        assert "Not enough time" in tr["label"]
+
+
+class TestOwnerBreakdownValidation:
     def test_400_when_cik_blank(self, auth_client):
         client, _db, _user = auth_client
 

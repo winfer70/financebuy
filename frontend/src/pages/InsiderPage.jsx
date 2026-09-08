@@ -32,6 +32,47 @@ const COLUMNS = [
   { key: "stake_pct", label: "STAKE %" },
 ];
 
+// SEC Form 4 transaction codes — https://www.sec.gov/about/forms/form4data.pdf
+const CODE_LABELS = {
+  P: "Open market or private purchase",
+  S: "Open market or private sale",
+  A: "Grant, award, or other acquisition",
+  D: "Sale or transfer to the issuer",
+  F: "Tax withholding (shares withheld to pay tax on a vest)",
+  M: "Exercise or conversion of a derivative security",
+  G: "Gift",
+  C: "Conversion of a derivative security",
+  V: "Transaction voluntarily reported earlier than required",
+  I: "Discretionary transaction under Rule 16b-3",
+  J: "Other acquisition or disposition (see filing footnotes)",
+  U: "Disposition pursuant to a tender offer",
+  W: "Acquisition or disposition by will or the laws of descent",
+  Z: "Deposit into or withdrawal from a voting trust",
+  X: "Exercise of an in-the-money or at-the-money option",
+  K: "Transaction in an equity swap or other derivative",
+  H: "Expiration of a short derivative position",
+  E: "Expiration of a long derivative position",
+  O: "Exercise of an out-of-the-money option",
+};
+const CODE_LEGEND_TITLE = Object.entries(CODE_LABELS)
+  .map(([code, label]) => `${code} — ${label}`)
+  .join("\n");
+
+function codeTitle(code) {
+  const c = (code || "").toUpperCase();
+  return CODE_LABELS[c] ? `${c} — ${CODE_LABELS[c]}` : code;
+}
+
+/** API dates arrive as "YYYY-MM-DD"; render as "DD-MM-YYYY". */
+function fmtDate(v) {
+  if (!v) return "—";
+  const s = String(v).slice(0, 10);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return s;
+  const [, y, mo, d] = m;
+  return `${d}-${mo}-${y}`;
+}
+
 function fmtNum(v, digits = 0) {
   if (v == null || Number.isNaN(Number(v))) return "—";
   return Number(v).toLocaleString(undefined, {
@@ -209,13 +250,14 @@ export function InsiderPage({ token, onViewChart }) {
                     <th
                       key={c.key}
                       onClick={() => onSort(c.key)}
+                      title={c.key === "transaction_code" ? `Transaction codes:\n${CODE_LEGEND_TITLE}` : undefined}
                       style={{
                         textAlign: "left", padding: "8px 10px", cursor: "pointer",
                         color: sort === c.key ? "var(--green)" : "var(--mid)",
                         borderBottom: "1px solid var(--border)", letterSpacing: 0.6, whiteSpace: "nowrap",
                       }}
                     >
-                      {c.label}{sort === c.key ? (order === "asc" ? " ↑" : " ↓") : ""}
+                      {c.label}{c.key === "transaction_code" ? " ⓘ" : ""}{sort === c.key ? (order === "asc" ? " ↑" : " ↓") : ""}
                     </th>
                   ))}
                   <th style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)", color: "var(--mid)" }}>10b5-1</th>
@@ -237,7 +279,7 @@ export function InsiderPage({ token, onViewChart }) {
                       style={{ borderBottom: "1px solid var(--border)", cursor: row.owner_cik ? "pointer" : "default" }}
                       onClick={() => openOwner(row)}
                     >
-                      <td style={{ padding: "7px 10px", color: "var(--text)" }}>{row.transaction_date || "—"}</td>
+                      <td style={{ padding: "7px 10px", color: "var(--text)" }}>{fmtDate(row.transaction_date)}</td>
                       <td style={{ padding: "7px 10px" }}>
                         <button
                           type="button"
@@ -254,7 +296,10 @@ export function InsiderPage({ token, onViewChart }) {
                         <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.owner_name || "—"}</div>
                         <div style={{ color: "var(--mid)", fontSize: 10 }}>{roleLabel(row)}</div>
                       </td>
-                      <td style={{ padding: "7px 10px", color: sell ? "var(--red)" : "var(--green)", fontWeight: 600 }}>
+                      <td
+                        title={codeTitle(row.transaction_code)}
+                        style={{ padding: "7px 10px", color: sell ? "var(--red)" : "var(--green)", fontWeight: 600, cursor: "help" }}
+                      >
                         {row.transaction_code}
                       </td>
                       <td style={{ padding: "7px 10px", color: "var(--text)" }}>{fmtNum(row.shares, 0)}</td>
@@ -329,15 +374,46 @@ export function InsiderPage({ token, onViewChart }) {
                 <Stat label="SELL GAP" value={owner.avg_sell_interval_days != null ? `${owner.avg_sell_interval_days.toFixed(0)}d` : "—"} />
                 <Stat label="WINDOW" value={`${owner.window_days}d`} />
               </div>
+              {owner.track_record && (
+                <div style={{
+                  background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 4,
+                  padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6,
+                }}>
+                  <div style={{ color: "var(--mid)", letterSpacing: 1, fontSize: 10 }}>TRACK RECORD &amp; OUTLOOK</div>
+                  {owner.track_record.win_rate != null && (
+                    <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+                      <span style={{
+                        fontWeight: 600, fontSize: 13,
+                        color: owner.track_record.win_rate >= 0.65 ? "var(--green)"
+                          : owner.track_record.win_rate <= 0.35 ? "var(--red)" : "var(--text)",
+                      }}>
+                        {(owner.track_record.win_rate * 100).toFixed(0)}% hit rate
+                      </span>
+                      <span style={{ color: "var(--mid)" }}>
+                        avg {owner.track_record.avg_aligned_return_pct >= 0 ? "+" : ""}
+                        {owner.track_record.avg_aligned_return_pct.toFixed(1)}% / {owner.track_record.horizon_days}d
+                        {" "}({owner.track_record.evaluated} trade{owner.track_record.evaluated === 1 ? "" : "s"} scored)
+                      </span>
+                    </div>
+                  )}
+                  <div style={{ color: "var(--text)", lineHeight: 1.5 }}>{owner.track_record.label}</div>
+                  <div style={{ color: "var(--mid)", fontSize: 9, fontStyle: "italic" }}>
+                    {owner.track_record.basis} Historical pattern, not a guarantee of future performance.
+                  </div>
+                </div>
+              )}
               <div style={{ color: "var(--mid)", letterSpacing: 1, marginTop: 4 }}>TRANSACTIONS</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {(owner.transactions || []).slice().reverse().map((t, i) => (
                   <div key={`${t.accession}-${i}`} style={{ borderBottom: "1px solid var(--border)", paddingBottom: 6 }}>
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ color: (t.transaction_code || "").toUpperCase() === "S" ? "var(--red)" : "var(--green)" }}>
+                      <span
+                        title={codeTitle(t.transaction_code)}
+                        style={{ color: (t.transaction_code || "").toUpperCase() === "S" ? "var(--red)" : "var(--green)", cursor: "help" }}
+                      >
                         {t.transaction_code} {t.ticker}
                       </span>
-                      <span style={{ color: "var(--mid)" }}>{t.transaction_date || "—"}</span>
+                      <span style={{ color: "var(--mid)" }}>{fmtDate(t.transaction_date)}</span>
                     </div>
                     <div style={{ color: "var(--text)" }}>
                       {fmtNum(t.shares)} sh @ {t.price != null ? "$" + fmtNum(t.price, 2) : "—"} · {fmtMoney(t.notional)}

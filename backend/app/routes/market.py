@@ -458,6 +458,23 @@ async def get_quote(symbol: str, current_user=Depends(get_current_user)):
     return quote
 
 
+async def get_ohlcv_series(symbol: str, years: int) -> OHLCVResponse:
+    """Fetch (or reuse the cached) daily OHLCV history for a symbol.
+
+    Public wrapper around _fetch_ohlcv for callers outside this module (e.g.
+    the insider track-record calculation), sharing the same cache as
+    GET /market/ohlcv/{symbol}.
+    """
+    sym = symbol.upper()
+    cache_key = f"ohlcv:{sym}:{years}"
+    cached = _get_cached(cache_key, _OHLCV_TTL)
+    if cached:
+        return cached
+    result = await asyncio.to_thread(_fetch_ohlcv, sym, years)
+    _set_cached(cache_key, result)
+    return result
+
+
 @router.get("/ohlcv/{symbol}", response_model=OHLCVResponse)
 async def get_ohlcv(symbol: str, years: int = Query(default=5, ge=1, le=10),
                     current_user=Depends(get_current_user)):
