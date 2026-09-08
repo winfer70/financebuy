@@ -316,11 +316,14 @@ export function InsiderPage({ token, onViewChart }) {
                 <div style={{ color: "var(--mid)" }}>{owner.officer_title || "—"} · CIK {owner.owner_cik}</div>
                 {owner.ticker && <div style={{ color: "var(--green)", marginTop: 4 }}>{owner.ticker}</div>}
               </div>
+              <div style={{ color: "var(--mid)", fontSize: 10, lineHeight: 1.4 }}>
+                Acquired/disposed across all filing types (grants, exercises, withholding — not just open-market trades).
+              </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <Stat label="BUYS" value={`${owner.buy_count} / ${fmtNum(owner.buy_shares)} sh`} color="var(--green)" />
-                <Stat label="SELLS" value={`${owner.sell_count} / ${fmtNum(owner.sell_shares)} sh`} color="var(--red)" />
-                <Stat label="BUY $" value={fmtMoney(owner.buy_notional)} />
-                <Stat label="SELL $" value={fmtMoney(owner.sell_notional)} />
+                <Stat label="ACQUIRED" value={`${owner.buy_count} / ${fmtNum(owner.buy_shares)} sh`} color="var(--green)" />
+                <Stat label="DISPOSED" value={`${owner.sell_count} / ${fmtNum(owner.sell_shares)} sh`} color="var(--red)" />
+                <Stat label="ACQ $" value={fmtMoney(owner.buy_notional)} />
+                <Stat label="DISP $" value={fmtMoney(owner.sell_notional)} />
                 <Stat label="NET SH" value={fmtNum(owner.net_shares)} color={owner.net_shares >= 0 ? "var(--green)" : "var(--red)"} />
                 <Stat label="10b5-1" value={owner.pct_10b5_1 != null ? `${(owner.pct_10b5_1 * 100).toFixed(0)}%` : "—"} />
                 <Stat label="SELL GAP" value={owner.avg_sell_interval_days != null ? `${owner.avg_sell_interval_days.toFixed(0)}d` : "—"} />

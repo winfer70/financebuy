@@ -50,6 +50,7 @@ def _mock_filing(**overrides):
         is_director=True,
         is_officer=True,
         transaction_code="S",
+        acquired_disposed="D",
         shares=Decimal("2000"),
         price=Decimal("150.00"),
         notional=Decimal("300000.00"),
@@ -123,6 +124,7 @@ class TestOwnerBreakdown:
         rows = [
             _mock_filing(
                 transaction_code="P",
+                acquired_disposed="A",
                 transaction_date=date(2026, 1, 5),
                 shares=Decimal("1000"),
                 notional=Decimal("100000"),
@@ -130,6 +132,7 @@ class TestOwnerBreakdown:
             ),
             _mock_filing(
                 transaction_code="S",
+                acquired_disposed="D",
                 transaction_date=date(2026, 2, 4),
                 shares=Decimal("400"),
                 notional=Decimal("60000"),
@@ -137,6 +140,7 @@ class TestOwnerBreakdown:
             ),
             _mock_filing(
                 transaction_code="S",
+                acquired_disposed="D",
                 transaction_date=date(2026, 3, 6),
                 shares=Decimal("400"),
                 notional=Decimal("62000"),
@@ -158,6 +162,48 @@ class TestOwnerBreakdown:
         # 2 of 3 rows are 10b5-1.
         assert body["pct_10b5_1"] == pytest.approx(2 / 3)
         assert len(body["transactions"]) == 3
+
+    def test_grants_and_withholding_are_not_all_zero(self, auth_client):
+        """Regression test: an owner whose window has zero open-market P/S
+        trades (routine RSU grant + tax-withholding pair, the common case
+        for a compensation-heavy executive) must not show all-zero
+        acquired/disposed figures just because neither row is coded P or S.
+        acquired_disposed ("A" grant, "D" withholding) is the SEC form's own
+        flag and must drive the aggregation instead."""
+        client, db, _user = auth_client
+        rows = [
+            _mock_filing(
+                transaction_code="A",  # award/grant
+                acquired_disposed="A",
+                transaction_date=date(2026, 1, 15),
+                shares=Decimal("5000"),
+                price=Decimal("0"),
+                notional=Decimal("0"),
+                is_10b5_1=False,
+            ),
+            _mock_filing(
+                transaction_code="F",  # tax withholding on vest
+                acquired_disposed="D",
+                transaction_date=date(2026, 1, 15),
+                shares=Decimal("1800"),
+                price=Decimal("150.00"),
+                notional=Decimal("270000"),
+                is_10b5_1=False,
+            ),
+        ]
+        db.execute.return_value = make_scalars_result(rows)
+
+        resp = client.get("/api/v1/insider/owners/0001214156")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["buy_count"] == 1
+        assert body["buy_shares"] == 5000
+        assert body["sell_count"] == 1
+        assert body["sell_shares"] == 1800
+        assert body["net_shares"] == 3200
+        # Neither row is transaction_code "S", so sell cadence stays empty —
+        # that stat is intentionally scoped to genuine open-market sells.
+        assert body["avg_sell_interval_days"] is None
 
     def test_404_when_no_filings_in_window(self, auth_client):
         client, db, _user = auth_client

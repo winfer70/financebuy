@@ -200,18 +200,32 @@ async def owner_breakdown(
     txns = []
     for r in rows:
         code = (r.transaction_code or "").upper()
+        # Most Form 4 activity for a typical executive is grants (A), tax
+        # withholding on vests (F), and option exercises (M) rather than
+        # open-market P/S trades — counting only "P"/"S" left this panel
+        # showing all-zero figures for owners with real filings but no
+        # open-market trades in the window. acquired_disposed is the SEC
+        # form's own A/D flag and covers every transaction type, so it
+        # reflects the owner's real net share change; transaction_code is
+        # kept as a fallback for any older/malformed row missing it.
+        ad = (r.acquired_disposed or "").upper()
+        if not ad:
+            ad = "A" if code == "P" else "D" if code == "S" else ""
         sh = float(r.shares or 0)
         nt = float(r.notional or 0)
-        if code == "P":
+        if ad == "A":
             buy_count += 1
             buy_shares += sh
             buy_notional += nt
-        elif code == "S":
+        elif ad == "D":
             sell_count += 1
             sell_shares += sh
             sell_notional += nt
-            if r.transaction_date:
-                sell_dates.append(r.transaction_date)
+        # Sell cadence is specifically about open-market selling intent
+        # (e.g. a 10b5-1 plan's fixed schedule) — tax-withholding disposals
+        # on every vest would swamp this with noise unrelated to trading.
+        if code == "S" and r.transaction_date:
+            sell_dates.append(r.transaction_date)
         if r.is_10b5_1 is True:
             ten_b5 += 1
         txns.append(
