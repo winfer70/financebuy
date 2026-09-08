@@ -6,6 +6,9 @@ Provides internal endpoints for the self-improving scoring system:
   GET  /api/v1/feedback/internal/rules/active       — worker fetches current rules
   POST /api/v1/feedback/internal/rules              — learner posts new rules
   GET  /api/v1/feedback/internal/training-export    — future fine-tuning data export
+  GET  /api/v1/feedback/internal/watch-tickers      — worker fetches tickers to
+                                                        search for directly (open
+                                                        positions + recent Form 4 filers)
 
 Background task:
   _outcome_checker_loop() — runs every 6 hours, checks actual stock price
@@ -32,8 +35,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..models import (
+    InsiderFiling,
     NewsArticle,
     NewsArticleTicker,
+    PortfolioPosition,
     ScoreOutcome,
     ScoringRule,
 )
@@ -348,6 +353,52 @@ async def get_active_rules(
         raise HTTPException(status_code=404, detail="No active scoring rules.")
 
     return ScoringRuleOut.from_orm(rule)
+
+
+# How far back to look for Form 4 filers when building the watch-ticker list.
+_WATCH_TICKER_FILING_LOOKBACK_DAYS = 21
+
+# Hard cap on tickers returned — keeps the worker's per-cycle Google/Ollama
+# load bounded even if the portfolio + filing set grows large.
+_WATCH_TICKER_LIMIT = 60
+
+
+@router.get("/internal/watch-tickers")
+async def get_watch_tickers(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return tickers the news worker should search for directly.
+
+    General-market RSS feeds (Yahoo/Google/Finviz/MarketWatch) rarely mention
+    small/micro-cap names by symbol, so tickers that only matter because of
+    an open position or a recent Form 4 filing can go indefinitely without a
+    single scored article — not a scoring failure, just a coverage gap. This
+    endpoint hands the worker a bounded watchlist (open positions across all
+    users + tickers with a Form 4 in the trailing window) so it can run a
+    targeted search for each instead of waiting for incidental coverage.
+
+    Returns:
+        {"tickers": [...]} — deduplicated, upper-cased, capped list.
+    """
+    _verify_internal_auth(request)
+
+    since = datetime.now(timezone.utc).date() - timedelta(days=_WATCH_TICKER_FILING_LOOKBACK_DAYS)
+
+    held_result = await db.execute(
+        select(PortfolioPosition.ticker).where(PortfolioPosition.closed_at.is_(None)).distinct()
+    )
+    filed_result = await db.execute(
+        select(InsiderFiling.ticker).where(InsiderFiling.transaction_date >= since).distinct()
+    )
+
+    tickers: set = set()
+    for row in (*held_result.all(), *filed_result.all()):
+        t = (row[0] or "").strip().upper()
+        if t:
+            tickers.add(t)
+
+    return {"tickers": sorted(tickers)[:_WATCH_TICKER_LIMIT]}
 
 
 @router.post("/internal/rules", response_model=ScoringRuleOut)
