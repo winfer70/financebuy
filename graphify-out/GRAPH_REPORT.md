@@ -5,8 +5,8 @@
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 2912 nodes · 10071 edges · 136 communities detected
-- Extraction: 31% EXTRACTED · 69% INFERRED · 0% AMBIGUOUS · INFERRED: 6999 edges (avg confidence: 0.5)
+- 2939 nodes · 10142 edges · 136 communities detected
+- Extraction: 31% EXTRACTED · 69% INFERRED · 0% AMBIGUOUS · INFERRED: 7042 edges (avg confidence: 0.5)
 - Token cost: 0 input · 0 output
 
 ## God Nodes (most connected - your core abstractions)
@@ -37,11 +37,11 @@
 
 ### Community 0 - "Community 0"
 Cohesion: 0.02
-Nodes (293): _apply_stage_result(), _build_soft_stop_report(), _check_condition(), _check_soft_stops(), evaluate_one_soft_stop(), evaluate_price_alerts(), _fetch_daily_close(), _fetch_price() (+285 more)
+Nodes (252): admin_check(), list_audit_logs(), list_users(), lock_account(), lock_user(), admin.py — Admin-only routes for TickerTap.  Provides endpoints for user and a, Lock or unlock a brokerage account atomically.      Eliminates duplication bet, List all registered users, ordered newest-first.      Args:         db: Async (+244 more)
 
 ### Community 1 - "Community 1"
-Cohesion: 0.02
-Nodes (247): admin_check(), list_audit_logs(), list_users(), lock_account(), lock_user(), admin.py — Admin-only routes for TickerTap.  Provides endpoints for user and a, Lock or unlock a brokerage account atomically.      Eliminates duplication bet, List all registered users, ordered newest-first.      Args:         db: Async (+239 more)
+Cohesion: 0.03
+Nodes (252): _apply_stage_result(), _build_soft_stop_report(), _check_condition(), _check_soft_stops(), evaluate_one_soft_stop(), evaluate_price_alerts(), _fetch_daily_close(), _fetch_price() (+244 more)
 
 ### Community 2 - "Community 2"
 Cohesion: 0.01
@@ -57,163 +57,163 @@ Nodes (180): LLMTranspileError, Raised when LLM translation or validation fails.
 
 ### Community 5 - "Community 5"
 Cohesion: 0.03
-Nodes (105): concern_level(), ConsensusBrief, format_insider_telegram(), format_news_digest(), format_volume_compact(), is_c_suite(), OwnerPattern, _plan_line() (+97 more)
+Nodes (101): concern_level(), ConsensusBrief, format_insider_telegram(), format_news_digest(), format_volume_compact(), is_c_suite(), OwnerPattern, _plan_line() (+93 more)
 
 ### Community 6 - "Community 6"
-Cohesion: 0.06
-Nodes (100): _change_pct_to_score(), _check_article_outcomes(), create_scoring_rules(), export_training_data(), _fetch_outcome_prices(), get_active_rules(), get_outcome_data(), get_watch_tickers() (+92 more)
-
-### Community 7 - "Community 7"
 Cohesion: 0.08
 Nodes (88): _aggregate_bars(), ExchangeRateResponse, _fetch_earnings_dates_set(), _fetch_events(), _fetch_exchange_rates(), _fetch_fundamentals(), _fetch_ohlcv(), _fetch_ohlcv_interval() (+80 more)
 
-### Community 8 - "Community 8"
+### Community 7 - "Community 7"
 Cohesion: 0.05
 Nodes (63): _assert_account_owner(), Config, HoldingOut, list_holdings(), holdings.py — Holdings (portfolio positions) routes for TickerTap.  Exposes a, Output schema for a single holding position.      Attributes:         holding, Verify the account belongs to the given user. Raises HTTP 403 if not.      Use, List holdings for the given account with pagination (P7.3).      Ownership of (+55 more)
 
+### Community 8 - "Community 8"
+Cohesion: 0.07
+Nodes (77): _change_pct_to_score(), _check_article_outcomes(), create_scoring_rules(), export_training_data(), _fetch_outcome_prices(), get_active_rules(), get_outcome_data(), get_watch_tickers() (+69 more)
+
 ### Community 9 - "Community 9"
 Cohesion: 0.04
-Nodes (67): _delete_manual_positions(), _extract_cash_balance(), _flatten_position(), _get_account_overview(), _get_int_account(), _get_portfolio(), _get_products_info(), _get_stop_orders() (+59 more)
+Nodes (78): cleanup_dead_letters(), _connect(), enqueue(), enqueue_batch(), get_pending(), increment_retries(), init_db(), mark_done() (+70 more)
 
 ### Community 10 - "Community 10"
 Cohesion: 0.04
-Nodes (65): _analyze_single_symbol(), _audit(), browse_marketplace(), clone_strategy(), _compute_exit_analysis(), _compute_score(), _compute_trend(), create_composed_strategy() (+57 more)
+Nodes (67): _delete_manual_positions(), _extract_cash_balance(), _flatten_position(), _get_account_overview(), _get_int_account(), _get_portfolio(), _get_products_info(), _get_stop_orders() (+59 more)
 
 ### Community 11 - "Community 11"
+Cohesion: 0.04
+Nodes (65): _analyze_single_symbol(), _audit(), browse_marketplace(), clone_strategy(), _compute_exit_analysis(), _compute_score(), _compute_trend(), create_composed_strategy() (+57 more)
+
+### Community 12 - "Community 12"
+Cohesion: 0.05
+Nodes (43): AuthOut, create_access_token(), decode_access_token(), hash_password(), login(), LoginIn, auth.py — Core authentication utilities for TickerTap.  Provides password hash, Raise on startup if the JWT secret is still the insecure default.      Called (+35 more)
+
+### Community 13 - "Community 13"
 Cohesion: 0.06
 Nodes (44): annualized_return(), avg_loss(), avg_win(), benchmark_comparison(), calmar_ratio(), compute_all(), expectancy(), get_worker_metrics() (+36 more)
 
-### Community 12 - "Community 12"
+### Community 14 - "Community 14"
 Cohesion: 0.08
 Nodes (31): _adx(), _atr(), _bollinger_pctb(), _build_train_data(), _ema(), _engineer_features(), FeatureClassifier, _get_top_features() (+23 more)
 
-### Community 13 - "Community 13"
-Cohesion: 0.07
-Nodes (27): BaseHTTPMiddleware, CorrelationIDMiddleware, health(), metrics(), main.py — FastAPI application entry point for TickerTap.  Configures middlewar, Validate critical configuration on startup.      Performs the following checks, Injects security headers on every response.      Provides a defence-in-depth l, Reject requests whose Content-Length exceeds MAX_REQUEST_BODY_BYTES.      Prev (+19 more)
-
-### Community 14 - "Community 14"
+### Community 15 - "Community 15"
 Cohesion: 0.08
 Nodes (22): make_mock_item(), make_mock_watchlist(), make_scalar_count_result(), ============================================================================ TE, Tests for watchlist create, list, get, and delete operations., Valid name payload should return 201 with the new watchlist., Omitting the name field should return 422 Unprocessable Entity., User with no watchlists should receive an empty JSON array. (+14 more)
 
-### Community 15 - "Community 15"
+### Community 16 - "Community 16"
 Cohesion: 0.07
 Nodes (31): adx(), atr(), bollinger_bands(), crossover(), crossunder(), ema(), highest(), lowest() (+23 more)
 
-### Community 16 - "Community 16"
+### Community 17 - "Community 17"
 Cohesion: 0.07
 Nodes (20): make_mock_alert(), ============================================================================ TE, Symbols in lowercase should be stored and returned uppercase., An unrecognised condition value must fail Pydantic validation (422)., User already at the 50-alert cap should receive 400 Bad Request., User with 49 active alerts should be able to create one more., Tests for alert listing endpoint., User with no alerts should receive an empty JSON array. (+12 more)
 
-### Community 17 - "Community 17"
+### Community 18 - "Community 18"
 Cohesion: 0.08
 Nodes (30): FeatureResponse, health(), _load_models(), LSTMResponse, OHLCVRow, PatternResponse, predict_features(), predict_lstm() (+22 more)
 
-### Community 18 - "Community 18"
+### Community 19 - "Community 19"
 Cohesion: 0.1
 Nodes (27): _call_indicator(), _check_stop_loss(), _compute_indicators(), _eval_comparison(), _eval_condition(), _eval_logical(), _extract_price_series(), _generate_signals() (+19 more)
 
-### Community 19 - "Community 19"
+### Community 20 - "Community 20"
 Cohesion: 0.1
 Nodes (10): TelegramLinkRequest, ============================================================================ TES, This endpoint must work for a not-yet-registered visitor., A regular user's own JWT must not be able to call this — only         the bot's, TestCheckTelegramInvite, TestCreateTelegramInvite, TestLinkTelegramChat, TestRegisterWithTelegramInvite (+2 more)
 
-### Community 20 - "Community 20"
+### Community 21 - "Community 21"
 Cohesion: 0.09
 Nodes (17): make_mock_strategy(), ============================================================================ TE, GET /strategies without auth should return 401 or 403., Tests for single-strategy retrieval., Fetching an owned strategy by ID should return 200., Fetching a non-existent strategy should return 404., System strategies should be accessible to any authenticated user., Tests for the backtest queuing endpoint. (+9 more)
 
-### Community 21 - "Community 21"
+### Community 22 - "Community 22"
 Cohesion: 0.1
 Nodes (25): _et(), TEST SUITE: Scanner Session Detection MODULE UNDER TEST: app.trading.scanner_se, 4:00 PM ET is at/after the regular close; elapsed weight must be 1.0., project_daily_volume must return intraday_vol unchanged when elapsed_weight == 0, At 50% session elapsed, projected volume should be double the intraday volume., Build a timezone-aware datetime in US/Eastern for use in tests.      Args:, Saturday noon ET must yield 'closed' regardless of time., Monday 8:00 AM ET is within pre-market hours (4:00–9:30 AM). (+17 more)
 
-### Community 22 - "Community 22"
+### Community 23 - "Community 23"
 Cohesion: 0.15
 Nodes (17): FakePos, TEST SUITE: Two-stage soft-stop alerts MODULE UNDER TEST: app.trading.alert_wor, Mirrors modify_position: any actual soft-stop change clears stage state., Do not hit yfinance / news tables during unit tests., _session_with(), _stub_soft_stop_report(), test_both_channels_fail_does_not_mark_date(), test_changing_soft_stop_value_resets_stage_dates() (+9 more)
 
-### Community 23 - "Community 23"
+### Community 24 - "Community 24"
 Cohesion: 0.13
 Nodes (17): _api_get(), _api_post(), cmd_alerts(), cmd_analyze(), cmd_approve_refinement(), cmd_buy(), cmd_link(), cmd_pnl() (+9 more)
 
-### Community 24 - "Community 24"
+### Community 25 - "Community 25"
 Cohesion: 0.17
 Nodes (21): _action_button(), email.py — Email sending utilities for TickerTap.  Provides a generic send_ema, Generate a styled call-to-action button for emails.      Args:         url: T, Send an email via the configured SMTP server.      Args:         to_email: Re, Send a password reset email with a one-time link.      Args:         to_email, Send an email verification link for new account registration.      Args:, Send a verification email to the NEW email address for an email change.      A, Send an account reactivation email with a one-time link.      Args:         t (+13 more)
 
-### Community 25 - "Community 25"
+### Community 26 - "Community 26"
 Cohesion: 0.21
 Nodes (21): create_template(), delete_template(), get_template(), _get_template_or_404(), list_templates(), routes/chart_templates.py — Chart Template CRUD API endpoints.  Provides CRUD, Partially update a chart template (ownership enforced)., Delete a chart template (ownership enforced). (+13 more)
 
-### Community 26 - "Community 26"
+### Community 27 - "Community 27"
 Cohesion: 0.11
 Nodes (21): _aggregate_5min(), archive_intraday(), _daily_downsample(), downsample_daily(), _fetch_and_store_bars(), _get_active_symbols(), _is_market_open(), trading/archiver.py — Intraday data archiver worker.  Background worker that: (+13 more)
 
-### Community 27 - "Community 27"
+### Community 28 - "Community 28"
 Cohesion: 0.19
 Nodes (20): _accession_from_href(), _accession_from_title(), _doc_level_10b5(), _find(), _findall(), _flag(), _local(), _num() (+12 more)
 
-### Community 28 - "Community 28"
+### Community 29 - "Community 29"
 Cohesion: 0.15
 Nodes (19): _get_dividend_zones(), _get_earnings_zones(), _get_fomc_zones(), get_no_trade_zones(), _get_opex_dates(), _get_opex_zones(), is_in_no_trade_zone(), NoTradeZone (+11 more)
 
-### Community 29 - "Community 29"
+### Community 30 - "Community 30"
 Cohesion: 0.12
 Nodes (13): _get_cached(), _is_market_open(), YFinance Provider — MarketDataProvider implementation backed by yfinance.  Wra, Fetch OHLCV bars from yfinance and return normalised OHLCVBars.          Args:, Fetch the latest quote for *symbol* from yfinance.          Args:, Search for symbols matching *query* via yfinance.          Args:, Synchronous OHLCV fetch from yfinance.          Args:             sym:, Synchronous quote fetch from yfinance.          Args:             sym: Upper- (+5 more)
 
-### Community 30 - "Community 30"
-Cohesion: 0.14
-Nodes (19): cleanup_dead_letters(), _connect(), enqueue(), enqueue_batch(), get_pending(), increment_retries(), init_db(), mark_done() (+11 more)
-
 ### Community 31 - "Community 31"
+Cohesion: 0.15
+Nodes (11): _book(), test_gate_blocks_10b5(), test_gate_blocks_avoid_list(), test_gate_blocks_sector_cap(), test_gate_blocks_tiny_notional(), test_gate_critical_de_blocks_buy(), test_gate_officer_buy_passes(), test_gate_sell_held_10b5_small_stake_is_info() (+3 more)
+
+### Community 32 - "Community 32"
 Cohesion: 0.15
 Nodes (17): _call_indicator(), _compute_composed_indicators(), _eval_expression(), _eval_node(), _generate_composed_signals(), Strategy Composition Engine — evaluates a graph of indicator nodes and boolean, Recursively validate every node in the expression AST.      Args:         nod, Evaluate a pre-validated expression against a variable namespace.      Args: (+9 more)
 
-### Community 32 - "Community 32"
+### Community 33 - "Community 33"
 Cohesion: 0.16
 Nodes (17): _fire_webhooks(), _insert_notification(), notify(), notify_soft_stop(), trading/notifications.py — Unified notification dispatcher.  Delivers notifica, Send an email notification using the existing SMTP setup.      Args:, POST notification payload to all active webhooks for this event type.      Arg, This user's own linked Telegram chat (see telegram_invites.py's /link     flow) (+9 more)
 
-### Community 33 - "Community 33"
+### Community 34 - "Community 34"
 Cohesion: 0.11
 Nodes (17): auth_client(), make_all_result(), make_scalar_count_result(), make_scalar_result(), make_scalars_result(), mock_db_session(), mock_user(), ============================================================================ Sh (+9 more)
 
-### Community 34 - "Community 34"
+### Community 35 - "Community 35"
 Cohesion: 0.11
 Nodes (11): ============================================================================ TE, Integration tests for listing the current user's accounts., No accounts for this user should return an empty JSON array., A user with one account should receive a list of length 1., Requests without authentication should be rejected (401 or 403)., Integration tests for account creation endpoint., Valid payload should return 201 with account data., Omitting the required account_type field must return 422. (+3 more)
 
-### Community 35 - "Community 35"
-Cohesion: 0.17
-Nodes (17): fetch_all_news(), fetch_finviz(), fetch_google(), fetch_google_news_for_ticker(), fetch_marketwatch(), fetch_yahoo(), _make_article(), _parse_rss_date() (+9 more)
-
 ### Community 36 - "Community 36"
-Cohesion: 0.17
-Nodes (15): analyse_with_ollama(), build_analysis_prompt(), compute_statistics(), fetch_outcomes(), main(), _parse_analysis_json(), post_rules(), learner.py — TickerTap scoring accuracy analyser for the remote worker host. (+7 more)
+Cohesion: 0.25
+Nodes (17): _filed_result(), _held_result(), _mock_request(), ============================================================================ TES, Mock for the open-positions query: result.all() -> [(ticker,), ...]., Mock for the Form 4 filers query: result.all() ->     [(ticker, latest_transacti, test_blank_tickers_skipped(), test_capped_at_watch_ticker_limit() (+9 more)
 
 ### Community 37 - "Community 37"
 Cohesion: 0.17
-Nodes (15): build_learning_prompt(), compute_strategy_stats(), fetch_backtest_history(), learn_with_ollama(), main(), _parse_learning_json(), post_strategy_rules(), strategy_learner.py — Strategy performance learner for the remote worker host. (+7 more)
+Nodes (15): analyse_with_ollama(), build_analysis_prompt(), compute_statistics(), fetch_outcomes(), main(), _parse_analysis_json(), post_rules(), learner.py — TickerTap scoring accuracy analyser for the remote worker host. (+7 more)
 
 ### Community 38 - "Community 38"
 Cohesion: 0.17
-Nodes (15): build_research_prompt(), fetch_recent_backtests(), fetch_regime_summary(), main(), _parse_research_json(), post_recommendations(), strategy_researcher.py — Strategy research agent for the remote worker host., Fetch current market regime summary from Server A.      Returns:         Dict (+7 more)
+Nodes (15): build_learning_prompt(), compute_strategy_stats(), fetch_backtest_history(), learn_with_ollama(), main(), _parse_learning_json(), post_strategy_rules(), strategy_learner.py — Strategy performance learner for the remote worker host. (+7 more)
 
 ### Community 39 - "Community 39"
+Cohesion: 0.17
+Nodes (15): build_research_prompt(), fetch_recent_backtests(), fetch_regime_summary(), main(), _parse_research_json(), post_recommendations(), strategy_researcher.py — Strategy research agent for the remote worker host., Fetch current market regime summary from Server A.      Returns:         Dict (+7 more)
+
+### Community 40 - "Community 40"
 Cohesion: 0.22
 Nodes (11): atr_based(), fixed_dollar(), fixed_percentage(), fractional_kelly(), kelly(), PositionSizer, engine/risk.py — Position sizing and risk management models.  Provides the ``P, Automatically choose and apply the best sizing model.          Prefers ATR-bas (+3 more)
 
-### Community 40 - "Community 40"
-Cohesion: 0.26
-Nodes (13): _mock_request(), ============================================================================ TES, Mock for db.execute(...) where the caller does result.all() directly     (row tu, _rows_result(), test_blank_tickers_skipped(), test_capped_at_watch_ticker_limit(), test_empty_when_no_positions_or_filings(), test_merges_and_dedupes_positions_and_filings() (+5 more)
-
 ### Community 41 - "Community 41"
+Cohesion: 0.25
+Nodes (13): advice_lines(), format_advice_block(), load_investment_rules(), _news_bias(), _position_phase_note(), briefing_advice.py — Template advice from investment_rules.json + book.  No LLM., Two-level stop line using the position's actual stored levels rather     than a, Action lines for Telegram. Empty if rules file is missing. (+5 more)
+
+### Community 42 - "Community 42"
 Cohesion: 0.19
 Nodes (13): _make_redis_mock(), TEST SUITE: Worker Metrics Endpoint MODULE UNDER TEST: app.routes.metrics TEST, Workers should report 'no_heartbeat' when the Redis key does not exist.      R, Endpoint should return {error: ...} gracefully when Redis is down.      aiored, Response must contain exactly the three known arq workers as top-level keys., Build a mock aioredis client with pre-configured async methods.      Args:, All workers should report 'healthy' when their heartbeat is recent.      A hea, All workers should report 'stale' when their heartbeat is 2000 s old.      200 (+5 more)
 
-### Community 42 - "Community 42"
+### Community 43 - "Community 43"
 Cohesion: 0.14
 Nodes (9): ============================================================================ TE, Tests for the positions listing endpoint., User with no accounts should receive an empty positions list., GET /positions without auth should return 401 or 403., Tests for the portfolio summary endpoint., User with no accounts should receive a zero-value summary., GET /summary without auth should return 401 or 403., TestGetPositions (+1 more)
 
-### Community 43 - "Community 43"
+### Community 44 - "Community 44"
 Cohesion: 0.2
 Nodes (6): _fill_profile_fields(), ============================================================================ TES, auth_client's shared mock_user fixture only sets user_id/email/is_active/     is, Regression: sidebar_collapsed was documented in the schema's         docstring b, TestGetProfileTutorialDefault, TestUpdatePreferencesTutorial
-
-### Community 44 - "Community 44"
-Cohesion: 0.18
-Nodes (1): Template advice for Telegram briefs — rules + book, no LLM.
 
 ### Community 45 - "Community 45"
 Cohesion: 0.29
@@ -224,16 +224,16 @@ Cohesion: 0.27
 Nodes (9): DecayResult, detect_decay(), detect_decay_for_strategy(), engine/decay.py — Strategy performance decay detection.  Monitors rolling stra, Load recent backtest results for a strategy and check for decay.      Queries, Compute rolling annualised Sharpe ratios.      Args:         returns:       B, Result of a strategy decay check.      Attributes:         is_decaying:    Tr, Detect performance decay from an equity curve.      Computes rolling Sharpe ra (+1 more)
 
 ### Community 47 - "Community 47"
-Cohesion: 0.38
-Nodes (9): advice_lines(), format_advice_block(), load_investment_rules(), _news_bias(), briefing_advice.py — Template advice from investment_rules.json + book.  No LLM., Action lines for Telegram. Empty if rules file is missing., _upper_set(), vol_class() (+1 more)
-
-### Community 48 - "Community 48"
 Cohesion: 0.24
 Nodes (9): get_elapsed_weight(), get_market_session(), get_session_context(), project_daily_volume(), scanner_session.py — Market session detection and volume projection for the scan, Return the current market session label for a given Eastern-time datetime., Return the fraction of the regular NYSE session elapsed at the given time., Project a full-day volume estimate from intraday volume and elapsed weight. (+1 more)
 
-### Community 49 - "Community 49"
+### Community 48 - "Community 48"
 Cohesion: 0.22
 Nodes (5): _dedupe_and_sort(), Normalized Data Service — single entry point for strategy data consumption.  S, Fetch aligned OHLCV data at multiple intervals.          Intraday intervals ar, Read bars from the intraday_bars TimescaleDB hypertable.          Args:, Fetch normalised OHLCV bars for a single symbol and interval.          For int
+
+### Community 49 - "Community 49"
+Cohesion: 0.22
+Nodes (1): Tests for redesigned insider Telegram briefing (10b5-1, stake %, pattern, concer
 
 ### Community 50 - "Community 50"
 Cohesion: 0.22
@@ -461,11 +461,11 @@ Nodes (1): Return the provider's supported interval list.          Returns:
 
 ### Community 106 - "Community 106"
 Cohesion: 1.0
-Nodes (1): Return the list of candle intervals this provider supports.          Returns:
+Nodes (1): Return maximum lookback for *interval*.          Args:             interval:
 
 ### Community 107 - "Community 107"
 Cohesion: 1.0
-Nodes (1): Return maximum lookback for *interval*.          Args:             interval:
+Nodes (1): Return the list of candle intervals this provider supports.          Returns:
 
 ### Community 108 - "Community 108"
 Cohesion: 1.0
@@ -580,7 +580,7 @@ Cohesion: 1.0
 Nodes (0): 
 
 ## Knowledge Gaps
-- **756 isolated node(s):** `env.py — Alembic migration environment for TickerTap.  DATABASE_URL environmen`, `Run migrations in 'offline' mode (no live DB connection required).      Genera`, `Run migrations against a live database connection.`, `initial  Revision ID: 0001_initial Revises: Create Date: 2026-01-09 00:00:00`, `password reset tokens  Revision ID: 0002_password_reset_tokens Revises: 0001_` (+751 more)
+- **758 isolated node(s):** `env.py — Alembic migration environment for TickerTap.  DATABASE_URL environmen`, `Run migrations in 'offline' mode (no live DB connection required).      Genera`, `Run migrations against a live database connection.`, `initial  Revision ID: 0001_initial Revises: Create Date: 2026-01-09 00:00:00`, `password reset tokens  Revision ID: 0002_password_reset_tokens Revises: 0001_` (+753 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **Thin community `Community 103`** (2 nodes): `dependencies.py`, `dependencies.py — Shared FastAPI dependencies for TickerTap.  Re-exports the c`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
@@ -588,19 +588,19 @@ Nodes (0):
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 105`** (2 nodes): `.get_supported_intervals()`, `Return the provider's supported interval list.          Returns:`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 106`** (2 nodes): `Return the list of candle intervals this provider supports.          Returns:`, `.get_supported_intervals()`
+- **Thin community `Community 106`** (2 nodes): `Return maximum lookback for *interval*.          Args:             interval:`, `.get_max_history()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 107`** (2 nodes): `Return maximum lookback for *interval*.          Args:             interval:`, `.get_max_history()`
+- **Thin community `Community 107`** (2 nodes): `Return the list of candle intervals this provider supports.          Returns:`, `.get_supported_intervals()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 108`** (2 nodes): `Synchronous symbol search via yfinance.          Args:             query: Fre`, `._search_sync()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 109`** (2 nodes): `templates.py`, `Strategy Templates — pre-built system strategies seeded into the database.  Th`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 110`** (2 nodes): `useContextPopup.js`, `useContextPopup()`
+- **Thin community `Community 110`** (2 nodes): `eslint.config.js`, `globals.js`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 111`** (2 nodes): `useKeyboardShortcuts.js`, `useKeyboardShortcuts()`
+- **Thin community `Community 111`** (2 nodes): `useContextPopup.js`, `useContextPopup()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 112`** (2 nodes): `eslint.config.js`, `globals.js`
+- **Thin community `Community 112`** (2 nodes): `useKeyboardShortcuts.js`, `useKeyboardShortcuts()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 113`** (1 nodes): `Enforce at least 1 uppercase, 1 lowercase, 1 digit, and 1 special character.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
@@ -652,11 +652,11 @@ Nodes (0):
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `User` connect `Community 1` to `Community 0`, `Community 32`, `Community 4`, `Community 5`, `Community 19`?**
+- **Why does `User` connect `Community 0` to `Community 1`, `Community 33`, `Community 4`, `Community 5`, `Community 12`, `Community 20`?**
   _High betweenness centrality (0.062) - this node is a cross-community bridge._
-- **Why does `RuleContext` connect `Community 3` to `Community 1`, `Community 2`?**
+- **Why does `RuleContext` connect `Community 3` to `Community 0`, `Community 2`?**
   _High betweenness centrality (0.043) - this node is a cross-community bridge._
-- **Why does `RuleAlertData` connect `Community 3` to `Community 1`, `Community 2`?**
+- **Why does `RuleAlertData` connect `Community 3` to `Community 0`, `Community 2`?**
   _High betweenness centrality (0.043) - this node is a cross-community bridge._
 - **Are the 187 inferred relationships involving `User` (e.g. with `admin.py — Admin-only routes for TickerTap.  Provides endpoints for user and a` and `Return 200 if the caller is an admin, else 403 from the dependency.      The f`) actually correct?**
   _`User` has 187 INFERRED edges - model-reasoned connections that need verification._
