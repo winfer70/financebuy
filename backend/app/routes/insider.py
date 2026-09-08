@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..models import InsiderFiling
-from ..trading.insider_briefing import summarize_owner_history
+from ..trading.insider_track_record import compute_track_record
 from .auth_routes import get_current_user
 from .market import get_ohlcv_series
 
@@ -115,21 +115,17 @@ def _f(v) -> Optional[float]:
     return float(v)
 
 
-_TRACK_RECORD_HORIZON_DAYS = 30
-
-
 async def _compute_track_record(
     rows: list[InsiderFiling],
     ticker: Optional[str],
 ) -> Optional[TrackRecordOut]:
-    """For each past open-market P/S trade by this owner, check where the
-    stock's price was ~30 days later. A "win" is a buy followed by a gain,
-    or a sell followed by a decline — the direction the trade implied. This
-    describes a historical pattern only; it is not a forecast.
+    """Thin wrapper around the shared insider_track_record.compute_track_record
+    (also used by insider_monitor.py's Telegram path, so the API/UI and the
+    actual alert show the same number) — converts ORM rows to plain dicts
+    and fetches OHLCV bars via the cached market-data endpoint.
 
     Only meaningful scoped to a single ticker (the UI always passes one when
-    opening this panel from a filing row) — returns None otherwise, or when
-    there isn't enough history to say anything.
+    opening this panel from a filing row) — returns None otherwise.
     """
     if not ticker:
         return None
@@ -137,8 +133,7 @@ async def _compute_track_record(
         r for r in rows
         if (r.transaction_code or "").upper() in ("P", "S") and r.transaction_date
     ]
-    sample_size = len(ps_rows)
-    if sample_size < 2:
+    if len(ps_rows) < 2:
         return None
 
     today = date.today()
@@ -148,94 +143,23 @@ async def _compute_track_record(
         series = await get_ohlcv_series(ticker, years_needed)
     except Exception:
         return None
-    bars = series.bars
-    if not bars:
+    bars = [(b.date, b.close) for b in series.bars]
+
+    row_dicts = [
+        {"transaction_code": r.transaction_code, "transaction_date": r.transaction_date, "shares": r.shares}
+        for r in ps_rows
+    ]
+    tr = compute_track_record(row_dicts, bars, today=today)
+    if tr is None:
         return None
-
-    by_date = {b.date: b.close for b in bars}
-    sorted_dates = sorted(by_date)
-
-    def _close_on_or_after(target: date) -> Optional[float]:
-        target_s = target.isoformat()
-        for ds in sorted_dates:
-            if ds >= target_s:
-                return by_date[ds]
-        return None
-
-    aligned_returns: list[float] = []
-    hits = 0
-    horizon = timedelta(days=_TRACK_RECORD_HORIZON_DAYS)
-    for r in ps_rows:
-        future_date = r.transaction_date + horizon
-        if future_date > today:
-            continue  # not enough time has passed yet to score this one
-        txn_close = _close_on_or_after(r.transaction_date)
-        future_close = _close_on_or_after(future_date)
-        if not txn_close or not future_close:
-            continue
-        fwd_return = (future_close - txn_close) / txn_close
-        code = (r.transaction_code or "").upper()
-        aligned = fwd_return if code == "P" else -fwd_return
-        aligned_returns.append(aligned)
-        if aligned > 0:
-            hits += 1
-
-    evaluated = len(aligned_returns)
-    if evaluated < 2:
-        return TrackRecordOut(
-            sample_size=sample_size,
-            evaluated=0,
-            horizon_days=_TRACK_RECORD_HORIZON_DAYS,
-            label="Not enough time has passed since this owner's trades to score a track record yet.",
-            basis=f"{sample_size} open-market trade(s) on file, none {_TRACK_RECORD_HORIZON_DAYS}+ days old with price data.",
-        )
-
-    win_rate = hits / evaluated
-    avg_aligned = sum(aligned_returns) / evaluated
-
-    last_code = (ps_rows[-1].transaction_code or "").upper()
-    last_action = "buying" if last_code == "P" else "selling"
-
-    if win_rate >= 0.65:
-        outlook = (
-            f"their {last_action} has historically preceded a favorable move — "
-            "the current filing may follow the same pattern, though past results don't guarantee it"
-        )
-    elif win_rate <= 0.35:
-        outlook = (
-            f"their {last_action} has not reliably preceded a favorable move — "
-            "treat this filing as a weak signal on its own"
-        )
-    else:
-        outlook = "no strong directional signal from this owner's past trades alone"
-
-    scheduled_note = ""
-    if last_code == "S":
-        sell_pattern = summarize_owner_history([
-            {"transaction_date": r.transaction_date, "shares": float(r.shares or 0)}
-            for r in ps_rows if (r.transaction_code or "").upper() == "S"
-        ])
-        if sell_pattern.looks_scheduled:
-            scheduled_note = (
-                " Note: this owner's sells look scheduled (10b5-1-style), which weakens "
-                "how predictive any single filing is."
-            )
-
-    label = (
-        f"{'Favorable' if win_rate >= 0.65 else 'Unfavorable' if win_rate <= 0.35 else 'Mixed'} "
-        f"track record: {hits}/{evaluated} trades ({win_rate:.0%}) preceded a move in the "
-        f"implied direction, avg {avg_aligned:+.1%} over {_TRACK_RECORD_HORIZON_DAYS}d — "
-        f"{outlook}.{scheduled_note}"
-    )
-
     return TrackRecordOut(
-        sample_size=sample_size,
-        evaluated=evaluated,
-        win_rate=win_rate,
-        avg_aligned_return_pct=avg_aligned * 100,
-        horizon_days=_TRACK_RECORD_HORIZON_DAYS,
-        label=label,
-        basis=f"{evaluated} of {sample_size} open-market P/S trades had {_TRACK_RECORD_HORIZON_DAYS}-day forward price data.",
+        sample_size=tr.sample_size,
+        evaluated=tr.evaluated,
+        win_rate=tr.win_rate,
+        avg_aligned_return_pct=tr.avg_aligned_return_pct,
+        horizon_days=tr.horizon_days,
+        label=tr.label,
+        basis=tr.basis,
     )
 
 

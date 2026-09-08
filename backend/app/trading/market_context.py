@@ -60,6 +60,18 @@ def _ohlcv(symbol: str, period: str = "3mo") -> Optional[pd.DataFrame]:
     return df
 
 
+def fetch_price_history_bars(symbol: str, period: str = "2y") -> list[tuple[str, float]]:
+    """(date_iso, close) pairs for a symbol — sync/yfinance, same as the
+    other helpers here. Used for the insider track-record calculation
+    (insider_track_record.py), which needs enough history to cover
+    whatever window the caller's filings span.
+    """
+    df = _ohlcv(symbol, period=period)
+    if df is None:
+        return []
+    return [(idx.strftime("%Y-%m-%d"), float(row["Close"])) for idx, row in df.iterrows()]
+
+
 def fetch_volume_snapshot(ticker: str, sector: Optional[str] = None) -> dict:
     """Sync yfinance snapshot: name volume vs 50d avg, and sector ETF if known."""
     out = {

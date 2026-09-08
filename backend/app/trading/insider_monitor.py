@@ -30,7 +30,9 @@ from .insider_briefing import (
 )
 from .insider_edgar import FORM4_ATOM_URL, parse_atom_accessions, parse_form4_xml, xml_doc_url_from_index_html
 from .insider_gate import BookSnapshot, GateResult, Integrity, evaluate_filing, sector_exposure
+from .insider_track_record import compute_track_record
 from .market_context import (
+    fetch_price_history_bars,
     fetch_ticker_news,
     fetch_volume_snapshot,
     format_insider_report,
@@ -263,6 +265,10 @@ class CycleDeps:
     ticker_sectors: dict = field(default_factory=dict)
     pause_s: float = 0.0
     fetch_consensus: Optional[Callable] = None
+    # (combined_owner_history_rows, ticker) -> TrackRecord | None — appended
+    # to the Telegram body as "Track record: <label>" when present. Optional
+    # so existing tests/callers that don't set it are unaffected.
+    fetch_track_record: Optional[Callable] = None
     # New, multi-user path: returns dict[user_id, BookSnapshot], one book per
     # user who has open positions. When set, run_insider_cycle evaluates and
     # notifies each *holder* of the filed ticker separately (their own
@@ -519,6 +525,7 @@ async def run_insider_cycle(
                 news: list = []
                 news_status = "ok"
                 consensus = None
+                track_record_label = None
                 fetched_shared = False
 
                 for uid, book in targets.items():
@@ -546,6 +553,18 @@ async def run_insider_cycle(
                                 consensus = await _maybe_await(
                                     deps.fetch_consensus(ticker, float(row.get("price") or 0) or None)
                                 )
+                            if deps.fetch_track_record:
+                                buy_hist = await store.owner_history(
+                                    row.get("owner_cik") or "", ticker, "P", since_365
+                                )
+                                sell_hist = await store.owner_history(
+                                    row.get("owner_cik") or "", ticker, "S", since_365
+                                )
+                                tr = await _maybe_await(
+                                    deps.fetch_track_record(buy_hist + sell_hist, ticker)
+                                )
+                                if tr and tr.label:
+                                    track_record_label = tr.label
                             fetched_shared = True
                         pos_raw = (book.positions or {}).get(ticker)
                         position = PositionBrief(**pos_raw) if pos_raw else None
@@ -571,6 +590,8 @@ async def run_insider_cycle(
                             consensus=consensus,
                             news_status=news_status,
                         )
+                        if track_record_label:
+                            body = f"{body}\n\nTrack record: {track_record_label}"
                     if gate.in_app:
                         await store.add_rule_alert(uid, gate, row, body)
                         stats["in_app"] += 1
@@ -636,6 +657,13 @@ async def poll_insider_filings(ctx: dict) -> dict:
         def _consensus(ticker: str, price=None):
             return fetch_consensus_sync(ticker, price)
 
+        def _track_record(rows: list[dict], ticker: str):
+            try:
+                bars = fetch_price_history_bars(ticker, period="2y")
+            except Exception:
+                return None
+            return compute_track_record(rows, bars)
+
         async def _notify(uid, event_type, title, body, prio):
             if uid is None:
                 logger.warning("insider_notify_no_user", title=title)
@@ -660,6 +688,7 @@ async def poll_insider_filings(ctx: dict) -> dict:
             fetch_volume=lambda t, s=None: loop.run_in_executor(None, _volume, t, s),
             fetch_news=_news,
             fetch_consensus=lambda t, p=None: loop.run_in_executor(None, _consensus, t, p),
+            fetch_track_record=lambda rows, t: loop.run_in_executor(None, _track_record, rows, t),
             notify=_notify,
             primary_user_id=primary_user_id,
             ticker_sectors=sectors,

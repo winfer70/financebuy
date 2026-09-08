@@ -85,7 +85,7 @@ def _deps(book=None, notifies=None, user_id=None):
     ), notifies
 
 
-def _deps_multi(books: dict, primary_user_id=None, notifies=None):
+def _deps_multi(books: dict, primary_user_id=None, notifies=None, fetch_track_record=None):
     """Multi-user CycleDeps — exercises the new load_books path directly,
     as production code (poll_insider_filings) now does."""
     notifies = notifies if notifies is not None else []
@@ -103,6 +103,7 @@ def _deps_multi(books: dict, primary_user_id=None, notifies=None):
         fetch_news=lambda _t: NEWS,
         notify=_notify,
         primary_user_id=primary_user_id,
+        fetch_track_record=fetch_track_record,
         ticker_sectors={"AAPL": "Technology", "OGN": "Healthcare"},
         pause_s=0.0,
     ), notifies
@@ -262,6 +263,43 @@ async def test_multi_user_accession_marked_notified_once_both_users_done():
     stats2 = await run_insider_cycle(fetcher, store, deps)
     assert stats2["new"] == 0
     assert len(notifies) == 2
+
+
+@pytest.mark.asyncio
+async def test_track_record_label_appended_to_telegram_body_when_available():
+    """Regression: the track-record feature was wired into the web API/UI
+    but never into the actual Telegram message — this is the missing piece
+    a real alert (SHMD, 2026-09-08) was found to lack."""
+    from app.trading.insider_track_record import TrackRecord
+
+    async def _fetch_track_record(rows, ticker):
+        return TrackRecord(
+            sample_size=3, evaluated=2, win_rate=1.0, avg_aligned_return_pct=9.5,
+            horizon_days=30, label="Favorable track record: 2/2 trades (100%) ...",
+            basis="2 of 3 open-market P/S trades had 30-day forward price data.",
+        )
+
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi({}, primary_user_id=uuid.uuid4(), fetch_track_record=_fetch_track_record)
+    await run_insider_cycle(
+        MapFetcher(_mapping()), store, deps, now=datetime(2026, 9, 2, tzinfo=timezone.utc)
+    )
+
+    assert len(notifies) == 1
+    assert "Track record: Favorable track record" in notifies[0]["body"]
+
+
+@pytest.mark.asyncio
+async def test_no_track_record_section_when_fetch_track_record_unset():
+    """Existing/default behavior — no fetch_track_record configured at all
+    (matches the pre-2026-09-08 deployed state) must not error or add text."""
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi({}, primary_user_id=uuid.uuid4())
+    await run_insider_cycle(
+        MapFetcher(_mapping()), store, deps, now=datetime(2026, 9, 2, tzinfo=timezone.utc)
+    )
+    assert len(notifies) == 1
+    assert "Track record:" not in notifies[0]["body"]
 
 
 @pytest.mark.asyncio
