@@ -39,6 +39,7 @@ from .form144_monitor import get_recent_144_notice
 from .form3_monitor import get_form3_baseline
 from .schedule13_monitor import get_recent_beneficial_ownership
 from .form8k_monitor import get_recent_8k_filings
+from .form13f_monitor import get_recent_13f_holders
 from .insider_gate import BookSnapshot, GateResult, Integrity, evaluate_filing, sector_exposure
 from .insider_track_record import compute_track_record
 from .market_context import (
@@ -284,6 +285,10 @@ class CycleDeps:
     # market color for "why might this stock actually be moving". Optional
     # so existing tests/callers are unaffected.
     fetch_8k_filings: Optional[Callable] = None
+    # (ticker) -> list[Form13FHolding] — "which funds hold this name" per
+    # the latest processed 13F cycle. Optional so existing tests/callers
+    # are unaffected.
+    fetch_13f_holders: Optional[Callable] = None
     # New, multi-user path: returns dict[user_id, BookSnapshot], one book per
     # user who has open positions. When set, run_insider_cycle evaluates and
     # notifies each *holder* of the filed ticker separately (their own
@@ -505,6 +510,24 @@ def _format_8k_note(rows: list) -> Optional[str]:
     return " ".join(parts)
 
 
+def _format_13f_note(rows: list) -> Optional[str]:
+    """Turns recent tracked 13F holdings into a "which funds hold this
+    name" line — positioning color, not a trading signal (13F is quarterly
+    and up to 45 days stale by the time it's filed)."""
+    if not rows:
+        return None
+    row = rows[0]
+    if not row.filer_name:
+        return None
+    parts = [f"13F: {row.filer_name} holds this name"]
+    if row.shares:
+        parts.append(f"({float(row.shares):,.0f} sh)")
+    if len(rows) > 1:
+        parts.append(f"— {len(rows)} tracked 13F filers hold it")
+    parts.append("[positioning data, up to 45 days stale].")
+    return " ".join(parts)
+
+
 async def run_insider_cycle(
     fetcher: EdgarFetcher,
     store: FilingStore,
@@ -617,6 +640,7 @@ async def run_insider_cycle(
                 form3_label = None
                 ownership_label = None
                 eightk_label = None
+                thirteenf_label = None
                 fetched_shared = False
 
                 for uid, book in targets.items():
@@ -682,6 +706,10 @@ async def run_insider_cycle(
                                 eightk_rows = await _maybe_await(deps.fetch_8k_filings(ticker))
                                 if eightk_rows:
                                     eightk_label = _format_8k_note(eightk_rows)
+                            if deps.fetch_13f_holders:
+                                thirteenf_rows = await _maybe_await(deps.fetch_13f_holders(ticker))
+                                if thirteenf_rows:
+                                    thirteenf_label = _format_13f_note(thirteenf_rows)
                             fetched_shared = True
                         pos_raw = (book.positions or {}).get(ticker)
                         position = PositionBrief(**pos_raw) if pos_raw else None
@@ -718,6 +746,8 @@ async def run_insider_cycle(
                             body = f"{body}\n\n{ownership_label}"
                         if eightk_label:
                             body = f"{body}\n\n{eightk_label}"
+                        if thirteenf_label:
+                            body = f"{body}\n\n{thirteenf_label}"
                     if gate.in_app:
                         await store.add_rule_alert(uid, gate, row, body)
                         stats["in_app"] += 1
@@ -820,6 +850,7 @@ async def poll_insider_filings(ctx: dict) -> dict:
             fetch_form3_baseline=lambda cik, t: get_form3_baseline(session, cik, t),
             fetch_beneficial_ownership=lambda t: get_recent_beneficial_ownership(session, t),
             fetch_8k_filings=lambda t: get_recent_8k_filings(session, t),
+            fetch_13f_holders=lambda t: get_recent_13f_holders(session, t),
             notify=_notify,
             primary_user_id=primary_user_id,
             ticker_sectors=sectors,

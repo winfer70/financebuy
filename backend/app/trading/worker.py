@@ -42,6 +42,7 @@ from .form144_monitor import poll_form144_filings  # noqa: F401 — registered i
 from .form3_monitor import poll_form3_filings  # noqa: F401 — registered in WorkerSettings
 from .schedule13_monitor import poll_schedule13_filings  # noqa: F401 — registered in WorkerSettings
 from .form8k_monitor import poll_8k_filings  # noqa: F401 — registered in WorkerSettings
+from .form13f_monitor import poll_13f_filings  # noqa: F401 — registered in WorkerSettings
 from .finra_short_interest import poll_short_interest  # noqa: F401 — registered in WorkerSettings
 from .scanner_worker import run_scanner  # noqa: F401 — registered in WorkerSettings
 from ..services.degiro_sync import sync_degiro_portfolio  # noqa: F401 — registered in WorkerSettings
@@ -1032,6 +1033,7 @@ class WorkerSettings:
         poll_form3_filings,
         poll_schedule13_filings,
         poll_8k_filings,
+        poll_13f_filings,
         poll_short_interest,
     ]
     queue_name = "arq:trading"
@@ -1056,6 +1058,9 @@ class WorkerSettings:
         # FINRA only republishes every two weeks — daily is plenty, and the
         # settlement-date scan is cached per-day regardless.
         cron(poll_short_interest, hour=6, minute=0),
+        # Quarterly positioning data, filed in a burst around the 45-day
+        # deadline — daily is plenty, same reasoning as short interest.
+        cron(poll_13f_filings, hour=7, minute=0),
         cron(sync_degiro_portfolio, hour=2, minute=0),
         cron(weekly_meta_analysis, weekday=0, hour=3, minute=0),
     ]

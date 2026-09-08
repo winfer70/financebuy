@@ -55,6 +55,26 @@ only ever holds names the user cares about, never the market-wide firehose.
 ticker-wide as market color on insider BUY/SELL alerts ("8-K filed on
 <date> — <item descriptions>").
 
+**Shipped (2026-09-09)**: Form 13F-HR (quarterly institutional holdings) —
+resolves the CUSIP↔ticker gap this doc originally flagged as needing "real
+design work" via the free OpenFIGI API (`api.openfigi.com/v3/mapping`,
+verified live against real CUSIPs from a live filing). Note the
+information table's own `<figi>` field turned out to be the share-class-
+level FIGI, not the composite/exchange-level ID OpenFIGI's default lookup
+expects — CUSIP is the reliable resolution key, not FIGI-to-FIGI. Filer
+name/CIK come from the atom entry's title (same convention as Form 8-K),
+so only the information-table XML itself needs fetching — but a 13F index
+page has *two* non-xsl `.xml` files (cover page + info table), so
+`infotable_xml_url_from_index_html()` specifically looks for "infotable"
+in the filename rather than reusing the generic "first .xml" picker.
+`cusip_ticker_map.py` (OpenFIGI resolver, batched up to 100/request) +
+`form13f_edgar.py` + `form13f_monitor.py` (daily cron, same "filter to
+tracked tickers before storing" principle as 8-K — a single filer can hold
+hundreds of positions). `Form13FHolding` table (migration 0041). Surfaced
+as "which funds hold this name" market color, explicitly labeled
+positioning data (quarterly, up to 45 days stale) rather than a timely
+signal like everything else shipped today.
+
 **Shipped (2026-09-08)**: FINRA biweekly short interest — the api.finra.org
 Query API turned out to require registered API credentials for anything
 past ~2020 (verified live: `group/otcMarket/name/consolidatedShortInterest`
@@ -239,6 +259,7 @@ These aren't SEC filings and need their own poller module (not a fit for
 3. ~~**Form 3**~~ — shipped 2026-09-08, see top of doc.
 4. ~~**Form 13D/13G**~~ — shipped 2026-09-08, see top of doc.
 5. ~~**Form 8-K**~~ — shipped 2026-09-08, see top of doc.
-6. **Form 13F / N-PORT** — lowest priority; positioning data, not trading signals,
-   and 13F's CUSIP↔ticker gap and N-PORT's per-fund-not-per-ticker shape both need
-   real design work before they're useful in this UI.
+6. ~~**Form 13F**~~ — shipped 2026-09-09, see top of doc. N-PORT remains unbuilt
+   (its per-fund-not-per-ticker shape needs real design work — lowest priority
+   of everything in this doc, and 13F now covers the same "who holds this"
+   question with far less engineering cost).

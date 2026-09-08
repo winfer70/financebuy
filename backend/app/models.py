@@ -1427,3 +1427,43 @@ class EightKFiling(Base):
     filed_at = Column(DateTime(timezone=True), nullable=True)
     filing_url = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class Form13FHolding(Base):
+    """One tracked-ticker holding from a Form 13F-HR (quarterly
+    institutional holdings, >$100M AUM, filed 45 days after quarter-end).
+
+    Positioning data, not a trading signal — filings roll in as a burst
+    around the 45-day deadline, not evenly through the quarter, and can
+    already be over a month stale the day they're filed. Reported by CUSIP,
+    not ticker — resolved via cusip_ticker_map.py (the free OpenFIGI API),
+    since 13F's own schema (verified live) doesn't reliably expose a
+    composite/exchange-level FIGI the same lookup could use directly.
+
+    form13f_monitor.py resolves every CUSIP in a filing's information
+    table and discards holdings that don't match an already-tracked ticker
+    (open positions + insider filers) before storing — same "filter before
+    storing" principle as Form 8-K, since a single filer can hold hundreds
+    of positions. One row per (accession, cusip): a filer's information
+    table lists each holding once.
+    """
+
+    __tablename__ = "form13f_holdings"
+    __table_args__ = (
+        UniqueConstraint("accession", "cusip", name="uq_form13f_holdings_accession_cusip"),
+        Index("idx_form13f_holdings_ticker", "ticker"),
+    )
+
+    holding_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    accession = Column(String(25), nullable=False)
+    filer_cik = Column(String(10), nullable=True)
+    filer_name = Column(String(256), nullable=True)
+    ticker = Column(String(20), nullable=False)
+    cusip = Column(String(9), nullable=False)
+    issuer_name = Column(String(256), nullable=True)
+    shares = Column(Numeric(20, 2), nullable=True)
+    value_usd = Column(Numeric(20, 2), nullable=True)
+    is_amendment = Column(Boolean, nullable=False, server_default="false")
+    filed_at = Column(DateTime(timezone=True), nullable=True)
+    filing_url = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
