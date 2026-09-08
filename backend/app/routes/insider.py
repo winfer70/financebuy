@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..models import Form144Notice, InsiderFiling
+from ..trading.finra_short_interest import get_latest_short_interest
 from ..trading.insider_track_record import compute_track_record
 from .auth_routes import get_current_user
 from .market import get_ohlcv_series
@@ -104,6 +105,16 @@ class Form144NoticeOut(BaseModel):
     filing_url: Optional[str] = None
 
 
+class ShortInterestOut(BaseModel):
+    """Most recent FINRA biweekly short-interest reading for a ticker —
+    squeeze/crowding context alongside the owner's Form 4 history."""
+
+    settlement_date: date
+    current_short_position: Optional[float] = None
+    days_to_cover: Optional[float] = None
+    change_percent: Optional[float] = None
+
+
 class OwnerBreakdownOut(BaseModel):
     owner_cik: str
     owner_name: Optional[str] = None
@@ -122,6 +133,7 @@ class OwnerBreakdownOut(BaseModel):
     transactions: list[OwnerTxnOut] = Field(default_factory=list)
     track_record: Optional[TrackRecordOut] = None
     pending_144: list[Form144NoticeOut] = Field(default_factory=list)
+    short_interest: Optional[ShortInterestOut] = None
 
 
 def _f(v) -> Optional[float]:
@@ -353,6 +365,17 @@ async def owner_breakdown(
         for n in notice_res.scalars().all()
     ]
 
+    short_interest = None
+    if ticker:
+        si = await get_latest_short_interest(db, ticker)
+        if si is not None:
+            short_interest = ShortInterestOut(
+                settlement_date=si.settlement_date,
+                current_short_position=_f(si.current_short_position),
+                days_to_cover=_f(si.days_to_cover),
+                change_percent=_f(si.change_percent),
+            )
+
     first = rows[0]
     return OwnerBreakdownOut(
         owner_cik=cik,
@@ -372,4 +395,5 @@ async def owner_breakdown(
         transactions=txns,
         track_record=track_record,
         pending_144=pending_144,
+        short_interest=short_interest,
     )

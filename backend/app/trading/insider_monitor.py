@@ -34,6 +34,7 @@ from .insider_edgar import (
     parse_form4_xml,
     xml_doc_url_from_index_html,
 )
+from .finra_short_interest import get_latest_short_interest
 from .form144_monitor import get_recent_144_notice
 from .insider_gate import BookSnapshot, GateResult, Integrity, evaluate_filing, sector_exposure
 from .insider_track_record import compute_track_record
@@ -264,6 +265,10 @@ class CycleDeps:
     # pre-announced via Form 144 gets a note instead of reading as a
     # surprise dump. Optional so existing tests/callers are unaffected.
     fetch_144_notice: Optional[Callable] = None
+    # (ticker) -> ShortInterestSnapshot | None — squeeze/crowding context
+    # from FINRA's biweekly data. Optional so existing tests/callers are
+    # unaffected.
+    fetch_short_interest: Optional[Callable] = None
     # New, multi-user path: returns dict[user_id, BookSnapshot], one book per
     # user who has open positions. When set, run_insider_cycle evaluates and
     # notifies each *holder* of the filed ticker separately (their own
@@ -540,6 +545,7 @@ async def run_insider_cycle(
                 consensus = None
                 track_record_label = None
                 notice_144_label = None
+                short_interest = None
                 fetched_shared = False
 
                 for uid, book in targets.items():
@@ -585,6 +591,8 @@ async def run_insider_cycle(
                                 )
                                 if notice is not None:
                                     notice_144_label = _format_144_note(notice)
+                            if deps.fetch_short_interest:
+                                short_interest = await _maybe_await(deps.fetch_short_interest(ticker))
                             fetched_shared = True
                         pos_raw = (book.positions or {}).get(ticker)
                         position = PositionBrief(**pos_raw) if pos_raw else None
@@ -608,6 +616,7 @@ async def run_insider_cycle(
                             pattern=pattern,
                             position=position,
                             consensus=consensus,
+                            short_interest=short_interest,
                             news_status=news_status,
                         )
                         if track_record_label:
@@ -712,6 +721,7 @@ async def poll_insider_filings(ctx: dict) -> dict:
             fetch_consensus=lambda t, p=None: loop.run_in_executor(None, _consensus, t, p),
             fetch_track_record=lambda rows, t: loop.run_in_executor(None, _track_record, rows, t),
             fetch_144_notice=lambda cik, t: get_recent_144_notice(session, cik, t),
+            fetch_short_interest=lambda t: get_latest_short_interest(session, t),
             notify=_notify,
             primary_user_id=primary_user_id,
             ticker_sectors=sectors,

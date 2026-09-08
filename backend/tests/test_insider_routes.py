@@ -35,7 +35,7 @@ os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 
 import pytest
 
-from tests.conftest import make_scalar_count_result, make_scalars_result
+from tests.conftest import make_scalar_count_result, make_scalar_result, make_scalars_result
 
 
 def _mock_filing(**overrides):
@@ -225,7 +225,9 @@ class TestOwnerBreakdownTrackRecord:
             _mock_filing(transaction_code="P", acquired_disposed="A", transaction_date=d_p, shares=Decimal("1000")),
             _mock_filing(transaction_code="S", acquired_disposed="D", transaction_date=d_s, shares=Decimal("500")),
         ]
-        db.execute.side_effect = [make_scalars_result(rows), make_scalars_result([])]
+        db.execute.side_effect = [
+            make_scalars_result(rows), make_scalars_result([]), make_scalar_result(None)
+        ]
 
         bars = sorted(
             [
@@ -267,7 +269,9 @@ class TestOwnerBreakdownTrackRecord:
     def test_none_when_fewer_than_two_open_market_trades(self, auth_client):
         client, db, _user = auth_client
         rows = [_mock_filing(transaction_code="P", acquired_disposed="A")]
-        db.execute.side_effect = [make_scalars_result(rows), make_scalars_result([])]
+        db.execute.side_effect = [
+            make_scalars_result(rows), make_scalars_result([]), make_scalar_result(None)
+        ]
 
         resp = client.get("/api/v1/insider/owners/0001214156", params={"ticker": "AAPL"})
         assert resp.status_code == 200
@@ -282,7 +286,9 @@ class TestOwnerBreakdownTrackRecord:
             _mock_filing(transaction_code="P", acquired_disposed="A", transaction_date=today - timedelta(days=5)),
             _mock_filing(transaction_code="S", acquired_disposed="D", transaction_date=today - timedelta(days=2)),
         ]
-        db.execute.side_effect = [make_scalars_result(rows), make_scalars_result([])]
+        db.execute.side_effect = [
+            make_scalars_result(rows), make_scalars_result([]), make_scalar_result(None)
+        ]
         series = OHLCVResponse(bars=[
             OHLCVBar(date=today.isoformat(), open=100, high=100, low=100, close=100, volume=0)
         ])
@@ -351,3 +357,60 @@ class TestOwnerBreakdownPending144:
         resp = client.get("/api/v1/insider/owners/0001214156")
         assert resp.status_code == 200
         assert resp.json()["pending_144"] == []
+
+
+def _mock_short_interest(**overrides):
+    row = MagicMock()
+    defaults = dict(
+        settlement_date=date(2026, 8, 14),
+        current_short_position=Decimal("34636195"),
+        days_to_cover=Decimal("3.5"),
+        change_percent=Decimal("-11.32"),
+    )
+    defaults.update(overrides)
+    for k, v in defaults.items():
+        setattr(row, k, v)
+    return row
+
+
+class TestOwnerBreakdownShortInterest:
+    """FINRA biweekly short-interest snapshot, ticker-scoped (not
+    owner-scoped) — only fetched when a ticker filter is given, same as
+    track_record."""
+
+    def test_included_when_ticker_given_and_on_file(self, auth_client):
+        client, db, _user = auth_client
+        rows = [_mock_filing(transaction_code="S", acquired_disposed="D")]
+        db.execute.side_effect = [
+            make_scalars_result(rows),
+            make_scalars_result([]),
+            make_scalar_result(_mock_short_interest()),
+        ]
+
+        resp = client.get("/api/v1/insider/owners/0001214156", params={"ticker": "AAPL"})
+        assert resp.status_code == 200
+        si = resp.json()["short_interest"]
+        assert si is not None
+        assert si["settlement_date"] == "2026-08-14"
+        assert si["days_to_cover"] == 3.5
+        assert si["change_percent"] == -11.32
+
+    def test_none_when_ticker_given_but_nothing_on_file(self, auth_client):
+        client, db, _user = auth_client
+        rows = [_mock_filing(transaction_code="S", acquired_disposed="D")]
+        db.execute.side_effect = [
+            make_scalars_result(rows), make_scalars_result([]), make_scalar_result(None)
+        ]
+
+        resp = client.get("/api/v1/insider/owners/0001214156", params={"ticker": "AAPL"})
+        assert resp.status_code == 200
+        assert resp.json()["short_interest"] is None
+
+    def test_none_without_ticker_filter(self, auth_client):
+        client, db, _user = auth_client
+        rows = [_mock_filing(transaction_code="S", acquired_disposed="D")]
+        db.execute.side_effect = [make_scalars_result(rows), make_scalars_result([])]
+
+        resp = client.get("/api/v1/insider/owners/0001214156")
+        assert resp.status_code == 200
+        assert resp.json()["short_interest"] is None

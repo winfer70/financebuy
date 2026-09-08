@@ -1237,6 +1237,38 @@ class InsiderFiling(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class ShortInterestSnapshot(Base):
+    """One ticker's biweekly short-interest reading from FINRA (Rule 4560).
+
+    FINRA publishes a market-wide flat file (thousands of tickers) every
+    two weeks with a ~2-3 week lag — finra_short_interest.py downloads the
+    whole file but only keeps rows for tickers we actually track (open
+    positions + anything with an insider filing on record), not the full
+    market. Dedup is (ticker, settlement_date): the poller re-checks for a
+    newer settlement date each cycle but never re-stores one already on file.
+
+    Used to add squeeze/crowding context to insider alert advice — e.g. a
+    high days_to_cover on a name with a fresh insider buy is a different
+    setup than the same buy with negligible short interest.
+    """
+
+    __tablename__ = "short_interest_snapshots"
+    __table_args__ = (
+        UniqueConstraint("ticker", "settlement_date", name="uq_short_interest_ticker_date"),
+        Index("idx_short_interest_ticker", "ticker"),
+    )
+
+    snapshot_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ticker = Column(String(20), nullable=False)
+    settlement_date = Column(Date, nullable=False)
+    current_short_position = Column(Numeric(20, 2), nullable=True)
+    previous_short_position = Column(Numeric(20, 2), nullable=True)
+    average_daily_volume = Column(Numeric(20, 2), nullable=True)
+    days_to_cover = Column(Numeric(10, 2), nullable=True)
+    change_percent = Column(Numeric(8, 2), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class Form144Notice(Base):
     """One Form 144 (Notice of Proposed Sale) ingested from EDGAR.
 

@@ -285,3 +285,63 @@ class TestComputedTwoLevelStop:
             "AAPL", 140.12, 150.0, "intraday", SNAP_DUMP, BEAR, rules=RULES, position=pos
         )
         assert "$142.00" in stop
+
+
+class _ShortInterest:
+    """Duck-typed stand-in for ShortInterestSnapshot — briefing_advice.py
+    only reads attributes, no import needed to avoid a DB-model dependency
+    in this pure-template module."""
+
+    def __init__(self, days_to_cover=None, change_percent=None, settlement_date=None):
+        self.days_to_cover = days_to_cover
+        self.change_percent = change_percent
+        self.settlement_date = settlement_date
+
+
+class TestShortInterestNote:
+    """FINRA squeeze/crowding context — a real gap found while building the
+    Form 144 correlation feature: investment_rules.json has no equivalent
+    threshold for this since it's a new data source, so the thresholds
+    live directly in briefing_advice.py (_HIGH_DAYS_TO_COVER etc)."""
+
+    def test_buy_high_days_to_cover_reads_as_squeeze_tailwind(self):
+        si = _ShortInterest(days_to_cover=6.2, settlement_date=date(2026, 8, 14))
+        lines = advice_lines("TSM", EVENT_INSIDER_BUY, held=False, rules=RULES, short_interest=si)
+        blob = " ".join(lines)
+        assert "squeeze" in blob.lower()
+        assert "6.2 days to cover" in blob
+        assert "2026-08-14" in blob
+
+    def test_sell_high_days_to_cover_reads_as_already_priced(self):
+        si = _ShortInterest(days_to_cover=6.2)
+        lines = advice_lines("AAPL", EVENT_INSIDER_SELL, held=True, rules=RULES, short_interest=si)
+        blob = " ".join(lines)
+        assert "already elevated" in blob.lower()
+
+    def test_fast_rising_short_interest_flagged_below_high_dtc_threshold(self):
+        si = _ShortInterest(days_to_cover=1.0, change_percent=25.0)
+        lines = advice_lines("TSM", EVENT_INSIDER_BUY, held=False, rules=RULES, short_interest=si)
+        blob = " ".join(lines)
+        assert "rose" in blob.lower()
+        assert "+25%" in blob or "25%" in blob
+
+    def test_low_days_to_cover_and_flat_change_produces_no_note(self):
+        si = _ShortInterest(days_to_cover=0.8, change_percent=2.0)
+        lines = advice_lines("TSM", EVENT_INSIDER_BUY, held=False, rules=RULES, short_interest=si)
+        blob = " ".join(lines)
+        assert "squeeze" not in blob.lower()
+        assert "days to cover" not in blob.lower()
+
+    def test_none_when_no_snapshot_on_file(self):
+        lines = advice_lines("TSM", EVENT_INSIDER_BUY, held=False, rules=RULES)
+        blob = " ".join(lines)
+        assert "days to cover" not in blob.lower()
+
+    def test_telegram_body_includes_short_interest_note(self):
+        filing = parse_form4_xml(FORM4)[0]
+        si = _ShortInterest(days_to_cover=7.0)
+        body = format_insider_report(
+            filing, ["officer buy"], SNAP_DUMP, BEAR,
+            held=False, rules=RULES, short_interest=si,
+        )
+        assert "squeeze" in body.lower()

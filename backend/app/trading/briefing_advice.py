@@ -115,6 +115,40 @@ def _stop_line(position) -> Optional[str]:
     return None
 
 
+_HIGH_DAYS_TO_COVER = 5.0
+_FAST_RISING_SHORT_INTEREST_PCT = 20.0
+
+
+def _short_interest_note(short_interest, event: str) -> Optional[str]:
+    """Squeeze/crowding context from FINRA's biweekly short-interest data —
+    a fresh insider buy on a heavily-shorted name is a different setup
+    (potential squeeze tailwind) than the same buy with negligible short
+    interest, and a sell into an already-crowded short doesn't add much new
+    bearish information. None when there's no snapshot on file (not every
+    ticker is tracked, and FINRA's data always lags by ~2-3 weeks)."""
+    if short_interest is None:
+        return None
+    dtc = getattr(short_interest, "days_to_cover", None)
+    change_pct = getattr(short_interest, "change_percent", None)
+    settlement_date = getattr(short_interest, "settlement_date", None)
+    as_of = f" (as of {settlement_date.isoformat()})" if settlement_date else ""
+
+    if dtc is not None and float(dtc) >= _HIGH_DAYS_TO_COVER:
+        if event == EVENT_INSIDER_BUY:
+            return (
+                f"Short interest elevated{as_of}: {float(dtc):.1f} days to cover — a squeeze "
+                f"tailwind if this breaks out, but don't chase the print itself."
+            )
+        if event == EVENT_INSIDER_SELL:
+            return (
+                f"Short interest already elevated{as_of}: {float(dtc):.1f} days to cover — "
+                f"this sale doesn't add much new bearish information on top of that."
+            )
+    if change_pct is not None and float(change_pct) >= _FAST_RISING_SHORT_INTEREST_PCT:
+        return f"Short interest rose {float(change_pct):+.0f}% last settlement{as_of} — bearish positioning building."
+    return None
+
+
 def advice_lines(
     ticker: str,
     event: str,
@@ -130,6 +164,7 @@ def advice_lines(
     stage: Optional[str] = None,
     position=None,
     consensus=None,
+    short_interest=None,
 ) -> list[str]:
     """Action lines for Telegram. Empty if rules file is missing."""
     rules = rules if rules is not None else load_investment_rules()
@@ -214,6 +249,9 @@ def advice_lines(
             lines.append("Volume LEAVING on a down day — do not buy into distribution.")
         if bias == "BEAR":
             lines.append("Scored news is BEAR — the Form 4 does not override a broken tape.")
+        si_note = _short_interest_note(short_interest, event)
+        if si_note:
+            lines.append(si_note)
         lines.append("FOMO check: planned setup? exit defined? sized? If not — tomorrow, not now.")
 
     elif event == EVENT_INSIDER_SELL:
@@ -230,6 +268,9 @@ def advice_lines(
         if klass == "volatile":
             lines.append(f"VOLATILE: if you exit, {vol_cool}-day cooloff, no same-day re-entry.")
         lines.append(_stop_line(position) or "Hard stop stays where it was set at entry — never moved against the position.")
+        si_note = _short_interest_note(short_interest, event)
+        if si_note:
+            lines.append(si_note)
         if bias == "BULL":
             lines.append("Bull headlines do not cancel an officer/director sale.")
 

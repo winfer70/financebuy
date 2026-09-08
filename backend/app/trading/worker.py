@@ -39,6 +39,7 @@ from ..logging_config import configure_structlog
 from .heartbeat import write_worker_heartbeat
 from .insider_monitor import poll_insider_filings  # noqa: F401 — registered in WorkerSettings
 from .form144_monitor import poll_form144_filings  # noqa: F401 — registered in WorkerSettings
+from .finra_short_interest import poll_short_interest  # noqa: F401 — registered in WorkerSettings
 from .scanner_worker import run_scanner  # noqa: F401 — registered in WorkerSettings
 from ..services.degiro_sync import sync_degiro_portfolio  # noqa: F401 — registered in WorkerSettings
 from ..services.chromadb_client import store_analysis
@@ -1025,6 +1026,7 @@ class WorkerSettings:
         evaluate_closed_trade,
         poll_insider_filings,
         poll_form144_filings,
+        poll_short_interest,
     ]
     queue_name = "arq:trading"
     cron_jobs = [
@@ -1034,6 +1036,9 @@ class WorkerSettings:
         # (see form144_monitor.py), it just needs to be on file before the
         # matching Form 4 sell shows up so that alert can reference it.
         cron(poll_form144_filings, minute={0, 15, 30, 45}),
+        # FINRA only republishes every two weeks — daily is plenty, and the
+        # settlement-date scan is cached per-day regardless.
+        cron(poll_short_interest, hour=6, minute=0),
         cron(sync_degiro_portfolio, hour=2, minute=0),
         cron(weekly_meta_analysis, weekday=0, hour=3, minute=0),
     ]

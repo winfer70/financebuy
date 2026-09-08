@@ -13,6 +13,23 @@ a 90-day window and appends a "Pre-announced via Form 144 on <date> for
 <shares> sh ... — not a surprise" line to the Telegram advice. Also surfaced
 as `pending_144` in `GET /insider/owners/{cik}`.
 
+**Shipped (2026-09-08)**: FINRA biweekly short interest — the api.finra.org
+Query API turned out to require registered API credentials for anything
+past ~2020 (verified live: `group/otcMarket/name/consolidatedShortInterest`
+serves current-looking requests but the data is frozen at 2020-04-15
+regardless of date filters; `group/equity/...` 401s outright). The real free
+path is the flat-file CDN: `cdn.finra.org/equity/otcmarket/biweekly/shrt{YYYYMMDD}.csv`,
+pipe-delimited, market-wide, ~2-3 week publish lag, no predictable "latest"
+URL (wrong dates 403). `finra_short_interest.py` HEAD-scans backward from
+today to find the most recent published date (cached per-day), downloads
+that file, and keeps only rows for tickers already tracked (open positions
++ any ticker with an insider filing on record — computed via direct DB
+query since this runs inside trading-worker, no HTTP round-trip needed).
+`ShortInterestSnapshot` table (migration 0037), daily cron. Adds
+squeeze/crowding advice lines to insider BUY/SELL alerts (high
+days-to-cover, fast-rising short interest) and surfaces the latest reading
+as `short_interest` in `GET /insider/owners/{cik}` when a ticker is given.
+
 ---
 
 ## Current Setup
@@ -161,11 +178,9 @@ lookup or accept CUSIP-only storage with manual/best-effort ticker resolution).
 These aren't SEC filings and need their own poller module (not a fit for
 `insider_edgar.py`'s atom-feed pattern), but are genuinely free and complementary:
 
-- **FINRA short interest** — biweekly (settlement dates mid/end of month), free,
-  ticker-indexed CSV/API. Short interest % of float is a well-known input to squeeze
-  and sentiment analysis; trivially joinable to your existing `ticker` column
-  everywhere. Lowest-effort bonus item on this whole list — it's a flat file on a
-  fixed twice-a-month schedule, no parsing complexity at all.
+- ~~**FINRA short interest**~~ — shipped 2026-09-08, see top of doc. The Query
+  API needs registered credentials for current data; the actual free path is
+  the flat-file CDN.
 - **Congressional stock trading (STOCK Act)** — House and Senate members must file
   Periodic Transaction Reports within 45 days of a trade. Free, published as
   PDFs/structured data on `disclosures-clerk.house.gov` and `efdsearch.senate.gov`.
@@ -178,8 +193,7 @@ These aren't SEC filings and need their own poller module (not a fit for
 ## Suggested Build Order
 
 1. ~~**Form 144**~~ — shipped 2026-09-08, see top of doc.
-2. **FINRA short interest** — near-zero engineering cost, orthogonal signal, no EDGAR
-   parsing needed at all; good "quick second win" alongside #1.
+2. ~~**FINRA short interest**~~ — shipped 2026-09-08, see top of doc.
 3. **Form 3** — small addition, mostly for owner-history context rather than a new
    alert type; do it opportunistically once #1 is in.
 4. **Form 13D/13G** — highest per-filing signal value but more parsing/judgment

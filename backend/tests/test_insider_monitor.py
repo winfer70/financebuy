@@ -86,7 +86,12 @@ def _deps(book=None, notifies=None, user_id=None):
 
 
 def _deps_multi(
-    books: dict, primary_user_id=None, notifies=None, fetch_track_record=None, fetch_144_notice=None
+    books: dict,
+    primary_user_id=None,
+    notifies=None,
+    fetch_track_record=None,
+    fetch_144_notice=None,
+    fetch_short_interest=None,
 ):
     """Multi-user CycleDeps — exercises the new load_books path directly,
     as production code (poll_insider_filings) now does."""
@@ -107,6 +112,7 @@ def _deps_multi(
         primary_user_id=primary_user_id,
         fetch_track_record=fetch_track_record,
         fetch_144_notice=fetch_144_notice,
+        fetch_short_interest=fetch_short_interest,
         ticker_sectors={"AAPL": "Technology", "OGN": "Healthcare"},
         pause_s=0.0,
     ), notifies
@@ -380,6 +386,67 @@ async def test_no_144_note_when_no_matching_notice_on_file():
 
 
 @pytest.mark.asyncio
+async def test_short_interest_note_appended_to_buy_telegram_body():
+    class _FakeShortInterest:
+        days_to_cover = Decimal("6.5")
+        change_percent = Decimal("3.0")
+        settlement_date = None
+
+    async def _fetch_si(ticker):
+        return _FakeShortInterest()
+
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi({}, primary_user_id=uuid.uuid4(), fetch_short_interest=_fetch_si)
+    await run_insider_cycle(MapFetcher(_mapping()), store, deps)  # default FORM4 is a "P" buy
+
+    assert len(notifies) == 1
+    assert "squeeze" in notifies[0]["body"].lower()
+
+
+@pytest.mark.asyncio
+async def test_short_interest_note_appended_to_sell_telegram_body():
+    xml = FORM4.replace("<transactionCode>P</transactionCode>", "<transactionCode>S</transactionCode>")
+
+    class _FakeShortInterest:
+        days_to_cover = Decimal("6.5")
+        change_percent = Decimal("3.0")
+        settlement_date = None
+
+    async def _fetch_si(ticker):
+        return _FakeShortInterest()
+
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi(
+        {uuid.uuid4(): _book(held_tickers={"AAPL"})}, fetch_short_interest=_fetch_si
+    )
+    await run_insider_cycle(MapFetcher(_mapping(xml=xml)), store, deps)
+
+    assert len(notifies) == 1
+    assert "already elevated" in notifies[0]["body"].lower()
+
+
+@pytest.mark.asyncio
+async def test_no_short_interest_note_when_fetch_short_interest_unset():
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi({}, primary_user_id=uuid.uuid4())
+    await run_insider_cycle(MapFetcher(_mapping()), store, deps)
+    assert len(notifies) == 1
+    assert "days to cover" not in notifies[0]["body"].lower()
+
+
+@pytest.mark.asyncio
+async def test_no_short_interest_note_when_none_on_file():
+    async def _fetch_si(ticker):
+        return None
+
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi({}, primary_user_id=uuid.uuid4(), fetch_short_interest=_fetch_si)
+    await run_insider_cycle(MapFetcher(_mapping()), store, deps)
+    assert len(notifies) == 1
+    assert "days to cover" not in notifies[0]["body"].lower()
+
+
+@pytest.mark.asyncio
 async def test_poll_skips_without_user_agent(monkeypatch):
     monkeypatch.delenv("SEC_USER_AGENT", raising=False)
     result = await poll_insider_filings({})
@@ -412,6 +479,14 @@ def test_worker_registers_form144_job():
     assert any(getattr(fn, "__name__", "") == "poll_form144_filings" for fn in WorkerSettings.functions)
     cron_fns = [c.coroutine.__name__ if hasattr(c, "coroutine") else str(c) for c in WorkerSettings.cron_jobs]
     assert "poll_form144_filings" in cron_fns
+
+
+def test_worker_registers_short_interest_job():
+    from app.trading.worker import WorkerSettings
+
+    assert any(getattr(fn, "__name__", "") == "poll_short_interest" for fn in WorkerSettings.functions)
+    cron_fns = [c.coroutine.__name__ if hasattr(c, "coroutine") else str(c) for c in WorkerSettings.cron_jobs]
+    assert "poll_short_interest" in cron_fns
 
 
 def test_news_worker_defaults_to_hermes_and_key_fallback():

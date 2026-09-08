@@ -272,6 +272,7 @@ def format_insider_report(
     pattern=None,
     position=None,
     consensus=None,
+    short_interest=None,
     news_status: str = "ok",
 ) -> str:
     """Telegram/ntfy body for a gated Form 4 (redesigned template)."""
@@ -292,6 +293,7 @@ def format_insider_report(
         cluster_count=cluster_count,
         position=position,
         consensus=consensus,
+        short_interest=short_interest,
     )
     _title, body = format_insider_telegram(
         filing,
