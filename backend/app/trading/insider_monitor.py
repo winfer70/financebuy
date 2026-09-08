@@ -14,7 +14,6 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Callable, Optional, Protocol
 
-import httpx
 import structlog
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -28,7 +27,14 @@ from .insider_briefing import (
     PositionBrief,
     summarize_owner_history,
 )
-from .insider_edgar import FORM4_ATOM_URL, parse_atom_accessions, parse_form4_xml, xml_doc_url_from_index_html
+from .insider_edgar import (
+    FORM4_ATOM_URL,
+    EdgarFetcher,
+    parse_atom_accessions,
+    parse_form4_xml,
+    xml_doc_url_from_index_html,
+)
+from .form144_monitor import get_recent_144_notice
 from .insider_gate import BookSnapshot, GateResult, Integrity, evaluate_filing, sector_exposure
 from .insider_track_record import compute_track_record
 from .market_context import (
@@ -52,21 +58,6 @@ _REQUEST_PAUSE_S = 0.25
 
 _engine = create_async_engine(_DATABASE_URL, echo=False, pool_size=3, max_overflow=1, pool_pre_ping=True)
 _SessionLocal = sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
-
-
-class EdgarFetcher:
-    def __init__(self, user_agent: str):
-        self.user_agent = user_agent
-
-    async def get(self, url: str) -> str:
-        headers = {
-            "User-Agent": self.user_agent,
-            "Accept-Encoding": "gzip, deflate",
-        }
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            resp = await client.get(url, headers=headers)
-            resp.raise_for_status()
-            return resp.text
 
 
 class FilingStore(Protocol):
@@ -269,6 +260,10 @@ class CycleDeps:
     # to the Telegram body as "Track record: <label>" when present. Optional
     # so existing tests/callers that don't set it are unaffected.
     fetch_track_record: Optional[Callable] = None
+    # (owner_cik, ticker) -> Form144Notice | None — a sell that was
+    # pre-announced via Form 144 gets a note instead of reading as a
+    # surprise dump. Optional so existing tests/callers are unaffected.
+    fetch_144_notice: Optional[Callable] = None
     # New, multi-user path: returns dict[user_id, BookSnapshot], one book per
     # user who has open positions. When set, run_insider_cycle evaluates and
     # notifies each *holder* of the filed ticker separately (their own
@@ -420,6 +415,23 @@ def new_accessions(entries: list[dict], seen: set, limit: int = _MAX_NEW_PER_CYC
     return out
 
 
+def _format_144_note(notice) -> str:
+    """Turns a matched Form144Notice into the 'pre-announced' line appended
+    to a sell alert's body — a sale that was already on file via Form 144
+    reads very differently than one with no prior notice at all."""
+    parts = ["Pre-announced via Form 144"]
+    if notice.notice_date:
+        parts.append(f"on {notice.notice_date.isoformat()}")
+    if notice.shares:
+        parts.append(f"for {float(notice.shares):,.0f} sh")
+    if notice.aggregate_value:
+        parts.append(f"(~${float(notice.aggregate_value):,.0f})")
+    if notice.approx_sale_date:
+        parts.append(f"— proposed sale date {notice.approx_sale_date.isoformat()}")
+    parts.append("— this Form 4 matches a notice already on file, not a surprise.")
+    return " ".join(parts)
+
+
 async def run_insider_cycle(
     fetcher: EdgarFetcher,
     store: FilingStore,
@@ -527,6 +539,7 @@ async def run_insider_cycle(
                 news_status = "ok"
                 consensus = None
                 track_record_label = None
+                notice_144_label = None
                 fetched_shared = False
 
                 for uid, book in targets.items():
@@ -566,6 +579,12 @@ async def run_insider_cycle(
                                 )
                                 if tr and tr.label:
                                     track_record_label = tr.label
+                            if code == "S" and deps.fetch_144_notice:
+                                notice = await _maybe_await(
+                                    deps.fetch_144_notice(row.get("owner_cik") or "", ticker)
+                                )
+                                if notice is not None:
+                                    notice_144_label = _format_144_note(notice)
                             fetched_shared = True
                         pos_raw = (book.positions or {}).get(ticker)
                         position = PositionBrief(**pos_raw) if pos_raw else None
@@ -593,6 +612,8 @@ async def run_insider_cycle(
                         )
                         if track_record_label:
                             body = f"{body}\n\nTrack record: {track_record_label}"
+                        if notice_144_label:
+                            body = f"{body}\n\n{notice_144_label}"
                     if gate.in_app:
                         await store.add_rule_alert(uid, gate, row, body)
                         stats["in_app"] += 1
@@ -690,6 +711,7 @@ async def poll_insider_filings(ctx: dict) -> dict:
             fetch_news=_news,
             fetch_consensus=lambda t, p=None: loop.run_in_executor(None, _consensus, t, p),
             fetch_track_record=lambda rows, t: loop.run_in_executor(None, _track_record, rows, t),
+            fetch_144_notice=lambda cik, t: get_recent_144_notice(session, cik, t),
             notify=_notify,
             primary_user_id=primary_user_id,
             ticker_sectors=sectors,

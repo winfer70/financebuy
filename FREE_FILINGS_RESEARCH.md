@@ -1,7 +1,17 @@
 # TickerTap — Free Filings & Alt-Data Expansion Research
 
 **Date**: 2026-09-08
-**Status**: Research (candidate sources beyond Form 4). No code changes in this doc.
+**Status**: Research (candidate sources beyond Form 4), Form 144 now shipped.
+
+**Shipped (2026-09-08)**: Form 144 — `form144_edgar.py` (parser), `cik_ticker_map.py`
+(CIK→ticker resolution via SEC's company_tickers.json, since 144's XML has no
+issuerTradingSymbol), `form144_monitor.py` (poller cron, every 15 min, no
+direct alert per the "surface it, don't auto-alert" guidance below),
+`Form144Notice` table (migration 0036). `insider_monitor.py`'s sell-gate path
+correlates a Form 4 sell against a matching 144 by (owner_cik, ticker) within
+a 90-day window and appends a "Pre-announced via Form 144 on <date> for
+<shares> sh ... — not a surprise" line to the Telegram advice. Also surfaced
+as `pending_144` in `GET /insider/owners/{cik}`.
 
 ---
 
@@ -167,9 +177,7 @@ These aren't SEC filings and need their own poller module (not a fit for
 
 ## Suggested Build Order
 
-1. **Form 144** — cheapest to add, directly strengthens the Form 4 pipeline you just
-   shipped (early warning + context for existing sells), reuses ~90% of the current
-   scaffolding.
+1. ~~**Form 144**~~ — shipped 2026-09-08, see top of doc.
 2. **FINRA short interest** — near-zero engineering cost, orthogonal signal, no EDGAR
    parsing needed at all; good "quick second win" alongside #1.
 3. **Form 3** — small addition, mostly for owner-history context rather than a new

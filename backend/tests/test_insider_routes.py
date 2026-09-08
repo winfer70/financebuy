@@ -147,7 +147,7 @@ class TestOwnerBreakdown:
                 is_10b5_1=True,
             ),
         ]
-        db.execute.return_value = make_scalars_result(rows)
+        db.execute.side_effect = [make_scalars_result(rows), make_scalars_result([])]
 
         resp = client.get("/api/v1/insider/owners/0001214156")
         assert resp.status_code == 200
@@ -191,7 +191,7 @@ class TestOwnerBreakdown:
                 is_10b5_1=False,
             ),
         ]
-        db.execute.return_value = make_scalars_result(rows)
+        db.execute.side_effect = [make_scalars_result(rows), make_scalars_result([])]
 
         resp = client.get("/api/v1/insider/owners/0001214156")
         assert resp.status_code == 200
@@ -207,7 +207,7 @@ class TestOwnerBreakdown:
 
     def test_404_when_no_filings_in_window(self, auth_client):
         client, db, _user = auth_client
-        db.execute.return_value = make_scalars_result([])
+        db.execute.side_effect = [make_scalars_result([]), make_scalars_result([])]
 
         resp = client.get("/api/v1/insider/owners/0001214156")
         assert resp.status_code == 404
@@ -225,7 +225,7 @@ class TestOwnerBreakdownTrackRecord:
             _mock_filing(transaction_code="P", acquired_disposed="A", transaction_date=d_p, shares=Decimal("1000")),
             _mock_filing(transaction_code="S", acquired_disposed="D", transaction_date=d_s, shares=Decimal("500")),
         ]
-        db.execute.return_value = make_scalars_result(rows)
+        db.execute.side_effect = [make_scalars_result(rows), make_scalars_result([])]
 
         bars = sorted(
             [
@@ -258,7 +258,7 @@ class TestOwnerBreakdownTrackRecord:
             _mock_filing(transaction_code="P", acquired_disposed="A"),
             _mock_filing(transaction_code="S", acquired_disposed="D"),
         ]
-        db.execute.return_value = make_scalars_result(rows)
+        db.execute.side_effect = [make_scalars_result(rows), make_scalars_result([])]
 
         resp = client.get("/api/v1/insider/owners/0001214156")
         assert resp.status_code == 200
@@ -267,7 +267,7 @@ class TestOwnerBreakdownTrackRecord:
     def test_none_when_fewer_than_two_open_market_trades(self, auth_client):
         client, db, _user = auth_client
         rows = [_mock_filing(transaction_code="P", acquired_disposed="A")]
-        db.execute.return_value = make_scalars_result(rows)
+        db.execute.side_effect = [make_scalars_result(rows), make_scalars_result([])]
 
         resp = client.get("/api/v1/insider/owners/0001214156", params={"ticker": "AAPL"})
         assert resp.status_code == 200
@@ -282,7 +282,7 @@ class TestOwnerBreakdownTrackRecord:
             _mock_filing(transaction_code="P", acquired_disposed="A", transaction_date=today - timedelta(days=5)),
             _mock_filing(transaction_code="S", acquired_disposed="D", transaction_date=today - timedelta(days=2)),
         ]
-        db.execute.return_value = make_scalars_result(rows)
+        db.execute.side_effect = [make_scalars_result(rows), make_scalars_result([])]
         series = OHLCVResponse(bars=[
             OHLCVBar(date=today.isoformat(), open=100, high=100, low=100, close=100, volume=0)
         ])
@@ -304,3 +304,50 @@ class TestOwnerBreakdownValidation:
 
         resp = client.get("/api/v1/insider/owners/%20")
         assert resp.status_code == 400
+
+
+def _mock_144_notice(**overrides):
+    row = MagicMock()
+    defaults = dict(
+        accession="0001968582-26-000933",
+        ticker="AAPL",
+        owner_cik="0001214156",
+        shares=Decimal("177701"),
+        aggregate_value=Decimal("18134387"),
+        approx_sale_date=date(2026, 9, 8),
+        notice_date=date(2026, 9, 8),
+        broker="J.P. Morgan Securities LLC",
+        filing_url="https://sec.gov/example-144.xml",
+    )
+    defaults.update(overrides)
+    for k, v in defaults.items():
+        setattr(row, k, v)
+    return row
+
+
+class TestOwnerBreakdownPending144:
+    """Form 144 notices (leading indicator for a sell) surfaced alongside
+    the owner's Form 4 history — see FREE_FILINGS_RESEARCH.md."""
+
+    def test_pending_144_included_when_present(self, auth_client):
+        client, db, _user = auth_client
+        rows = [_mock_filing(transaction_code="S", acquired_disposed="D")]
+        notice = _mock_144_notice()
+        db.execute.side_effect = [make_scalars_result(rows), make_scalars_result([notice])]
+
+        resp = client.get("/api/v1/insider/owners/0001214156")
+        assert resp.status_code == 200
+        pending = resp.json()["pending_144"]
+        assert len(pending) == 1
+        assert pending[0]["accession"] == "0001968582-26-000933"
+        assert pending[0]["shares"] == 177701.0
+        assert pending[0]["broker"] == "J.P. Morgan Securities LLC"
+
+    def test_pending_144_empty_list_when_none_on_file(self, auth_client):
+        client, db, _user = auth_client
+        rows = [_mock_filing(transaction_code="S", acquired_disposed="D")]
+        db.execute.side_effect = [make_scalars_result(rows), make_scalars_result([])]
+
+        resp = client.get("/api/v1/insider/owners/0001214156")
+        assert resp.status_code == 200
+        assert resp.json()["pending_144"] == []

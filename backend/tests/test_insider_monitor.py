@@ -85,7 +85,9 @@ def _deps(book=None, notifies=None, user_id=None):
     ), notifies
 
 
-def _deps_multi(books: dict, primary_user_id=None, notifies=None, fetch_track_record=None):
+def _deps_multi(
+    books: dict, primary_user_id=None, notifies=None, fetch_track_record=None, fetch_144_notice=None
+):
     """Multi-user CycleDeps — exercises the new load_books path directly,
     as production code (poll_insider_filings) now does."""
     notifies = notifies if notifies is not None else []
@@ -104,6 +106,7 @@ def _deps_multi(books: dict, primary_user_id=None, notifies=None, fetch_track_re
         notify=_notify,
         primary_user_id=primary_user_id,
         fetch_track_record=fetch_track_record,
+        fetch_144_notice=fetch_144_notice,
         ticker_sectors={"AAPL": "Technology", "OGN": "Healthcare"},
         pause_s=0.0,
     ), notifies
@@ -303,6 +306,80 @@ async def test_no_track_record_section_when_fetch_track_record_unset():
 
 
 @pytest.mark.asyncio
+async def test_144_notice_note_appended_to_sell_telegram_body():
+    """A sell that was pre-announced via Form 144 should read differently
+    from a surprise dump — see form144_monitor.get_recent_144_notice."""
+    from datetime import date as _date
+
+    xml = FORM4.replace("<transactionCode>P</transactionCode>", "<transactionCode>S</transactionCode>")
+
+    class _FakeNotice:
+        shares = Decimal("177701")
+        aggregate_value = Decimal("18134387")
+        approx_sale_date = _date(2026, 9, 8)
+        notice_date = _date(2026, 9, 1)
+
+    async def _fetch_144(owner_cik, ticker):
+        return _FakeNotice()
+
+    store = MemoryFilingStore()
+    holder = uuid.uuid4()
+    deps, notifies = _deps_multi({holder: _book(held_tickers={"AAPL"})}, fetch_144_notice=_fetch_144)
+    await run_insider_cycle(MapFetcher(_mapping(xml=xml)), store, deps)
+
+    assert len(notifies) == 1
+    body = notifies[0]["body"]
+    assert "Pre-announced via Form 144" in body
+    assert "2026-09-01" in body
+    assert "177,701 sh" in body
+    assert "2026-09-08" in body  # proposed sale date
+
+
+@pytest.mark.asyncio
+async def test_no_144_note_when_fetch_144_notice_unset():
+    """Default/pre-feature behavior — no fetch_144_notice configured must
+    not error or add text."""
+    xml = FORM4.replace("<transactionCode>P</transactionCode>", "<transactionCode>S</transactionCode>")
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi({uuid.uuid4(): _book(held_tickers={"AAPL"})})
+    await run_insider_cycle(MapFetcher(_mapping(xml=xml)), store, deps)
+    assert len(notifies) == 1
+    assert "Pre-announced via Form 144" not in notifies[0]["body"]
+
+
+@pytest.mark.asyncio
+async def test_no_144_lookup_attempted_for_buy_filings():
+    """fetch_144_notice is a sell-side concept (144s only cover proposed
+    *sales*) — a buy filing must never even call the correlation lookup."""
+    called = False
+
+    async def _fetch_144(owner_cik, ticker):
+        nonlocal called
+        called = True
+        return None
+
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi({}, primary_user_id=uuid.uuid4(), fetch_144_notice=_fetch_144)
+    await run_insider_cycle(MapFetcher(_mapping()), store, deps)  # default FORM4 is a "P" buy
+    assert len(notifies) == 1
+    assert called is False
+
+
+@pytest.mark.asyncio
+async def test_no_144_note_when_no_matching_notice_on_file():
+    xml = FORM4.replace("<transactionCode>P</transactionCode>", "<transactionCode>S</transactionCode>")
+
+    async def _fetch_144(owner_cik, ticker):
+        return None
+
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi({uuid.uuid4(): _book(held_tickers={"AAPL"})}, fetch_144_notice=_fetch_144)
+    await run_insider_cycle(MapFetcher(_mapping(xml=xml)), store, deps)
+    assert len(notifies) == 1
+    assert "Pre-announced via Form 144" not in notifies[0]["body"]
+
+
+@pytest.mark.asyncio
 async def test_poll_skips_without_user_agent(monkeypatch):
     monkeypatch.delenv("SEC_USER_AGENT", raising=False)
     result = await poll_insider_filings({})
@@ -327,6 +404,14 @@ def test_worker_registers_insider_job():
     assert any(getattr(fn, "__name__", "") == "poll_insider_filings" for fn in WorkerSettings.functions)
     cron_fns = [c.coroutine.__name__ if hasattr(c, "coroutine") else str(c) for c in WorkerSettings.cron_jobs]
     assert "poll_insider_filings" in cron_fns
+
+
+def test_worker_registers_form144_job():
+    from app.trading.worker import WorkerSettings
+
+    assert any(getattr(fn, "__name__", "") == "poll_form144_filings" for fn in WorkerSettings.functions)
+    cron_fns = [c.coroutine.__name__ if hasattr(c, "coroutine") else str(c) for c in WorkerSettings.cron_jobs]
+    assert "poll_form144_filings" in cron_fns
 
 
 def test_news_worker_defaults_to_hermes_and_key_fallback():

@@ -1235,3 +1235,43 @@ class InsiderFiling(Base):
     filing_url = Column(Text, nullable=True)
     notified_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class Form144Notice(Base):
+    """One Form 144 (Notice of Proposed Sale) ingested from EDGAR.
+
+    A leading indicator for insider Form 4 sells — filed before or on the
+    day of a proposed sale of restricted/control stock, stating the exact
+    share count and intended sale date. Ticker isn't embedded in the XML
+    (unlike Form 4's issuerTradingSymbol), so it's resolved from issuer_cik
+    via cik_ticker_map.py at ingest time; a null ticker means resolution
+    failed and the row is kept CIK-only rather than dropped.
+
+    Dedup is accession (one notice per filing, unlike Form 4's multi-row
+    shape). Correlated against InsiderFiling by (owner_cik, ticker) in
+    insider_monitor.py to give a sell alert's advice section a "this was
+    pre-announced" note instead of treating every sale as a surprise.
+    """
+
+    __tablename__ = "form144_notices"
+    __table_args__ = (
+        UniqueConstraint("accession", name="uq_form144_notices_accession"),
+        Index("idx_form144_notices_owner_ticker", "owner_cik", "ticker"),
+        Index("idx_form144_notices_ticker", "ticker"),
+    )
+
+    notice_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    accession = Column(String(25), nullable=False)
+    ticker = Column(String(20), nullable=True)
+    issuer_cik = Column(String(10), nullable=True)
+    issuer_name = Column(String(256), nullable=True)
+    owner_cik = Column(String(10), nullable=True)
+    owner_name = Column(String(256), nullable=True)
+    relationships = Column(String(128), nullable=True)
+    broker = Column(String(256), nullable=True)
+    shares = Column(Numeric(18, 4), nullable=True)
+    aggregate_value = Column(Numeric(18, 2), nullable=True)
+    approx_sale_date = Column(Date, nullable=True)
+    notice_date = Column(Date, nullable=True)
+    filing_url = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

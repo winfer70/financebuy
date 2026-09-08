@@ -15,7 +15,7 @@ from sqlalchemy import asc, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..models import InsiderFiling
+from ..models import Form144Notice, InsiderFiling
 from ..trading.insider_track_record import compute_track_record
 from .auth_routes import get_current_user
 from .market import get_ohlcv_series
@@ -90,6 +90,20 @@ class TrackRecordOut(BaseModel):
     basis: str
 
 
+class Form144NoticeOut(BaseModel):
+    """A Notice of Proposed Sale — a leading indicator filed before or on
+    the day of an insider's actual sale, stating the intended share count
+    and sale date. See FREE_FILINGS_RESEARCH.md."""
+
+    accession: str
+    shares: Optional[float] = None
+    aggregate_value: Optional[float] = None
+    approx_sale_date: Optional[date] = None
+    notice_date: Optional[date] = None
+    broker: Optional[str] = None
+    filing_url: Optional[str] = None
+
+
 class OwnerBreakdownOut(BaseModel):
     owner_cik: str
     owner_name: Optional[str] = None
@@ -107,6 +121,7 @@ class OwnerBreakdownOut(BaseModel):
     pct_10b5_1: Optional[float] = None
     transactions: list[OwnerTxnOut] = Field(default_factory=list)
     track_record: Optional[TrackRecordOut] = None
+    pending_144: list[Form144NoticeOut] = Field(default_factory=list)
 
 
 def _f(v) -> Optional[float]:
@@ -316,6 +331,28 @@ async def owner_breakdown(
 
     track_record = await _compute_track_record(rows, ticker)
 
+    notice_filters = [Form144Notice.owner_cik == cik]
+    if ticker:
+        notice_filters.append(Form144Notice.ticker == ticker.upper())
+    notice_res = await db.execute(
+        select(Form144Notice)
+        .where(*notice_filters)
+        .order_by(desc(Form144Notice.notice_date))
+        .limit(10)
+    )
+    pending_144 = [
+        Form144NoticeOut(
+            accession=n.accession,
+            shares=_f(n.shares),
+            aggregate_value=_f(n.aggregate_value),
+            approx_sale_date=n.approx_sale_date,
+            notice_date=n.notice_date,
+            broker=n.broker,
+            filing_url=n.filing_url,
+        )
+        for n in notice_res.scalars().all()
+    ]
+
     first = rows[0]
     return OwnerBreakdownOut(
         owner_cik=cik,
@@ -334,4 +371,5 @@ async def owner_breakdown(
         pct_10b5_1=(ten_b5 / len(rows)) if rows else None,
         transactions=txns,
         track_record=track_record,
+        pending_144=pending_144,
     )

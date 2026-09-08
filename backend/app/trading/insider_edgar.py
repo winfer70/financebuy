@@ -6,10 +6,33 @@ import xml.etree.ElementTree as ET
 from typing import Optional
 from urllib.parse import urljoin
 
+import httpx
+
 FORM4_ATOM_URL = (
     "https://www.sec.gov/cgi-bin/browse-edgar"
     "?action=getcurrent&type=4&owner=include&count=40&output=atom"
 )
+
+
+class EdgarFetcher:
+    """Shared async HTTP fetcher for any EDGAR atom/XML/index page — not
+    Form-4-specific despite living alongside the Form 4 parser; form144_edgar
+    and any future filing-type module reuse this rather than each opening
+    their own httpx client (and each needing the SEC User-Agent contact
+    requirement wired in separately)."""
+
+    def __init__(self, user_agent: str):
+        self.user_agent = user_agent
+
+    async def get(self, url: str) -> str:
+        headers = {
+            "User-Agent": self.user_agent,
+            "Accept-Encoding": "gzip, deflate",
+        }
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers=headers)
+            resp.raise_for_status()
+            return resp.text
 
 
 def _local(tag: str) -> str:
