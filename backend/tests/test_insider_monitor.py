@@ -93,6 +93,7 @@ def _deps_multi(
     fetch_144_notice=None,
     fetch_short_interest=None,
     fetch_form3_baseline=None,
+    fetch_beneficial_ownership=None,
 ):
     """Multi-user CycleDeps — exercises the new load_books path directly,
     as production code (poll_insider_filings) now does."""
@@ -115,6 +116,7 @@ def _deps_multi(
         fetch_144_notice=fetch_144_notice,
         fetch_short_interest=fetch_short_interest,
         fetch_form3_baseline=fetch_form3_baseline,
+        fetch_beneficial_ownership=fetch_beneficial_ownership,
         ticker_sectors={"AAPL": "Technology", "OGN": "Healthcare"},
         pause_s=0.0,
     ), notifies
@@ -517,6 +519,76 @@ async def test_no_form3_note_when_fetch_form3_baseline_unset():
 
 
 @pytest.mark.asyncio
+async def test_beneficial_ownership_note_appended_for_activist_13d():
+    from datetime import date as _date
+
+    class _FakeRow:
+        is_13d = True
+        event_date = _date(2026, 9, 1)
+        filer_name = "Some Activist Fund"
+        pct_owned = Decimal("7.5")
+
+    async def _fetch_bo(ticker):
+        return [_FakeRow()]
+
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi({}, primary_user_id=uuid.uuid4(), fetch_beneficial_ownership=_fetch_bo)
+    await run_insider_cycle(MapFetcher(_mapping()), store, deps)  # default FORM4 is a "P" buy
+
+    assert len(notifies) == 1
+    body = notifies[0]["body"]
+    assert "Schedule 13D (activist)" in body
+    assert "Some Activist Fund" in body
+    assert "7.5% stake" in body
+
+
+@pytest.mark.asyncio
+async def test_beneficial_ownership_note_appended_for_passive_13g_on_sell():
+    from datetime import date as _date
+
+    xml = FORM4.replace("<transactionCode>P</transactionCode>", "<transactionCode>S</transactionCode>")
+
+    class _FakeRow:
+        is_13d = False
+        event_date = _date(2026, 9, 1)
+        filer_name = "Index Fund LLC"
+        pct_owned = Decimal("6.0")
+
+    async def _fetch_bo(ticker):
+        return [_FakeRow()]
+
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi(
+        {uuid.uuid4(): _book(held_tickers={"AAPL"})}, fetch_beneficial_ownership=_fetch_bo
+    )
+    await run_insider_cycle(MapFetcher(_mapping(xml=xml)), store, deps)
+
+    assert len(notifies) == 1
+    assert "Schedule 13G (passive)" in notifies[0]["body"]
+
+
+@pytest.mark.asyncio
+async def test_no_beneficial_ownership_note_when_fetch_unset():
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi({}, primary_user_id=uuid.uuid4())
+    await run_insider_cycle(MapFetcher(_mapping()), store, deps)
+    assert len(notifies) == 1
+    assert "Schedule 13" not in notifies[0]["body"]
+
+
+@pytest.mark.asyncio
+async def test_no_beneficial_ownership_note_when_empty_list():
+    async def _fetch_bo(ticker):
+        return []
+
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi({}, primary_user_id=uuid.uuid4(), fetch_beneficial_ownership=_fetch_bo)
+    await run_insider_cycle(MapFetcher(_mapping()), store, deps)
+    assert len(notifies) == 1
+    assert "Schedule 13" not in notifies[0]["body"]
+
+
+@pytest.mark.asyncio
 async def test_poll_skips_without_user_agent(monkeypatch):
     monkeypatch.delenv("SEC_USER_AGENT", raising=False)
     result = await poll_insider_filings({})
@@ -565,6 +637,14 @@ def test_worker_registers_form3_job():
     assert any(getattr(fn, "__name__", "") == "poll_form3_filings" for fn in WorkerSettings.functions)
     cron_fns = [c.coroutine.__name__ if hasattr(c, "coroutine") else str(c) for c in WorkerSettings.cron_jobs]
     assert "poll_form3_filings" in cron_fns
+
+
+def test_worker_registers_schedule13_job():
+    from app.trading.worker import WorkerSettings
+
+    assert any(getattr(fn, "__name__", "") == "poll_schedule13_filings" for fn in WorkerSettings.functions)
+    cron_fns = [c.coroutine.__name__ if hasattr(c, "coroutine") else str(c) for c in WorkerSettings.cron_jobs]
+    assert "poll_schedule13_filings" in cron_fns
 
 
 def test_news_worker_defaults_to_hermes_and_key_fallback():

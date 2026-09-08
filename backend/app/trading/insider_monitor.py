@@ -37,6 +37,7 @@ from .insider_edgar import (
 from .finra_short_interest import get_latest_short_interest
 from .form144_monitor import get_recent_144_notice
 from .form3_monitor import get_form3_baseline
+from .schedule13_monitor import get_recent_beneficial_ownership
 from .insider_gate import BookSnapshot, GateResult, Integrity, evaluate_filing, sector_exposure
 from .insider_track_record import compute_track_record
 from .market_context import (
@@ -274,6 +275,10 @@ class CycleDeps:
     # position, used to show what fraction of it a sell represents.
     # Optional so existing tests/callers are unaffected.
     fetch_form3_baseline: Optional[Callable] = None
+    # (ticker) -> list[BeneficialOwnership] — recent Schedule 13D/13G
+    # >5%-ownership disclosures for this ticker (any filer, not owner-
+    # correlated). Optional so existing tests/callers are unaffected.
+    fetch_beneficial_ownership: Optional[Callable] = None
     # New, multi-user path: returns dict[user_id, BookSnapshot], one book per
     # user who has open positions. When set, run_insider_cycle evaluates and
     # notifies each *holder* of the filed ticker separately (their own
@@ -456,6 +461,26 @@ def _format_form3_note(baseline, shares_sold: float) -> Optional[str]:
     return f"This sale is {pct:.0f}% of their initial {initial:,.0f}-share stake{as_of}."
 
 
+def _format_beneficial_ownership_note(rows: list) -> Optional[str]:
+    """Turns recent Schedule 13D/13G hits into a market-color line — a
+    fresh activist 13D is a very different signal than a passive 13G
+    (index-fund rebalancing), so the two get different phrasing."""
+    if not rows:
+        return None
+    row = rows[0]
+    kind = "Schedule 13D (activist)" if row.is_13d else "Schedule 13G (passive)"
+    parts = [f"{kind} filed"]
+    if row.event_date:
+        parts.append(f"on {row.event_date.isoformat()}")
+    if row.filer_name:
+        parts.append(f"by {row.filer_name}")
+    if row.pct_owned:
+        parts.append(f"— {float(row.pct_owned):.1f}% stake")
+    if len(rows) > 1:
+        parts.append(f"({len(rows)} recent 13D/13G filings on this name)")
+    return " ".join(parts)
+
+
 async def run_insider_cycle(
     fetcher: EdgarFetcher,
     store: FilingStore,
@@ -566,6 +591,7 @@ async def run_insider_cycle(
                 notice_144_label = None
                 short_interest = None
                 form3_label = None
+                ownership_label = None
                 fetched_shared = False
 
                 for uid, book in targets.items():
@@ -621,6 +647,12 @@ async def run_insider_cycle(
                                     form3_label = _format_form3_note(
                                         baseline, float(row.get("shares") or 0)
                                     )
+                            if deps.fetch_beneficial_ownership:
+                                ownership_rows = await _maybe_await(
+                                    deps.fetch_beneficial_ownership(ticker)
+                                )
+                                if ownership_rows:
+                                    ownership_label = _format_beneficial_ownership_note(ownership_rows)
                             fetched_shared = True
                         pos_raw = (book.positions or {}).get(ticker)
                         position = PositionBrief(**pos_raw) if pos_raw else None
@@ -653,6 +685,8 @@ async def run_insider_cycle(
                             body = f"{body}\n\n{notice_144_label}"
                         if form3_label:
                             body = f"{body}\n\n{form3_label}"
+                        if ownership_label:
+                            body = f"{body}\n\n{ownership_label}"
                     if gate.in_app:
                         await store.add_rule_alert(uid, gate, row, body)
                         stats["in_app"] += 1
@@ -753,6 +787,7 @@ async def poll_insider_filings(ctx: dict) -> dict:
             fetch_144_notice=lambda cik, t: get_recent_144_notice(session, cik, t),
             fetch_short_interest=lambda t: get_latest_short_interest(session, t),
             fetch_form3_baseline=lambda cik, t: get_form3_baseline(session, cik, t),
+            fetch_beneficial_ownership=lambda t: get_recent_beneficial_ownership(session, t),
             notify=_notify,
             primary_user_id=primary_user_id,
             ticker_sectors=sectors,

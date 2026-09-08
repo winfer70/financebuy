@@ -23,6 +23,25 @@ helper; `form3_monitor.py` polls at the same cadence as Form 144.
 path correlates by (owner_cik, ticker) and appends "This sale is X% of
 their initial N-share stake" to the advice.
 
+**Shipped (2026-09-08)**: Schedule 13D/13G — verified against two real live
+filings (Sono Group N.V. 13D, a 9-person joint "group" filing; Metalla
+Royalty & Streaming Ltd. 13G, a single institutional filer). Both use
+structured XML cover pages but with genuinely different tag names for
+equivalent concepts (13D: `issuerCIK`/`aggregateAmountOwned`/`percentOfClass`
+under `reportingPersons/reportingPersonInfo`; 13G: `issuerCik`/
+`reportingPersonBeneficiallyOwnedAggregateNumberOfShares`/`classPercent`
+under unwrapped sibling `coverPageHeaderReportingPersonDetails` blocks, no
+per-person CIK — falls back to the top-level filer CIK). EDGAR's
+`getcurrent` type filter needed the exact internal string `SCHEDULE 13D`/
+`SCHEDULE 13G` (not `SC 13D` as originally guessed), which conveniently
+prefix-matches amendments (`SCHEDULE 13D/A`) too. `schedule13_edgar.py` +
+`schedule13_monitor.py`, `BeneficialOwnership` table (migration 0039, one
+row per reporting person — a 13D can name several). Surfaced ticker-wide
+(not owner-correlated like Form 144/3, since these filers are typically
+institutions/activists rather than the same people filing Form 4s) as
+market color on insider BUY/SELL alerts: "Schedule 13D (activist) filed
+... by X — Y% stake" vs the softer 13G phrasing.
+
 **Shipped (2026-09-08)**: FINRA biweekly short interest — the api.finra.org
 Query API turned out to require registered API credentials for anything
 past ~2020 (verified live: `group/otcMarket/name/consolidatedShortInterest`
@@ -205,8 +224,7 @@ These aren't SEC filings and need their own poller module (not a fit for
 1. ~~**Form 144**~~ — shipped 2026-09-08, see top of doc.
 2. ~~**FINRA short interest**~~ — shipped 2026-09-08, see top of doc.
 3. ~~**Form 3**~~ — shipped 2026-09-08, see top of doc.
-4. **Form 13D/13G** — highest per-filing signal value but more parsing/judgment
-   work (free-text "Item 4"); worth it once the above are stable.
+4. ~~**Form 13D/13G**~~ — shipped 2026-09-08, see top of doc.
 5. **Form 8-K** — valuable but only if the portfolio-ticker filter is built first;
    otherwise it's a firehose. Pair with the existing news-scoring pipeline rather
    than routing through the insider Telegram digest.

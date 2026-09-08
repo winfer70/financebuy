@@ -1345,3 +1345,48 @@ class Form3Statement(Base):
     period_of_report = Column(Date, nullable=True)
     filing_url = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class BeneficialOwnership(Base):
+    """One reporting person's row from a Schedule 13D or 13G ingested from
+    EDGAR — beneficial ownership >5% of a public company's shares.
+
+    13D = "activist" intent (may seek control/board seats, states a
+    purpose in purpose_text). 13G = passive investor (index funds, most
+    institutions), same 5% threshold, no intent language — purpose_text is
+    always null for these.
+
+    One row per reporting person, not per filing: a 13D can be a joint
+    "group" filing naming several people/entities on one cover page (see
+    schedule13_edgar.py), each with their own shares_owned/pct_owned.
+    Dedup is (accession, person_index). Ticker isn't embedded in either
+    schema (only CUSIP) — resolved from issuer_cik via cik_ticker_map.py,
+    same as Form 144.
+
+    Surfaced ticker-wide (not owner-correlated like Form 144/3 — 13D/13G
+    filers are typically institutions/activists, not the same individuals
+    filing Form 4s) as general market color on insider alerts for that name.
+    """
+
+    __tablename__ = "beneficial_ownership"
+    __table_args__ = (
+        UniqueConstraint("accession", "person_index", name="uq_beneficial_ownership_accession_person"),
+        Index("idx_beneficial_ownership_ticker", "ticker"),
+    )
+
+    ownership_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    accession = Column(String(25), nullable=False)
+    person_index = Column(Integer, nullable=False, server_default="0")
+    is_13d = Column(Boolean, nullable=False, server_default="true")
+    is_amendment = Column(Boolean, nullable=False, server_default="false")
+    ticker = Column(String(20), nullable=True)
+    issuer_cik = Column(String(10), nullable=True)
+    issuer_name = Column(String(256), nullable=True)
+    filer_cik = Column(String(10), nullable=True)
+    filer_name = Column(String(256), nullable=True)
+    shares_owned = Column(Numeric(20, 4), nullable=True)
+    pct_owned = Column(Numeric(8, 4), nullable=True)
+    event_date = Column(Date, nullable=True)
+    purpose_text = Column(Text, nullable=True)
+    filing_url = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
