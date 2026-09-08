@@ -60,6 +60,36 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
     preferences = Column(JSONB, server_default="{}", nullable=True)
+    # Per-user Telegram notification target. The bot token stays a single
+    # server-side secret (TELEGRAM_BOT_TOKEN env var) — this is just the
+    # chat_id Telegram reports once this user's account has messaged the
+    # bot, learned automatically via the /link command, never typed in.
+    telegram_chat_id = Column(String(64), nullable=True)
+    telegram_link_code = Column(String(16), nullable=True)
+    telegram_link_code_expires_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class TelegramInvite(Base):
+    """One-time invite code gating the Telegram-connect step on /register.
+
+    Without a valid code, the register page never shows the Telegram step —
+    this is what lets a friend register and link their own chat without an
+    admin having to hand them anything more sensitive than a URL.
+    """
+
+    __tablename__ = "telegram_invites"
+
+    invite_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    code = Column(String(32), unique=True, nullable=False)
+    created_by = Column(
+        UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True
+    )
+    used_by = Column(
+        UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True
+    )
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class Account(Base):

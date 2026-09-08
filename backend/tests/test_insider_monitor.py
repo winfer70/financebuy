@@ -2,6 +2,7 @@
 import os
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 
 os.environ.setdefault("JWT_SECRET", "test-secret-key-that-is-long-enough-for-jwt-validation-purposes")
@@ -84,6 +85,29 @@ def _deps(book=None, notifies=None, user_id=None):
     ), notifies
 
 
+def _deps_multi(books: dict, primary_user_id=None, notifies=None):
+    """Multi-user CycleDeps — exercises the new load_books path directly,
+    as production code (poll_insider_filings) now does."""
+    notifies = notifies if notifies is not None else []
+
+    async def _notify(user, event, title, body, prio):
+        notifies.append(
+            {"user_id": user, "event": event, "title": title, "body": body, "prio": prio}
+        )
+
+    return CycleDeps(
+        load_book=None,
+        load_books=lambda: books,
+        fetch_integrity=lambda _t: Integrity(),
+        fetch_volume=lambda _t, _s=None: SNAP,
+        fetch_news=lambda _t: NEWS,
+        notify=_notify,
+        primary_user_id=primary_user_id,
+        ticker_sectors={"AAPL": "Technology", "OGN": "Healthcare"},
+        pause_s=0.0,
+    ), notifies
+
+
 @pytest.mark.asyncio
 async def test_cycle_officer_buy_sends_telegram():
     store = MemoryFilingStore()
@@ -155,6 +179,89 @@ async def test_cycle_does_not_renotify_same_accession():
     stats2 = await run_insider_cycle(fetcher, store, deps)
     assert stats2["new"] == 0
     assert len(notifies) == 1
+
+
+@pytest.mark.asyncio
+async def test_multi_user_sell_notifies_only_the_holder():
+    """Regression: load_book() used to pick 'whichever user was iterated
+    first' for every notification, so a sell on a ticker only user B holds
+    could end up attributed to user A. With load_books, only the actual
+    holder is evaluated/notified."""
+    xml = FORM4.replace("<transactionCode>P</transactionCode>", "<transactionCode>S</transactionCode>")
+    holder, non_holder = uuid.uuid4(), uuid.uuid4()
+    books = {
+        holder: _book(held_tickers={"AAPL"}),
+        non_holder: _book(held_tickers={"MSFT"}),
+    }
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi(books)
+    stats = await run_insider_cycle(MapFetcher(_mapping(xml=xml)), store, deps)
+
+    assert stats["telegram"] == 1
+    assert len(notifies) == 1
+    assert notifies[0]["user_id"] == holder
+    assert notifies[0]["event"] == "insider_sell"
+
+
+@pytest.mark.asyncio
+async def test_multi_user_both_holders_get_own_personalized_notification():
+    xml = FORM4.replace("<transactionCode>P</transactionCode>", "<transactionCode>S</transactionCode>")
+    user_a, user_b = uuid.uuid4(), uuid.uuid4()
+    books = {
+        user_a: _book(held_tickers={"AAPL"}, sector_values={"Technology": Decimal("100000")}),
+        user_b: _book(held_tickers={"AAPL"}, sector_values={"Technology": Decimal("900000")}),
+    }
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi(books)
+    stats = await run_insider_cycle(MapFetcher(_mapping(xml=xml)), store, deps)
+
+    assert stats["telegram"] == 2
+    notified_users = {n["user_id"] for n in notifies}
+    assert notified_users == {user_a, user_b}
+    # Both got an in-app RuleAlert too, one each.
+    assert len(store.alerts) == 2
+    assert {a["user_id"] for a in store.alerts} == {user_a, user_b}
+
+
+@pytest.mark.asyncio
+async def test_multi_user_buy_on_unheld_ticker_goes_to_primary_only():
+    """A BUY 'new idea' filing on a ticker nobody holds is inherently about
+    the primary/owner's personal watchlist config — it must not fan out to
+    every user, since a friend has no reason to see the owner's research."""
+    primary, other = uuid.uuid4(), uuid.uuid4()
+    books = {other: _book(held_tickers={"MSFT"})}  # `other` holds something, just not AAPL
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi(books, primary_user_id=primary)
+    stats = await run_insider_cycle(
+        MapFetcher(_mapping()),
+        store,
+        deps,
+        now=datetime(2026, 9, 2, tzinfo=timezone.utc),
+    )
+
+    assert stats["telegram"] == 1
+    assert notifies[0]["user_id"] == primary
+
+
+@pytest.mark.asyncio
+async def test_multi_user_accession_marked_notified_once_both_users_done():
+    xml = FORM4.replace("<transactionCode>P</transactionCode>", "<transactionCode>S</transactionCode>")
+    user_a, user_b = uuid.uuid4(), uuid.uuid4()
+    books = {
+        user_a: _book(held_tickers={"AAPL"}),
+        user_b: _book(held_tickers={"AAPL"}),
+    }
+    store = MemoryFilingStore()
+    fetcher = MapFetcher(_mapping(xml=xml))
+    deps, notifies = _deps_multi(books)
+    await run_insider_cycle(fetcher, store, deps)
+    assert len(notifies) == 2
+    assert store.rows[0]["notified_at"] is not None
+
+    # A second cycle must not re-notify either user for the same accession.
+    stats2 = await run_insider_cycle(fetcher, store, deps)
+    assert stats2["new"] == 0
+    assert len(notifies) == 2
 
 
 @pytest.mark.asyncio

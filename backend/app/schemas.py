@@ -55,6 +55,13 @@ class UserCreate(UserBase):
             raise ValueError("Password must contain at least one special character.")
         return v
 
+    telegram_invite_code: Optional[str] = Field(
+        None,
+        max_length=32,
+        description="One-time invite code that unlocks Telegram notification linking. "
+        "Only present when the register page was opened via an invite link.",
+    )
+
 
 class UserOut(UserBase):
     """Serialised user returned by the API — no password hash included."""
@@ -62,6 +69,14 @@ class UserOut(UserBase):
     user_id: UUID = Field(..., description="Unique user identifier.")
     kyc_status: str = Field(..., description="KYC verification status: pending | approved | rejected.")
     is_active: bool = Field(..., description="Whether the account is active and can authenticate.")
+    telegram_link_code: Optional[str] = Field(
+        None,
+        description="One-time code to send the bot as '/link <code>' to connect Telegram. "
+        "Only set when registration used a valid Telegram invite.",
+    )
+    telegram_bot_username: Optional[str] = Field(
+        None, description="Public @username of the notification bot, if telegram_link_code is set."
+    )
 
     class Config:
         orm_mode = True

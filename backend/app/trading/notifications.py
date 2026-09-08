@@ -73,8 +73,10 @@ async def notify(
     if event_type in webhook_events:
         await _fire_webhooks(db, user_id, event_type, title, body, metadata)
 
-    # 5. Telegram (always, if TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID set)
-    await _send_telegram(title, body)
+    # 5. Telegram — this user's own linked chat if they have one (see
+    # telegram_invites.py), else the single configured owner chat. Still
+    # only actually sends if TELEGRAM_BOT_TOKEN is set.
+    await _send_telegram(title, body, chat_id=user.telegram_chat_id or os.getenv("TELEGRAM_CHAT_ID"))
 
 
 async def _insert_notification(
@@ -193,10 +195,25 @@ async def _fire_webhooks(
                 logger.warning("Webhook failed: url=%s error=%s", wh.url, e)
 
 
-async def _send_telegram(title: str, body: str) -> bool:
+async def _resolve_telegram_chat_id(db: AsyncSession, user_id) -> Optional[str]:
+    """This user's own linked Telegram chat (see telegram_invites.py's /link
+    flow), falling back to the single configured owner chat if they haven't
+    linked one — preserves existing single-owner behavior for every account
+    that never went through the Telegram-invite flow."""
+    from ..models import User
+
+    if user_id is not None:
+        result = await db.execute(select(User.telegram_chat_id).where(User.user_id == user_id))
+        chat_id = result.scalar_one_or_none()
+        if chat_id:
+            return chat_id
+    return os.getenv("TELEGRAM_CHAT_ID")
+
+
+async def _send_telegram(title: str, body: str, *, chat_id: Optional[str] = None) -> bool:
     """Send a Telegram message. True on 2xx or if Telegram is not configured."""
     token = os.getenv("TELEGRAM_BOT_TOKEN")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    chat_id = chat_id or os.getenv("TELEGRAM_CHAT_ID")
     if not (token and chat_id):
         return True
     text = f"{title}\n{body}" if body else title
@@ -264,7 +281,8 @@ async def notify_soft_stop(
     telegram_ok = True
     ntfy_ok = True
     if send_telegram:
-        telegram_ok = await _send_telegram(title, body)
+        chat_id = await _resolve_telegram_chat_id(db, user_id)
+        telegram_ok = await _send_telegram(title, body, chat_id=chat_id)
     if send_ntfy:
         ntfy_ok = await _send_ntfy(title, body, ntfy_priority)
 

@@ -28,9 +28,10 @@ import api from "../api/client";
 
 /** Tab identifiers for the admin dashboard. */
 const TABS = [
-  { id: "users",     label: "USERS"     },
-  { id: "reports",   label: "REPORTS"   },
-  { id: "audit-log", label: "AUDIT LOG" },
+  { id: "users",             label: "USERS"             },
+  { id: "reports",           label: "REPORTS"           },
+  { id: "audit-log",         label: "AUDIT LOG"         },
+  { id: "telegram-invites",  label: "TELEGRAM INVITES"  },
 ];
 
 /** Report status options for the filter dropdown. */
@@ -801,6 +802,91 @@ function AuditLogTab({ token }) {
   );
 }
 
+/**
+ * TelegramInvitesTab — Mint a one-time Telegram-invite registration link.
+ *
+ * Each generated link works exactly once: it unlocks the Telegram-connect
+ * step on /register for whoever opens it, and stops working the moment
+ * that registration completes. The bot token is never part of this flow —
+ * only the resulting register_url, which is safe to share.
+ */
+function TelegramInvitesTab({ token }) {
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState(null);
+  const [invite, setInvite] = useState(null); // {code, expires_at, register_url}
+  const [copied, setCopied] = useState(false);
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    setError(null);
+    setCopied(false);
+    try {
+      const data = await api.adminCreateTelegramInvite(token);
+      setInvite(data);
+    } catch (e) {
+      setError(e.message || "Failed to generate invite");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleCopy = async () => {
+    if (!invite?.register_url) return;
+    try {
+      await navigator.clipboard.writeText(invite.register_url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (_) { /* clipboard permission denied — user can still select-copy */ }
+  };
+
+  return (
+    <div style={{ fontFamily: "var(--font-mono)", maxWidth: 560 }}>
+      <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.6, marginBottom: 16 }}>
+        Generate a one-time link that lets a friend register and connect their
+        own Telegram chat for their own alerts. Each link works exactly once —
+        it stops working the moment that registration completes.
+      </div>
+      <button
+        type="button"
+        onClick={handleGenerate}
+        disabled={generating}
+        className="btn btn-amber"
+        style={{ marginBottom: 16 }}
+      >
+        {generating ? "GENERATING..." : "GENERATE INVITE LINK"}
+      </button>
+      {error && (
+        <div style={{ color: "var(--red, #e5484d)", fontSize: 11, marginBottom: 12 }}>{error}</div>
+      )}
+      {invite && (
+        <div style={{
+          border: "1px solid var(--border, #333)", borderRadius: 4, padding: 14,
+          background: "var(--bg2, #161616)",
+        }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input
+              readOnly
+              value={invite.register_url}
+              onFocus={(e) => e.target.select()}
+              style={{
+                flex: 1, background: "var(--bg3, #111)", border: "1px solid var(--border, #333)",
+                borderRadius: 3, padding: "8px 10px", color: "var(--text, #eee)",
+                fontFamily: "inherit", fontSize: 12,
+              }}
+            />
+            <button type="button" onClick={handleCopy} className="btn" style={{ whiteSpace: "nowrap" }}>
+              {copied ? "COPIED" : "COPY"}
+            </button>
+          </div>
+          <div style={{ color: "var(--muted)", fontSize: 10, marginTop: 8 }}>
+            Expires {new Date(invite.expires_at).toLocaleString()} if unused.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    MAIN ADMIN PAGE
 ═══════════════════════════════════════════════════════════════════════════ */
@@ -884,9 +970,10 @@ export default function AdminPage({ token }) {
       </div>
 
       {/* Tab content */}
-      {activeTab === "users"     && <UsersTab token={token} />}
-      {activeTab === "reports"   && <ReportsTab token={token} />}
-      {activeTab === "audit-log" && <AuditLogTab token={token} />}
+      {activeTab === "users"             && <UsersTab token={token} />}
+      {activeTab === "reports"           && <ReportsTab token={token} />}
+      {activeTab === "audit-log"         && <AuditLogTab token={token} />}
+      {activeTab === "telegram-invites"  && <TelegramInvitesTab token={token} />}
     </div>
     </div>
   );

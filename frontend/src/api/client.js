@@ -133,6 +133,16 @@ const api = {
   register: (payload) =>
     apiFetch("/auth/register", { method: "POST", body: payload }),
 
+  /**
+   * Check whether a Telegram invite code is currently valid (unused, not
+   * expired) — used by the register page to decide whether to show the
+   * Telegram-connect step. Public, unauthenticated.
+   * @param {string} code
+   * @returns {Promise<{valid: boolean}>}
+   */
+  checkTelegramInvite: (code) =>
+    apiFetch(`/telegram-invites/${encodeURIComponent(code)}`),
+
   /** @param {string} email */
   forgotPassword: (email) =>
     apiFetch("/auth/forgot-password", { method: "POST", body: { email } }),
@@ -1073,6 +1083,15 @@ const api = {
   /** List all users (admin). */
   adminListUsers: (token) =>
     apiFetch("/admin/users", { token }),
+
+  /**
+   * Mint a one-time Telegram-invite registration link (admin). Share the
+   * returned register_url — it unlocks the Telegram-connect step on
+   * /register for exactly one signup, then stops working.
+   * @returns {Promise<{code: string, expires_at: string, register_url: string}>}
+   */
+  adminCreateTelegramInvite: (token) =>
+    apiFetch("/admin/telegram-invites", { method: "POST", token }),
 
   /** Lock (deactivate) a user. */
   adminLockUser: (userId, token) =>
