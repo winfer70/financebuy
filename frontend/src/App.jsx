@@ -70,6 +70,7 @@ import LearningPage                  from "./pages/LearningPage";
 import ExitPointsPage                from "./pages/ExitPointsPage";
 import ResearchPage                  from "./pages/ResearchPage";
 import AdminPage                     from "./pages/AdminPage";
+import { OnboardingTutorial }        from "./components/common/OnboardingTutorial";
 
 /* ── API ─────────────────────────────────────────────────────────────────── */
 import api from "./api/client";
@@ -214,6 +215,7 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
 
   return (
     <div className="app-shell">
+      <OnboardingTutorial token={authToken} />
       {/* ── Sidebar ─────────────────────────────────────────────────────── */}
       <aside className={`sidebar${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
         <div className="sidebar-logo">

@@ -723,6 +723,8 @@ async def get_profile(current_user: User = Depends(get_current_user)):
     prefs = UserPreferences(**{
         "currency": raw.get("currency", "USD"),
         "language": raw.get("language", "en"),
+        "sidebar_collapsed": raw.get("sidebar_collapsed", False),
+        "tutorial_done": raw.get("tutorial_done", False),
     })
     return UserProfileOut(
         email=current_user.email,
@@ -772,6 +774,10 @@ async def update_preferences(
         existing["currency"] = payload.currency
     if payload.language:
         existing["language"] = payload.language
+    if payload.sidebar_collapsed is not None:
+        existing["sidebar_collapsed"] = payload.sidebar_collapsed
+    if payload.tutorial_done is not None:
+        existing["tutorial_done"] = payload.tutorial_done
 
     current_user.preferences = existing
     await db.commit()
@@ -781,6 +787,8 @@ async def update_preferences(
     return UserPreferences(
         currency=raw.get("currency", "USD"),
         language=raw.get("language", "en"),
+        sidebar_collapsed=raw.get("sidebar_collapsed", False),
+        tutorial_done=raw.get("tutorial_done", False),
     )
 
 
@@ -1274,6 +1282,8 @@ async def update_profile(
     prefs = UserPreferences(**{
         "currency": raw.get("currency", "USD"),
         "language": raw.get("language", "en"),
+        "sidebar_collapsed": raw.get("sidebar_collapsed", False),
+        "tutorial_done": raw.get("tutorial_done", False),
     })
     return UserProfileOut(
         email=current_user.email,
