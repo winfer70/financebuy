@@ -29,6 +29,7 @@ from ..models import Notification, PriceAlert, Portfolio, PortfolioPosition
 from .heartbeat import write_worker_heartbeat
 from ..services.degiro_sync import sync_degiro_portfolio  # noqa: F401
 from .notifications import notify_soft_stop
+from .insider_briefing import PositionBrief
 from .market_context import fetch_ticker_news, fetch_volume_snapshot, format_soft_stop_report
 
 # Configure structlog before any logger is obtained — idempotent guard inside
@@ -57,6 +58,7 @@ async def _build_soft_stop_report(
     soft_stop: float,
     stage: str,
     sector: Optional[str] = None,
+    position: Optional[PositionBrief] = None,
 ) -> str:
     """Price vs stop, scanner-style volume, and scored news for Telegram/ntfy."""
     loop = asyncio.get_running_loop()
@@ -83,7 +85,8 @@ async def _build_soft_stop_report(
         news = []
         news_status = "error"
     return format_soft_stop_report(
-        ticker, price, soft_stop, stage, snap, news, news_status=news_status, ticker_sector=sector
+        ticker, price, soft_stop, stage, snap, news,
+        news_status=news_status, ticker_sector=sector, position=position,
     )
 
 
@@ -305,6 +308,13 @@ async def _fire_soft_stop_stage(
         soft_stop,
         stage,
         sector=getattr(pos, "sector", None),
+        position=PositionBrief(
+            quantity=float(getattr(pos, "quantity", 0) or 0),
+            purchase_price=float(getattr(pos, "purchase_price", 0) or 0),
+            hard_stop=float(pos.hard_stop_loss) if getattr(pos, "hard_stop_loss", None) is not None else None,
+            soft_stop=soft_stop,
+            date_entered=getattr(pos, "date_entered", None),
+        ),
     )
 
     result = await notify_soft_stop(

@@ -5,6 +5,7 @@ No LLM. Telegram copy must stay deterministic and cite the live rules file.
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 from typing import Optional
 
@@ -58,6 +59,62 @@ def _news_bias(news: list) -> str:
     return "MIXED"
 
 
+def _position_phase_note(
+    date_entered: Optional[date],
+    klass: str,
+    rules: dict,
+    *,
+    today: Optional[date] = None,
+) -> Optional[str]:
+    """Phase Framework note for a held position (Phase 0 grace / Phase 1 BEP
+    assessment / Phase 2 time-based exit), driven by how long it's been open.
+
+    Returns None if the position's open date is unknown — the phase can't be
+    determined, so silently omitting the line beats guessing.
+    """
+    if date_entered is None:
+        return None
+    today = today or date.today()
+    days_held = (today - date_entered).days
+    if days_held < 0:
+        return None
+
+    phase0_days = rules.get("phase0_grace_days", 3)
+    phase1_end = rules.get("phase1_end_days", 10)
+    phase2_ext = rules.get("phase2_extension_days", 5)
+
+    if days_held <= phase0_days:
+        return f"Phase 0 grace period (day {days_held}/{phase0_days}) — hold through normal noise, no stop-out on first-day volatility."
+    if days_held <= phase1_end:
+        bep = rules.get(
+            "volatile_bep_trigger_pct" if klass == "volatile" else "stable_bep_trigger_pct",
+            5.0 if klass == "volatile" else 2.0,
+        )
+        return f"Phase 1 BEP assessment (day {days_held}/{phase1_end}) — needs +{bep:g}% before considering a partial exit."
+    return (
+        f"Phase 2 (day {days_held}, past the {phase1_end}-day mark) — close if no catalyst "
+        f"and not at BEP; +{phase2_ext}d extension only if there's a clear one (earnings, news)."
+    )
+
+
+def _stop_line(position) -> Optional[str]:
+    """Two-level stop line using the position's actual stored levels rather
+    than a generic phrase — soft alert (notification-only) and hard stop
+    (the broker order, meant to sit ~1.5xATR14 below the soft level per the
+    rules) are both already computed and stored per-position; show them."""
+    if position is None:
+        return None
+    hard = getattr(position, "hard_stop", None)
+    soft = getattr(position, "soft_stop", None)
+    if hard is not None and soft is not None:
+        return f"Stops: soft ${soft:.2f} (alert only) / hard ${hard:.2f} (broker order) — hard stop is the floor, never moved against the position."
+    if hard is not None:
+        return f"Hard stop ${hard:.2f} — the floor, never moved against the position."
+    if soft is not None:
+        return f"Soft alert level ${soft:.2f} set, no hard stop on file yet — set one at entry, not after it moves."
+    return None
+
+
 def advice_lines(
     ticker: str,
     event: str,
@@ -71,6 +128,8 @@ def advice_lines(
     rules: Optional[dict] = None,
     cluster_count: int = 1,
     stage: Optional[str] = None,
+    position=None,
+    consensus=None,
 ) -> list[str]:
     """Action lines for Telegram. Empty if rules file is missing."""
     rules = rules if rules is not None else load_investment_rules()
@@ -96,10 +155,21 @@ def advice_lines(
     if ticker in _upper_set(rules, "avoid_tickers"):
         lines.append(f"{ticker} is on avoid_tickers — do not open (or re-open) a position.")
 
+    date_entered = getattr(position, "date_entered", None) if position else None
+    phase_note = _position_phase_note(date_entered, klass, rules) if held else None
+    target = getattr(consensus, "target", None) if consensus else None
+    upside_pct = getattr(consensus, "upside_pct", None) if consensus else None
+    target_warn_pct = rules.get("analyst_target_premium_warn_pct", 40.0)
+    target_baked_in = (
+        target is not None and upside_pct is not None and upside_pct < target_warn_pct
+    )
+
     if event == EVENT_INSIDER_BUY:
         lines.append("Do not chase this Form 4 — wait for YOUR entry, not the print.")
         if held:
             lines.append("Already in the book. No averaging down if red; add only if this was a planned scale-in.")
+            if phase_note:
+                lines.append(phase_note)
         elif tier:
             lines.append(
                 f"Watchlist tier {tier} — in-universe. Still need a planned setup, defined exit, and size."
@@ -117,6 +187,11 @@ def advice_lines(
         if ticker == "SNDK":
             ban = rules.get("sndk_strike3_ban_days", 5)
             lines.append(f"SNDK: 3-strike = {ban}-day ban, two-bucket system only.")
+        if target_baked_in:
+            lines.append(
+                f"Analyst target ${target:.2f} is only {upside_pct:.1f}% above — may already be "
+                f"priced in (threshold {target_warn_pct:g}%). Don't add on the print alone."
+            )
         if sector_pct is not None and sector_cap is not None:
             room = sector_cap - sector_pct
             if room <= 0:
@@ -144,6 +219,8 @@ def advice_lines(
     elif event == EVENT_INSIDER_SELL:
         if held:
             lines.append("Insider sell on a name we hold — default is respect it. Do not average down.")
+            if phase_note:
+                lines.append(phase_note)
         else:
             lines.append("Insider sell on an unheld name — log only unless you were about to buy.")
         if leaving:
@@ -152,7 +229,7 @@ def advice_lines(
             lines.append("Light volume on the drop — shakeout possible, but do not add into an insider sale.")
         if klass == "volatile":
             lines.append(f"VOLATILE: if you exit, {vol_cool}-day cooloff, no same-day re-entry.")
-        lines.append("Hard stop stays where it was set at entry — never moved against the position.")
+        lines.append(_stop_line(position) or "Hard stop stays where it was set at entry — never moved against the position.")
         if bias == "BULL":
             lines.append("Bull headlines do not cancel an officer/director sale.")
 
@@ -165,10 +242,12 @@ def advice_lines(
             lines.append("Soft stop on light volume — shakeout possible. Still no averaging down; decide at the close.")
         else:
             lines.append("Soft stop hit — honor it or accept the gap. No adding.")
+        if phase_note:
+            lines.append(phase_note)
         if klass == "volatile":
             lines.append(f"VOLATILE: no same-day re-entry; {vol_cool}-day cooloff after a stop.")
         else:
-            lines.append("Hard stop is the floor and is never moved against the position.")
+            lines.append(_stop_line(position) or "Hard stop is the floor and is never moved against the position.")
         if bias == "BULL":
             lines.append("Bull news does not authorize averaging down through a stop.")
         lines.append("If you scratch: wait for a new planned entry, not the bounce.")

@@ -379,26 +379,42 @@ async def get_watch_tickers(
     targeted search for each instead of waiting for incidental coverage.
 
     Returns:
-        {"tickers": [...]} — deduplicated, upper-cased, capped list.
+        {"tickers": [...]} — deduplicated, upper-cased, capped list, most
+        recently filed tickers first.
     """
     _verify_internal_auth(request)
 
     since = datetime.now(timezone.utc).date() - timedelta(days=_WATCH_TICKER_FILING_LOOKBACK_DAYS)
 
+    # Order Form 4 filers by most recent transaction first — a brand-new
+    # filing (the exact case a Telegram alert fires for) needs to reach the
+    # front of the worker's per-cycle window, not get buried alphabetically
+    # behind whatever else is on the list. Open positions have no comparable
+    # urgency signal, so they're appended after in ticker order.
     held_result = await db.execute(
         select(PortfolioPosition.ticker).where(PortfolioPosition.closed_at.is_(None)).distinct()
     )
-    filed_result = await db.execute(
-        select(InsiderFiling.ticker).where(InsiderFiling.transaction_date >= since).distinct()
+    filed_rows = await db.execute(
+        select(InsiderFiling.ticker, func.max(InsiderFiling.transaction_date))
+        .where(InsiderFiling.transaction_date >= since)
+        .group_by(InsiderFiling.ticker)
+        .order_by(func.max(InsiderFiling.transaction_date).desc())
     )
 
-    tickers: set = set()
-    for row in (*held_result.all(), *filed_result.all()):
+    tickers: list = []
+    seen: set = set()
+    for ticker, _latest in filed_rows.all():
+        t = (ticker or "").strip().upper()
+        if t and t not in seen:
+            seen.add(t)
+            tickers.append(t)
+    for row in held_result.all():
         t = (row[0] or "").strip().upper()
-        if t:
-            tickers.add(t)
+        if t and t not in seen:
+            seen.add(t)
+            tickers.append(t)
 
-    return {"tickers": sorted(tickers)[:_WATCH_TICKER_LIMIT]}
+    return {"tickers": tickers[:_WATCH_TICKER_LIMIT]}
 
 
 @router.post("/internal/rules", response_model=ScoringRuleOut)

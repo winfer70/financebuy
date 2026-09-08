@@ -220,6 +220,7 @@ def format_soft_stop_report(
     ticker_sector: Optional[str] = None,
     rules: Optional[dict] = None,
     news_status: str = "ok",
+    position=None,
 ) -> str:
     """Telegram/ntfy body. Keep under Telegram's 4096-char limit."""
     pct = ((price - soft_stop) / soft_stop * 100) if soft_stop else 0.0
@@ -246,6 +247,7 @@ def format_soft_stop_report(
         news=news,
         rules=rules,
         stage=stage,
+        position=position,
     )
     if advice:
         parts.append("")
@@ -288,6 +290,8 @@ def format_insider_report(
         news=news,
         rules=rules,
         cluster_count=cluster_count,
+        position=position,
+        consensus=consensus,
     )
     _title, body = format_insider_telegram(
         filing,

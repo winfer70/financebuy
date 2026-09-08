@@ -87,6 +87,18 @@ _WATCH_TICKERS_REFRESH_EVERY = 6
 _MAX_WATCH_TICKERS_PER_CYCLE = 15
 _MAX_TICKER_ARTICLES_PER_CYCLE = 20
 
+# Server A returns watch tickers ordered by most-recent Form 4 filing first,
+# so a brand-new filing (the exact case a Telegram alert fires for) starts
+# at the front of the list. But always taking the first N every cycle would
+# still starve anything past position N once the list grows — e.g. a busy
+# day of filings pushed a real position 16+ deep and it never got searched.
+# A per-ticker cooldown fixes both: freshest tickers are eligible immediately
+# (cooldown never hit), so they get searched on the very next cycle, and once
+# searched they free up their slot for the next-most-urgent ticker instead of
+# blocking it for hours.
+_TICKER_SEARCH_COOLDOWN_SECONDS = 2 * 60 * 60
+_ticker_last_searched: dict = {}
+
 # Sleep intervals in seconds.
 _SLEEP_MARKET_HOURS = 600    # 10 minutes
 _SLEEP_OFF_HOURS = 1800      # 30 minutes
@@ -627,8 +639,14 @@ def _run_cycle() -> None:
     # Each article is tagged with the ticker it was searched for so scoring
     # can force that symbol in even if the LLM's own extraction misses it.
     ticker_articles = []
-    watch_tickers = (_cached_watch_tickers or [])[:_MAX_WATCH_TICKERS_PER_CYCLE]
+    now_ts = time.time()
+    eligible_tickers = [
+        t for t in (_cached_watch_tickers or [])
+        if now_ts - _ticker_last_searched.get(t, 0) >= _TICKER_SEARCH_COOLDOWN_SECONDS
+    ]
+    watch_tickers = eligible_tickers[:_MAX_WATCH_TICKERS_PER_CYCLE]
     for ticker in watch_tickers:
+        _ticker_last_searched[ticker] = now_ts
         if len(ticker_articles) >= _MAX_TICKER_ARTICLES_PER_CYCLE:
             break
         for article in sources.fetch_google_news_for_ticker(ticker):
@@ -636,8 +654,9 @@ def _run_cycle() -> None:
             ticker_articles.append(article)
     if watch_tickers:
         logger.info(
-            "Targeted search over %d watch tickers found %d candidate articles.",
+            "Targeted search over %d watch tickers (%s) found %d candidate articles.",
             len(watch_tickers),
+            ", ".join(watch_tickers),
             len(ticker_articles),
         )
 

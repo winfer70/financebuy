@@ -29,6 +29,7 @@ class PositionBrief:
     purchase_price: float
     hard_stop: Optional[float] = None
     soft_stop: Optional[float] = None
+    date_entered: Optional[date] = None
 
 
 @dataclass

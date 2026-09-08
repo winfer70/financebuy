@@ -43,7 +43,7 @@ TODAY = date(2026, 9, 2)
 @pytest.fixture(autouse=True)
 def _stub_soft_stop_report():
     """Do not hit yfinance / news tables during unit tests."""
-    async def _fake(session, ticker, price, soft_stop, stage, sector=None):
+    async def _fake(session, ticker, price, soft_stop, stage, sector=None, position=None):
         return (
             f"{ticker} last ${price:.2f} vs soft stop ${soft_stop:.2f}. "
             f"stage={stage}"

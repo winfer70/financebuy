@@ -356,6 +356,7 @@ async def load_books(session: AsyncSession) -> tuple[dict, dict]:
                 "purchase_price": float(pos.purchase_price or 0),
                 "hard_stop": float(pos.hard_stop_loss) if pos.hard_stop_loss is not None else None,
                 "soft_stop": float(pos.soft_stop_loss) if pos.soft_stop_loss is not None else None,
+                "date_entered": pos.date_entered,
             }
         total = sum((p["market_value"] for p in pos_dicts), Decimal("0"))
         books[uid] = BookSnapshot(
