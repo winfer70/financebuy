@@ -1390,3 +1390,40 @@ class BeneficialOwnership(Base):
     purpose_text = Column(Text, nullable=True)
     filing_url = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class EightKFiling(Base):
+    """One Form 8-K (Material Event) ingested from EDGAR, for tracked
+    tickers only.
+
+    Unlike Form 4/144/3/13D-13G, item codes (which material event
+    triggered the filing — M&A, executive changes, earnings, bankruptcy,
+    etc.) come straight from EDGAR's getcurrent atom <summary> text, not a
+    per-filing XML/document fetch — see form8k_edgar.py. 8-K volume is
+    dozens per 5-minute tick across every US issuer, so form8k_monitor.py
+    resolves each entry's issuer CIK to a ticker and discards anything not
+    already tracked (open positions + insider filers) *before* storing —
+    this table only ever holds filings for names the user actually cares
+    about, never the market-wide firehose.
+
+    items is a JSONB list of {"code": "5.02", "description": "..."} — kept
+    as-is rather than normalized into a join table since it's small and
+    read-only display data, not queried by item code anywhere yet.
+    """
+
+    __tablename__ = "eight_k_filings"
+    __table_args__ = (
+        UniqueConstraint("accession", name="uq_eight_k_filings_accession"),
+        Index("idx_eight_k_filings_ticker", "ticker"),
+    )
+
+    filing_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    accession = Column(String(25), nullable=False)
+    ticker = Column(String(20), nullable=False)
+    issuer_cik = Column(String(10), nullable=True)
+    issuer_name = Column(String(256), nullable=True)
+    is_amendment = Column(Boolean, nullable=False, server_default="false")
+    items = Column(JSONB, nullable=True)
+    filed_at = Column(DateTime(timezone=True), nullable=True)
+    filing_url = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

@@ -42,6 +42,19 @@ institutions/activists rather than the same people filing Form 4s) as
 market color on insider BUY/SELL alerts: "Schedule 13D (activist) filed
 ... by X — Y% stake" vs the softer 13G phrasing.
 
+**Shipped (2026-09-08)**: Form 8-K — verified live that item codes ("Item
+5.02: Departure of Directors...") are already embedded in EDGAR's
+`getcurrent` atom `<summary>` text, so `form8k_edgar.py` parses the atom
+feed directly with no per-filing document fetch at all (the only filing
+type here that works this way). Volume is dozens per 5-minute tick across
+every US issuer, so `form8k_monitor.py` reuses `finra_short_interest.py`'s
+tracked-ticker query and discards everything not already tracked (open
+positions + insider filers) *before* storing anything — `EightKFilings`
+only ever holds names the user cares about, never the market-wide firehose.
+`EightKFiling` table (migration 0040, `items` as JSONB). Surfaced
+ticker-wide as market color on insider BUY/SELL alerts ("8-K filed on
+<date> — <item descriptions>").
+
 **Shipped (2026-09-08)**: FINRA biweekly short interest — the api.finra.org
 Query API turned out to require registered API credentials for anything
 past ~2020 (verified live: `group/otcMarket/name/consolidatedShortInterest`
@@ -225,9 +238,7 @@ These aren't SEC filings and need their own poller module (not a fit for
 2. ~~**FINRA short interest**~~ — shipped 2026-09-08, see top of doc.
 3. ~~**Form 3**~~ — shipped 2026-09-08, see top of doc.
 4. ~~**Form 13D/13G**~~ — shipped 2026-09-08, see top of doc.
-5. **Form 8-K** — valuable but only if the portfolio-ticker filter is built first;
-   otherwise it's a firehose. Pair with the existing news-scoring pipeline rather
-   than routing through the insider Telegram digest.
+5. ~~**Form 8-K**~~ — shipped 2026-09-08, see top of doc.
 6. **Form 13F / N-PORT** — lowest priority; positioning data, not trading signals,
    and 13F's CUSIP↔ticker gap and N-PORT's per-fund-not-per-ticker shape both need
    real design work before they're useful in this UI.

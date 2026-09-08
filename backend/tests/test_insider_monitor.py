@@ -94,6 +94,7 @@ def _deps_multi(
     fetch_short_interest=None,
     fetch_form3_baseline=None,
     fetch_beneficial_ownership=None,
+    fetch_8k_filings=None,
 ):
     """Multi-user CycleDeps — exercises the new load_books path directly,
     as production code (poll_insider_filings) now does."""
@@ -117,6 +118,7 @@ def _deps_multi(
         fetch_short_interest=fetch_short_interest,
         fetch_form3_baseline=fetch_form3_baseline,
         fetch_beneficial_ownership=fetch_beneficial_ownership,
+        fetch_8k_filings=fetch_8k_filings,
         ticker_sectors={"AAPL": "Technology", "OGN": "Healthcare"},
         pause_s=0.0,
     ), notifies
@@ -589,6 +591,52 @@ async def test_no_beneficial_ownership_note_when_empty_list():
 
 
 @pytest.mark.asyncio
+async def test_8k_note_appended_to_telegram_body():
+    from datetime import datetime as _dt, timezone as _tz
+
+    class _FakeFiling:
+        items = [{"code": "5.02", "description": "Departure of Directors or Certain Officers"}]
+        filed_at = _dt(2026, 9, 1, tzinfo=_tz.utc)
+
+    async def _fetch_8k(ticker):
+        return [_FakeFiling()]
+
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi({}, primary_user_id=uuid.uuid4(), fetch_8k_filings=_fetch_8k)
+    await run_insider_cycle(MapFetcher(_mapping()), store, deps)
+
+    assert len(notifies) == 1
+    body = notifies[0]["body"]
+    assert "8-K filed" in body
+    assert "Departure of Directors" in body
+
+
+@pytest.mark.asyncio
+async def test_no_8k_note_when_items_empty():
+    class _FakeFiling:
+        items = []
+        filed_at = None
+
+    async def _fetch_8k(ticker):
+        return [_FakeFiling()]
+
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi({}, primary_user_id=uuid.uuid4(), fetch_8k_filings=_fetch_8k)
+    await run_insider_cycle(MapFetcher(_mapping()), store, deps)
+    assert len(notifies) == 1
+    assert "8-K filed" not in notifies[0]["body"]
+
+
+@pytest.mark.asyncio
+async def test_no_8k_note_when_fetch_unset():
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi({}, primary_user_id=uuid.uuid4())
+    await run_insider_cycle(MapFetcher(_mapping()), store, deps)
+    assert len(notifies) == 1
+    assert "8-K filed" not in notifies[0]["body"]
+
+
+@pytest.mark.asyncio
 async def test_poll_skips_without_user_agent(monkeypatch):
     monkeypatch.delenv("SEC_USER_AGENT", raising=False)
     result = await poll_insider_filings({})
@@ -645,6 +693,14 @@ def test_worker_registers_schedule13_job():
     assert any(getattr(fn, "__name__", "") == "poll_schedule13_filings" for fn in WorkerSettings.functions)
     cron_fns = [c.coroutine.__name__ if hasattr(c, "coroutine") else str(c) for c in WorkerSettings.cron_jobs]
     assert "poll_schedule13_filings" in cron_fns
+
+
+def test_worker_registers_8k_job():
+    from app.trading.worker import WorkerSettings
+
+    assert any(getattr(fn, "__name__", "") == "poll_8k_filings" for fn in WorkerSettings.functions)
+    cron_fns = [c.coroutine.__name__ if hasattr(c, "coroutine") else str(c) for c in WorkerSettings.cron_jobs]
+    assert "poll_8k_filings" in cron_fns
 
 
 def test_news_worker_defaults_to_hermes_and_key_fallback():

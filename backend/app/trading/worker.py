@@ -41,6 +41,7 @@ from .insider_monitor import poll_insider_filings  # noqa: F401 — registered i
 from .form144_monitor import poll_form144_filings  # noqa: F401 — registered in WorkerSettings
 from .form3_monitor import poll_form3_filings  # noqa: F401 — registered in WorkerSettings
 from .schedule13_monitor import poll_schedule13_filings  # noqa: F401 — registered in WorkerSettings
+from .form8k_monitor import poll_8k_filings  # noqa: F401 — registered in WorkerSettings
 from .finra_short_interest import poll_short_interest  # noqa: F401 — registered in WorkerSettings
 from .scanner_worker import run_scanner  # noqa: F401 — registered in WorkerSettings
 from ..services.degiro_sync import sync_degiro_portfolio  # noqa: F401 — registered in WorkerSettings
@@ -1030,6 +1031,7 @@ class WorkerSettings:
         poll_form144_filings,
         poll_form3_filings,
         poll_schedule13_filings,
+        poll_8k_filings,
         poll_short_interest,
     ]
     queue_name = "arq:trading"
@@ -1046,6 +1048,11 @@ class WorkerSettings:
         # 13D/13G are lower-volume than any Form-4-family feed — every 10
         # min is plenty, no direct alert (see schedule13_monitor.py).
         cron(poll_schedule13_filings, minute={10, 40}),
+        # 8-K volume is dozens per 5-min tick market-wide, but form8k_monitor
+        # filters to tracked tickers before storing anything (no per-filing
+        # document fetch either) — every 5 min like Form 4 to keep the
+        # 100-entry atom buffer from rolling off unseen during busy periods.
+        cron(poll_8k_filings, minute={2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, 57}),
         # FINRA only republishes every two weeks — daily is plenty, and the
         # settlement-date scan is cached per-day regardless.
         cron(poll_short_interest, hour=6, minute=0),

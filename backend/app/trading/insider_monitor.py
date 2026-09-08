@@ -38,6 +38,7 @@ from .finra_short_interest import get_latest_short_interest
 from .form144_monitor import get_recent_144_notice
 from .form3_monitor import get_form3_baseline
 from .schedule13_monitor import get_recent_beneficial_ownership
+from .form8k_monitor import get_recent_8k_filings
 from .insider_gate import BookSnapshot, GateResult, Integrity, evaluate_filing, sector_exposure
 from .insider_track_record import compute_track_record
 from .market_context import (
@@ -279,6 +280,10 @@ class CycleDeps:
     # >5%-ownership disclosures for this ticker (any filer, not owner-
     # correlated). Optional so existing tests/callers are unaffected.
     fetch_beneficial_ownership: Optional[Callable] = None
+    # (ticker) -> list[EightKFiling] — recent tracked 8-Ks for this ticker,
+    # market color for "why might this stock actually be moving". Optional
+    # so existing tests/callers are unaffected.
+    fetch_8k_filings: Optional[Callable] = None
     # New, multi-user path: returns dict[user_id, BookSnapshot], one book per
     # user who has open positions. When set, run_insider_cycle evaluates and
     # notifies each *holder* of the filed ticker separately (their own
@@ -481,6 +486,25 @@ def _format_beneficial_ownership_note(rows: list) -> Optional[str]:
     return " ".join(parts)
 
 
+def _format_8k_note(rows: list) -> Optional[str]:
+    """Turns recent tracked 8-Ks into a market-color line — "why might this
+    stock actually be moving" alongside the insider filing itself."""
+    if not rows:
+        return None
+    row = rows[0]
+    items = row.items or []
+    descriptions = [i.get("description", "") for i in items if i.get("description")]
+    if not descriptions:
+        return None
+    parts = ["8-K filed"]
+    if row.filed_at:
+        parts.append(f"on {row.filed_at.date().isoformat()}")
+    parts.append(f"— {'; '.join(descriptions[:2])}")
+    if len(rows) > 1:
+        parts.append(f"({len(rows)} recent 8-Ks on this name)")
+    return " ".join(parts)
+
+
 async def run_insider_cycle(
     fetcher: EdgarFetcher,
     store: FilingStore,
@@ -592,6 +616,7 @@ async def run_insider_cycle(
                 short_interest = None
                 form3_label = None
                 ownership_label = None
+                eightk_label = None
                 fetched_shared = False
 
                 for uid, book in targets.items():
@@ -653,6 +678,10 @@ async def run_insider_cycle(
                                 )
                                 if ownership_rows:
                                     ownership_label = _format_beneficial_ownership_note(ownership_rows)
+                            if deps.fetch_8k_filings:
+                                eightk_rows = await _maybe_await(deps.fetch_8k_filings(ticker))
+                                if eightk_rows:
+                                    eightk_label = _format_8k_note(eightk_rows)
                             fetched_shared = True
                         pos_raw = (book.positions or {}).get(ticker)
                         position = PositionBrief(**pos_raw) if pos_raw else None
@@ -687,6 +716,8 @@ async def run_insider_cycle(
                             body = f"{body}\n\n{form3_label}"
                         if ownership_label:
                             body = f"{body}\n\n{ownership_label}"
+                        if eightk_label:
+                            body = f"{body}\n\n{eightk_label}"
                     if gate.in_app:
                         await store.add_rule_alert(uid, gate, row, body)
                         stats["in_app"] += 1
@@ -788,6 +819,7 @@ async def poll_insider_filings(ctx: dict) -> dict:
             fetch_short_interest=lambda t: get_latest_short_interest(session, t),
             fetch_form3_baseline=lambda cik, t: get_form3_baseline(session, cik, t),
             fetch_beneficial_ownership=lambda t: get_recent_beneficial_ownership(session, t),
+            fetch_8k_filings=lambda t: get_recent_8k_filings(session, t),
             notify=_notify,
             primary_user_id=primary_user_id,
             ticker_sectors=sectors,
