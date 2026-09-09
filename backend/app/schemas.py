@@ -660,7 +660,12 @@ class PortfolioTradeOut(BaseModel):
 class CashAdjustmentRequest(BaseModel):
     """Payload to manually adjust a portfolio's cash balance."""
 
-    amount: float = Field(..., description="Amount to add (positive) or subtract (negative) from the cash balance.")
+    amount: Decimal = Field(
+        ...,
+        max_digits=18,
+        decimal_places=4,
+        description="Amount to add (positive) or subtract (negative) from the cash balance.",
+    )
     notes: Optional[str] = Field(None, max_length=500, description="Optional note describing the adjustment.")
 
 

@@ -36,6 +36,7 @@ from ..models import (
     StrategyRating, StrategyUsage,
     PaperTrade, PaperTradePosition, PaperTradeEquitySnapshot,
 )
+from ..trading.notifications import check_webhook_host_safe, validate_webhook_url_shape
 from ..schemas import (
     StrategyCreate, StrategyOut, StrategyUpdate,
     BacktestRequest, BacktestResultOut,
@@ -1052,6 +1053,19 @@ async def mark_all_notifications_read(
 
 # ── Webhook routes ───────────────────────────────────────────────────────
 
+async def _require_safe_webhook_url(url: str) -> None:
+    """Reject webhook URLs that could be used for SSRF (see
+    trading/notifications.py for the shape + DNS checks). Registration-time
+    rejection catches obvious cases early; _fire_webhooks re-checks the host
+    immediately before every send since DNS can change afterward."""
+    try:
+        host = validate_webhook_url_shape(url)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not await check_webhook_host_safe(host):
+        raise HTTPException(400, "Webhook host does not resolve to a permitted public address.")
+
+
 @router.get("/webhooks", response_model=List[WebhookOut])
 async def list_webhooks(
     current_user=Depends(get_current_user),
@@ -1091,8 +1105,7 @@ async def create_webhook(
         400: Invalid URL scheme (must be https).
         429: Max 5 webhooks per user.
     """
-    if not body.url.startswith("https://"):
-        raise HTTPException(400, "Webhook URL must use HTTPS.")
+    await _require_safe_webhook_url(body.url)
 
     count_stmt = select(func.count(UserWebhook.webhook_id)).where(
         UserWebhook.user_id == current_user.user_id,
@@ -1142,8 +1155,8 @@ async def update_webhook(
         raise HTTPException(404, "Webhook not found.")
 
     updates = body.dict(exclude_unset=True)
-    if "url" in updates and not updates["url"].startswith("https://"):
-        raise HTTPException(400, "Webhook URL must use HTTPS.")
+    if "url" in updates:
+        await _require_safe_webhook_url(updates["url"])
 
     for key, value in updates.items():
         setattr(wh, key, value)

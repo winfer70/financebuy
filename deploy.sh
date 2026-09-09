@@ -1,5 +1,15 @@
 #!/bin/bash
-# deploy.sh — Server setup script for tickerTap on a fresh Ubuntu 22.04/24.04 server.
+# deploy.sh — LEGACY server setup script for tickerTap on a fresh Ubuntu
+# 22.04/24.04 server (host-level nginx + certbot + port-forwarding).
+#
+# SUPERSEDED: current production deploys use docker-compose.labserver.yml,
+# which runs the web tier (nginx + SPA) as a container (web/Dockerfile) and
+# terminates TLS via Cloudflare Tunnel (cloudflared service) instead of a
+# host nginx + certbot + router port-forward. See docker-compose.labserver.yml
+# and web/nginx.conf for the current setup. This script is kept only for
+# reference / for standing up the old topology; do not follow it for a new
+# deployment host.
+#
 # Run this script as a non-root user with sudo access.
 set -e
 

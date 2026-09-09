@@ -31,6 +31,7 @@ from ..db import get_db
 from ..models import Account, Holding, Order, Security
 from ..schemas import OrderCreate, OrderOut
 from .auth_routes import get_current_user
+from .market import get_live_price
 
 
 router = APIRouter(prefix="/orders", tags=["orders"])
@@ -119,7 +120,39 @@ async def place_order(
 
     side = _normalize_side(payload.side)
     order_type = _normalize_order_type(payload.order_type)
-    effective_price = payload.price
+
+    if order_type == "market":
+        # Market orders fill at the live market price. payload.price is
+        # validated above for shape only and is never used as the fill
+        # price — otherwise a client could name its own execution price
+        # (e.g. buy at $0.01, sell at $999999) since a "market" order has
+        # no other price input.
+        #
+        # This lookup and the live-quote fetch below run in their own
+        # transaction (committed before the network call), separate from
+        # the account-locking transaction further down — a yfinance call
+        # must never happen while holding the account row's FOR UPDATE lock.
+        async with db.begin():
+            symbol_result = await db.execute(
+                select(Security.symbol).where(Security.security_id == payload.security_id)
+            )
+            symbol = symbol_result.scalar_one_or_none()
+        if symbol is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="security not found",
+            )
+        try:
+            live_price = await get_live_price(symbol)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Could not fetch a live price for '{symbol}'; try again.",
+            ) from exc
+        effective_price = Decimal(str(round(live_price, 2)))
+    else:
+        effective_price = payload.price
+
     notional = payload.quantity * effective_price
 
     # ── Limit orders: no cash/holding mutation at placement time ────────────

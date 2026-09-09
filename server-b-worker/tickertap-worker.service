@@ -1,4 +1,13 @@
-# tickertap-worker.service — systemd unit for the TickerTap news worker.
+# tickertap-worker.service — LEGACY systemd unit for the TickerTap news worker.
+#
+# SUPERSEDED: news ingestion now runs as the `news-worker` container in
+# docker-compose.labserver.yml (server-b-worker/Dockerfile), which POSTs to
+# the app over the internal tickertap_net Docker network instead of a
+# separate always-on host process. Do not deploy this unit on a new host —
+# use the news-worker service in docker-compose.labserver.yml instead.
+# (tickertap-learner.service/.timer are a separate, still-relevant job with
+# no containerized equivalent yet — this deprecation note applies only to
+# the news-fetching worker above.)
 #
 # Installation:
 #   1. Copy this file to /etc/systemd/system/tickertap-worker.service
