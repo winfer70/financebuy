@@ -29,10 +29,28 @@ from app.trading.alert_worker import (
     evaluate_one_soft_stop,
     reset_soft_stop_stages,
 )
+from app.trading.market_context import (
+    format_news_lines,
+    format_soft_stop_report,
+    format_volume_lines,
+)
 from app.trading.notifications import _send_ntfy, _send_telegram, notify_soft_stop
 
 
 TODAY = date(2026, 9, 2)
+
+
+@pytest.fixture(autouse=True)
+def _stub_soft_stop_report():
+    """Do not hit yfinance / news tables during unit tests."""
+    async def _fake(session, ticker, price, soft_stop, stage, sector=None, position=None):
+        return (
+            f"{ticker} last ${price:.2f} vs soft stop ${soft_stop:.2f}. "
+            f"stage={stage}"
+        )
+
+    with patch("app.trading.alert_worker._build_soft_stop_report", side_effect=_fake):
+        yield
 
 
 class FakePos:
@@ -114,6 +132,7 @@ async def test_stage1_does_not_clear_stop_and_fires_once():
     kwargs = notify.await_args.kwargs
     assert kwargs["event_type"] == "soft_stop_loss"
     assert kwargs["ntfy_priority"] == 3
+    assert "$140.00" in kwargs["body"]
     session.commit.assert_awaited()
 
 
@@ -383,3 +402,37 @@ def test_patch_soft_stop_resets_stage_dates(auth_client):
     assert pos.soft_stop_delivery_json is None
     assert float(pos.soft_stop_loss) == 145.0
     assert resp.status_code == 200
+
+
+def test_format_soft_stop_includes_price_volume_and_news():
+    snap = {
+        "vol_ratio": 2.4,
+        "price_up": False,
+        "leaving": True,
+        "sector": "Technology",
+        "sector_etf": "XLK",
+        "sector_vol_ratio": 1.1,
+        "sector_price_up": False,
+    }
+    news = [
+        {
+            "title": "Supplier cuts guidance",
+            "score": -3,
+            "label": "BEAR",
+            "severity": "med",
+            "source": "yahoo",
+            "reasoning": "guidance cut",
+        }
+    ]
+    body = format_soft_stop_report("AAPL", 140.12, 150.0, "intraday", snap, news)
+    assert "$140.12" in body
+    assert "$150.00" in body
+    assert "LEAVING" in body
+    assert "BEAR" in body or "Supplier" in body
+    assert "XLK" in body
+    assert "Advice" in body
+    assert "0 articles" not in body or "articles" in body.lower()
+    vol_lines = format_volume_lines(snap)
+    assert any("LEAVING" in line for line in vol_lines)
+    news_lines = format_news_lines(news)
+    assert any("BEAR" in line for line in news_lines)

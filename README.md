@@ -71,7 +71,7 @@ Frontend          Backend
 
 **Frontend** — React 19 (Vite) single-page application. Bloomberg-terminal aesthetic with IBM Plex Mono typography. Page state managed via `App.jsx` (no client-side router).
 
-**Database** — PostgreSQL 15 (TimescaleDB image) with Alembic migrations **0001–0032**. CHECK constraints, CASCADE deletes, composite indexes. Not “12 tables” — that snapshot is obsolete.
+**Database** — PostgreSQL 15 (TimescaleDB image) with Alembic migrations **0001–0041**. CHECK constraints, CASCADE deletes, composite indexes. Not “12 tables” — that snapshot is obsolete.
 
 **Infrastructure** — Docker Compose with three services (app, db, redis) on a private bridge network. nginx reverse proxy serves the frontend and proxies `/api/v1/` to the backend. Two-stage Dockerfile for deterministic builds.
 
@@ -92,7 +92,15 @@ Frontend          Backend
 - Multi-source ingest on a **remote worker** (`server-b-worker/`): Yahoo Finance RSS, Google News RSS, Finviz HTML, MarketWatch RSS
 - Ollama LLM scores each article −5…+5 (general + per-ticker) and POSTs to `POST /api/v1/news/internal/news`
 - Portfolio-first sorting, category filters, ticker search
+- Per-ticker search rotates through the full watch list on a 2-hour cooldown, ordered by most-recent insider activity — see `NEWS_RESEARCH.md`
 - **Not FinBERT** — that classifier is not in this repo
+
+### Insider & SEC Filing Monitoring
+- Real-time SEC EDGAR polling (`trading-worker` arq cron, every 5 min for Form 4) across 6 filing types: **Form 4** (insider buy/sell), **Form 144** (planned sales — a leading indicator, now a standalone alert), **Form 3** (initial ownership stakes), **Schedule 13D/13G** (>5% beneficial ownership, activist vs. passive), **Form 8-K** (material events, atom-feed-only parsing), **Form 13F-HR** (quarterly institutional holdings, CUSIP→ticker via OpenFIGI)
+- FINRA biweekly short interest (free CDN flat-file) feeds squeeze/crowding advice
+- Unified `GET /api/v1/insider/filings-all` — all 6 sources normalized, sortable, source-filterable, paginated
+- `InsiderPage.jsx`: FORM 4 / ALL FILINGS tab switcher; person-breakdown panel shows track record, short interest, and pending Form 144 notices
+- Alerts (Telegram + ntfy + in-app) fire with **full parity between portfolio positions and watchlist tickers** — a watchlist-only ticker gets the same buy/sell/planned-sell coverage as a held position
 
 ### Portfolio Manager
 - Create, rename, and delete custom portfolios
@@ -200,13 +208,13 @@ backend/
 │   ├── main.py              # FastAPI app, middleware stack, startup checks
 │   ├── auth.py              # JWT utilities, password hashing
 │   ├── db.py                # Async engine, session factory, get_db() dependency
-│   ├── models.py            # SQLAlchemy ORM models (see alembic 0001–0032)
+│   ├── models.py            # SQLAlchemy ORM models (see alembic 0001–0041)
 │   ├── schemas.py           # Pydantic v1 request/response schemas
 │   ├── email.py             # Async SMTP email helpers
 │   ├── limiter.py           # SlowAPI rate limiter configuration
 │   ├── trading/             # arq workers: alerts, scanner, backtests, DeGiro, paper
 │   └── routes/              # /api/v1/* — see main.py include_router list
-├── alembic/versions/        # 0001 … 0032 (head: soft-stop alert state)
+├── alembic/versions/        # 0001 … 0041 (head: form13f_holdings)
 ├── tests/
 │   ├── test_health.py
 │   ├── test_auth.py
@@ -261,6 +269,7 @@ frontend/src/
 │   ├── OrdersPage.jsx          # Buy/sell order management
 │   ├── ChartsPage.jsx          # Advanced charting with technical indicators
 │   ├── NewsPage.jsx            # LLM-scored news feed (−5…+5)
+│   ├── InsiderPage.jsx         # SEC filings: FORM 4 / ALL FILINGS tabs, person breakdown
 │   ├── PortfolioManagerPage.jsx# Custom portfolio CRUD; soft/hard stops
 │   └── ImportPage.jsx          # CSV portfolio import wizard
 └── __tests__/
@@ -336,7 +345,7 @@ alembic downgrade -1
 
 ### Migration History
 
-Alembic revisions **0001–0032**. Head: `0032_soft_stop_alert_state`. See `backend/alembic/versions/` — do not treat the old 0001–0008 table as complete.
+Alembic revisions **0001–0041**. Head: `0041_form13f_holdings`. See `backend/alembic/versions/` — do not treat the old 0001–0008 table as complete.
 
 ---
 

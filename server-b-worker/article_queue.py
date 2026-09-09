@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-_DB_DIR = os.path.dirname(os.path.abspath(__file__))
+_DB_DIR = os.getenv("NEWS_QUEUE_DIR") or os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(_DB_DIR, "queue.db")
 MAX_RETRIES = 5
 
@@ -43,6 +43,7 @@ def _connect() -> sqlite3.Connection:
     Returns:
         sqlite3.Connection with row_factory set to sqlite3.Row.
     """
+    os.makedirs(_DB_DIR, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn

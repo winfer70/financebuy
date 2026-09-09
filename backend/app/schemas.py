@@ -55,6 +55,13 @@ class UserCreate(UserBase):
             raise ValueError("Password must contain at least one special character.")
         return v
 
+    telegram_invite_code: Optional[str] = Field(
+        None,
+        max_length=32,
+        description="One-time invite code that unlocks Telegram notification linking. "
+        "Only present when the register page was opened via an invite link.",
+    )
+
 
 class UserOut(UserBase):
     """Serialised user returned by the API — no password hash included."""
@@ -62,6 +69,14 @@ class UserOut(UserBase):
     user_id: UUID = Field(..., description="Unique user identifier.")
     kyc_status: str = Field(..., description="KYC verification status: pending | approved | rejected.")
     is_active: bool = Field(..., description="Whether the account is active and can authenticate.")
+    telegram_link_code: Optional[str] = Field(
+        None,
+        description="One-time code to send the bot as '/link <code>' to connect Telegram. "
+        "Only set when registration used a valid Telegram invite.",
+    )
+    telegram_bot_username: Optional[str] = Field(
+        None, description="Public @username of the notification bot, if telegram_link_code is set."
+    )
 
     class Config:
         orm_mode = True
@@ -85,9 +100,14 @@ class UserPreferences(BaseModel):
     Attributes:
         currency: ISO 4217 currency code for display conversion.
         language: ISO 639-1 language code for UI translations.
+        sidebar_collapsed: Whether the sidebar is collapsed by default.
+        tutorial_done: Whether the onboarding tutorial has been completed or
+            skipped — either way it should not be shown again.
     """
     currency: str = Field("USD", description="Display currency code.")
     language: str = Field("en", description="UI language code.")
+    sidebar_collapsed: bool = Field(False, description="Whether sidebar is collapsed.")
+    tutorial_done: bool = Field(False, description="Onboarding tutorial completed or skipped.")
 
 
 class UserPreferencesUpdate(BaseModel):
@@ -97,10 +117,12 @@ class UserPreferencesUpdate(BaseModel):
         currency: New currency code (must be in SUPPORTED_CURRENCIES).
         language: New language code (must be in SUPPORTED_LANGUAGES).
         sidebar_collapsed: Whether the sidebar is collapsed by default.
+        tutorial_done: Mark the onboarding tutorial completed or skipped.
     """
     currency: Optional[str] = Field(None, description="Display currency code.")
     language: Optional[str] = Field(None, description="UI language code.")
     sidebar_collapsed: Optional[bool] = Field(None, description="Whether sidebar is collapsed.")
+    tutorial_done: Optional[bool] = Field(None, description="Onboarding tutorial completed or skipped.")
 
 
 class UserProfileOut(UserBase):

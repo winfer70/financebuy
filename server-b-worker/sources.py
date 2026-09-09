@@ -1,11 +1,16 @@
 """
 sources.py — Synchronous multi-source financial news fetcher for the TickerTap worker.
 
-Fetches news from four sources:
+Fetches general-market news from four sources:
   1. Yahoo Finance RSS   — general financial headlines
   2. Google News RSS     — market-related search results
   3. Finviz              — front-page news table (HTML scrape)
   4. MarketWatch RSS     — general top-stories feed
+
+Plus one targeted source used separately by worker.py for a caller-supplied
+watchlist (open positions + recent Form 4 filers), since the above rarely
+mention small/micro-cap tickers by name:
+  5. fetch_google_news_for_ticker(ticker) — per-symbol Google News RSS search
 
 Each fetcher returns a list of article dicts with a common schema:
     {
@@ -181,6 +186,64 @@ def fetch_google() -> List[Dict]:
                 title=title,
                 url=link,
                 source="google",
+                published_at=_parse_rss_date(entry),
+                summary=entry.get("summary"),
+            )
+        )
+    return articles
+
+
+# ---------------------------------------------------------------------------
+# Source 2b: Google News RSS, scoped to one ticker
+# ---------------------------------------------------------------------------
+
+_MAX_TICKER_ENTRIES = 3
+
+
+def fetch_google_news_for_ticker(ticker: str) -> List[Dict]:
+    """Targeted Google News RSS search for a single ticker symbol.
+
+    The broad fetch_google() query deliberately avoids per-ticker searches
+    (see its docstring) — general-market feeds rarely mention small/micro-cap
+    names by symbol, so a ticker with real insider or portfolio activity can
+    go weeks without a single scored article. This supplements that gap for
+    a caller-supplied watchlist (open positions + recent Form 4 filers) so
+    obscure names actually get a scoring chance instead of silently reading
+    "0 articles" forever.
+
+    Args:
+        ticker: Stock ticker symbol (already upper-cased by the caller).
+
+    Returns:
+        List of article dicts tagged source="google_ticker", capped at
+        _MAX_TICKER_ENTRIES to keep per-cycle Ollama load bounded.
+    """
+    url = (
+        "https://news.google.com/rss/search?"
+        f"q=%22{ticker}%22+stock"
+        "&hl=en-US&gl=US&ceid=US:en"
+    )
+    try:
+        resp = requests.get(url, headers=_HEADERS, timeout=_FETCH_TIMEOUT)
+        if resp.status_code != 200:
+            logger.debug("Google ticker RSS (%s) returned status %d", ticker, resp.status_code)
+            return []
+    except Exception as exc:
+        logger.debug("Google ticker RSS fetch failed for %s: %s", ticker, exc)
+        return []
+
+    feed = feedparser.parse(resp.text)
+    articles = []
+    for entry in feed.entries[:_MAX_TICKER_ENTRIES]:
+        title = entry.get("title", "").strip()
+        link = entry.get("link", "").strip()
+        if not title or not link:
+            continue
+        articles.append(
+            _make_article(
+                title=title,
+                url=link,
+                source="google_ticker",
                 published_at=_parse_rss_date(entry),
                 summary=entry.get("summary"),
             )

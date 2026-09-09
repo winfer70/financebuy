@@ -57,6 +57,7 @@ import { ChartsPage }             from "./pages/ChartsPage";
 import { ImportPage }             from "./pages/ImportPage";
 import { PortfolioManagerPage }   from "./pages/PortfolioManagerPage";
 import { NewsPage }               from "./pages/NewsPage";
+import { InsiderPage }            from "./pages/InsiderPage";
 import { WatchlistPage }          from "./pages/WatchlistPage";
 import { LegalPage }              from "./pages/LegalPage";
 import { UserGuidePage }          from "./pages/UserGuidePage";
@@ -69,6 +70,7 @@ import LearningPage                  from "./pages/LearningPage";
 import ExitPointsPage                from "./pages/ExitPointsPage";
 import ResearchPage                  from "./pages/ResearchPage";
 import AdminPage                     from "./pages/AdminPage";
+import { OnboardingTutorial }        from "./components/common/OnboardingTutorial";
 
 /* ── API ─────────────────────────────────────────────────────────────────── */
 import api from "./api/client";
@@ -198,6 +200,7 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
     { id: "orders",           label: t("nav.orders"),       Icon: Ic.orders       },
     { id: "charts",           label: t("nav.charts"),       Icon: Ic.charts       },
     { id: "news",             label: t("nav.news"),         Icon: Ic.news         },
+    { id: "insider",          label: "FORM 4",               Icon: Ic.shield       },
     { id: "watchlist",         label: t("nav.watchlist"),    Icon: Ic.watchlist    },
     { id: "portfolio-manager",label: t("nav.portfolio"),    Icon: Ic.portfolio    },
     { id: "trading",          label: "TRADING AI",           Icon: Ic.trading      },
@@ -212,6 +215,7 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
 
   return (
     <div className="app-shell">
+      <OnboardingTutorial token={authToken} />
       {/* ── Sidebar ─────────────────────────────────────────────────────── */}
       <aside className={`sidebar${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
         <div className="sidebar-logo">
@@ -324,6 +328,7 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
                   orders: t("nav.orders"),
                   charts: t("nav.charts"),
                   news: t("nav.news"),
+                  insider: "FORM 4",
                   watchlist: t("nav.watchlist"),
                   "portfolio-manager": t("nav.portfolio"),
                   settings: t("nav.settings"),
@@ -408,6 +413,12 @@ function AppShell({ page, setPage, goBack, toasts, addToast, pageParams }) {
           <NewsPage
             token={authToken}
             initialTicker={newsSymbol}
+            onViewChart={navigateToChart}
+          />
+        )}
+        {page === "insider"      && (
+          <InsiderPage
+            token={authToken}
             onViewChart={navigateToChart}
           />
         )}

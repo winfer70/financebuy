@@ -37,6 +37,13 @@ import httpx
 
 from ..logging_config import configure_structlog
 from .heartbeat import write_worker_heartbeat
+from .insider_monitor import poll_insider_filings  # noqa: F401 — registered in WorkerSettings
+from .form144_monitor import poll_form144_filings  # noqa: F401 — registered in WorkerSettings
+from .form3_monitor import poll_form3_filings  # noqa: F401 — registered in WorkerSettings
+from .schedule13_monitor import poll_schedule13_filings  # noqa: F401 — registered in WorkerSettings
+from .form8k_monitor import poll_8k_filings  # noqa: F401 — registered in WorkerSettings
+from .form13f_monitor import poll_13f_filings  # noqa: F401 — registered in WorkerSettings
+from .finra_short_interest import poll_short_interest  # noqa: F401 — registered in WorkerSettings
 from .scanner_worker import run_scanner  # noqa: F401 — registered in WorkerSettings
 from ..services.degiro_sync import sync_degiro_portfolio  # noqa: F401 — registered in WorkerSettings
 from ..services.chromadb_client import store_analysis
@@ -1015,10 +1022,45 @@ async def weekly_meta_analysis(ctx: dict) -> None:
 
 
 class WorkerSettings:
-    functions = [run_backtest, run_scanner, run_portfolio_rules, sync_degiro_portfolio, evaluate_closed_trade]
+    functions = [
+        run_backtest,
+        run_scanner,
+        run_portfolio_rules,
+        sync_degiro_portfolio,
+        evaluate_closed_trade,
+        poll_insider_filings,
+        poll_form144_filings,
+        poll_form3_filings,
+        poll_schedule13_filings,
+        poll_8k_filings,
+        poll_13f_filings,
+        poll_short_interest,
+    ]
     queue_name = "arq:trading"
     cron_jobs = [
         cron(_periodic_heartbeat, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
+        cron(poll_insider_filings, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
+        # Slower cadence than Form 4 — a 144 alone doesn't fire its own alert
+        # (see form144_monitor.py), it just needs to be on file before the
+        # matching Form 4 sell shows up so that alert can reference it.
+        cron(poll_form144_filings, minute={0, 15, 30, 45}),
+        # Same reasoning as 144 — a Form 3 alone doesn't alert, it just needs
+        # to be on file before that owner's first Form 4 sell shows up.
+        cron(poll_form3_filings, minute={5, 20, 35, 50}),
+        # 13D/13G are lower-volume than any Form-4-family feed — every 10
+        # min is plenty, no direct alert (see schedule13_monitor.py).
+        cron(poll_schedule13_filings, minute={10, 40}),
+        # 8-K volume is dozens per 5-min tick market-wide, but form8k_monitor
+        # filters to tracked tickers before storing anything (no per-filing
+        # document fetch either) — every 5 min like Form 4 to keep the
+        # 100-entry atom buffer from rolling off unseen during busy periods.
+        cron(poll_8k_filings, minute={2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, 57}),
+        # FINRA only republishes every two weeks — daily is plenty, and the
+        # settlement-date scan is cached per-day regardless.
+        cron(poll_short_interest, hour=6, minute=0),
+        # Quarterly positioning data, filed in a burst around the 45-day
+        # deadline — daily is plenty, same reasoning as short interest.
+        cron(poll_13f_filings, hour=7, minute=0),
         cron(sync_degiro_portfolio, hour=2, minute=0),
         cron(weekly_meta_analysis, weekday=0, hour=3, minute=0),
     ]

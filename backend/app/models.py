@@ -60,6 +60,36 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
     preferences = Column(JSONB, server_default="{}", nullable=True)
+    # Per-user Telegram notification target. The bot token stays a single
+    # server-side secret (TELEGRAM_BOT_TOKEN env var) — this is just the
+    # chat_id Telegram reports once this user's account has messaged the
+    # bot, learned automatically via the /link command, never typed in.
+    telegram_chat_id = Column(String(64), nullable=True)
+    telegram_link_code = Column(String(16), nullable=True)
+    telegram_link_code_expires_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class TelegramInvite(Base):
+    """One-time invite code gating the Telegram-connect step on /register.
+
+    Without a valid code, the register page never shows the Telegram step —
+    this is what lets a friend register and link their own chat without an
+    admin having to hand them anything more sensitive than a URL.
+    """
+
+    __tablename__ = "telegram_invites"
+
+    invite_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    code = Column(String(32), unique=True, nullable=False)
+    created_by = Column(
+        UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True
+    )
+    used_by = Column(
+        UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True
+    )
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class Account(Base):
@@ -1158,4 +1188,282 @@ class RuleRefinement(Base):
     raw_ollama_response = Column(Text, nullable=True)
     status = Column(String(16), server_default="pending", nullable=False)
     approved_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class InsiderFiling(Base):
+    """One non-derivative Form 4 transaction ingested from EDGAR.
+
+    Dedup is (accession, txn_index). Telegram is sent at most once per accession
+    (notified_at). Cluster queries use ticker + transaction_code + date window.
+    """
+
+    __tablename__ = "insider_filings"
+    __table_args__ = (
+        UniqueConstraint("accession", "txn_index", name="uq_insider_filings_accession_txn"),
+        Index("idx_insider_filings_ticker_code_date", "ticker", "transaction_code", "transaction_date"),
+        Index("idx_insider_filings_accession", "accession"),
+        Index(
+            "idx_insider_filings_owner_hist",
+            "owner_cik",
+            "ticker",
+            "transaction_code",
+            "transaction_date",
+        ),
+    )
+
+    filing_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    accession = Column(String(25), nullable=False)
+    txn_index = Column(Integer, nullable=False, server_default="0")
+    ticker = Column(String(20), nullable=False)
+    issuer_cik = Column(String(10), nullable=True)
+    owner_name = Column(String(256), nullable=True)
+    owner_cik = Column(String(10), nullable=True)
+    is_director = Column(Boolean, nullable=False, server_default="false")
+    is_officer = Column(Boolean, nullable=False, server_default="false")
+    is_ten_percent = Column(Boolean, nullable=False, server_default="false")
+    officer_title = Column(String(128), nullable=True)
+    transaction_code = Column(String(4), nullable=False)
+    acquired_disposed = Column(String(1), nullable=True)
+    shares = Column(Numeric(18, 4), nullable=True)
+    price = Column(Numeric(18, 4), nullable=True)
+    notional = Column(Numeric(18, 2), nullable=True)
+    shares_after = Column(Numeric(18, 4), nullable=True)
+    stake_pct = Column(Numeric(8, 6), nullable=True)
+    transaction_date = Column(Date, nullable=True)
+    is_10b5_1 = Column(Boolean, nullable=True)
+    filing_url = Column(Text, nullable=True)
+    notified_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ShortInterestSnapshot(Base):
+    """One ticker's biweekly short-interest reading from FINRA (Rule 4560).
+
+    FINRA publishes a market-wide flat file (thousands of tickers) every
+    two weeks with a ~2-3 week lag — finra_short_interest.py downloads the
+    whole file but only keeps rows for tickers we actually track (open
+    positions + anything with an insider filing on record), not the full
+    market. Dedup is (ticker, settlement_date): the poller re-checks for a
+    newer settlement date each cycle but never re-stores one already on file.
+
+    Used to add squeeze/crowding context to insider alert advice — e.g. a
+    high days_to_cover on a name with a fresh insider buy is a different
+    setup than the same buy with negligible short interest.
+    """
+
+    __tablename__ = "short_interest_snapshots"
+    __table_args__ = (
+        UniqueConstraint("ticker", "settlement_date", name="uq_short_interest_ticker_date"),
+        Index("idx_short_interest_ticker", "ticker"),
+    )
+
+    snapshot_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ticker = Column(String(20), nullable=False)
+    settlement_date = Column(Date, nullable=False)
+    current_short_position = Column(Numeric(20, 2), nullable=True)
+    previous_short_position = Column(Numeric(20, 2), nullable=True)
+    average_daily_volume = Column(Numeric(20, 2), nullable=True)
+    days_to_cover = Column(Numeric(10, 2), nullable=True)
+    change_percent = Column(Numeric(8, 2), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class Form144Notice(Base):
+    """One Form 144 (Notice of Proposed Sale) ingested from EDGAR.
+
+    A leading indicator for insider Form 4 sells — filed before or on the
+    day of a proposed sale of restricted/control stock, stating the exact
+    share count and intended sale date. Ticker isn't embedded in the XML
+    (unlike Form 4's issuerTradingSymbol), so it's resolved from issuer_cik
+    via cik_ticker_map.py at ingest time; a null ticker means resolution
+    failed and the row is kept CIK-only rather than dropped.
+
+    Dedup is accession (one notice per filing, unlike Form 4's multi-row
+    shape). Correlated against InsiderFiling by (owner_cik, ticker) in
+    insider_monitor.py to give a sell alert's advice section a "this was
+    pre-announced" note instead of treating every sale as a surprise.
+    """
+
+    __tablename__ = "form144_notices"
+    __table_args__ = (
+        UniqueConstraint("accession", name="uq_form144_notices_accession"),
+        Index("idx_form144_notices_owner_ticker", "owner_cik", "ticker"),
+        Index("idx_form144_notices_ticker", "ticker"),
+    )
+
+    notice_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    accession = Column(String(25), nullable=False)
+    ticker = Column(String(20), nullable=True)
+    issuer_cik = Column(String(10), nullable=True)
+    issuer_name = Column(String(256), nullable=True)
+    owner_cik = Column(String(10), nullable=True)
+    owner_name = Column(String(256), nullable=True)
+    relationships = Column(String(128), nullable=True)
+    broker = Column(String(256), nullable=True)
+    shares = Column(Numeric(18, 4), nullable=True)
+    aggregate_value = Column(Numeric(18, 2), nullable=True)
+    approx_sale_date = Column(Date, nullable=True)
+    notice_date = Column(Date, nullable=True)
+    filing_url = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class Form3Statement(Base):
+    """One Form 3 (Initial Statement of Beneficial Ownership) ingested from
+    EDGAR — filed when someone *becomes* an insider (new officer, director,
+    or 10%+ owner), stating their starting position before any Form 4
+    activity exists.
+
+    Same ownershipDocument XML family as Form 4 (parse_form3_xml reuses its
+    helpers) — a single point-in-time holding, not a transaction, so there's
+    no price/date/code, just shares_owned as of period_of_report.
+
+    Gives a baseline for a first-ever Form 4 sale — insider_monitor.py's
+    sell-gate path correlates by (owner_cik, ticker) and computes what
+    fraction of this starting position a sale represents ("sold 10% of
+    initial grant" vs "sold 80%").
+    """
+
+    __tablename__ = "form3_statements"
+    __table_args__ = (
+        UniqueConstraint("accession", name="uq_form3_statements_accession"),
+        Index("idx_form3_statements_owner_ticker", "owner_cik", "ticker"),
+    )
+
+    statement_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    accession = Column(String(25), nullable=False)
+    ticker = Column(String(20), nullable=False)
+    issuer_cik = Column(String(10), nullable=True)
+    owner_name = Column(String(256), nullable=True)
+    owner_cik = Column(String(10), nullable=True)
+    is_director = Column(Boolean, nullable=False, server_default="false")
+    is_officer = Column(Boolean, nullable=False, server_default="false")
+    is_ten_percent = Column(Boolean, nullable=False, server_default="false")
+    officer_title = Column(String(128), nullable=True)
+    shares_owned = Column(Numeric(18, 4), nullable=True)
+    period_of_report = Column(Date, nullable=True)
+    filing_url = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class BeneficialOwnership(Base):
+    """One reporting person's row from a Schedule 13D or 13G ingested from
+    EDGAR — beneficial ownership >5% of a public company's shares.
+
+    13D = "activist" intent (may seek control/board seats, states a
+    purpose in purpose_text). 13G = passive investor (index funds, most
+    institutions), same 5% threshold, no intent language — purpose_text is
+    always null for these.
+
+    One row per reporting person, not per filing: a 13D can be a joint
+    "group" filing naming several people/entities on one cover page (see
+    schedule13_edgar.py), each with their own shares_owned/pct_owned.
+    Dedup is (accession, person_index). Ticker isn't embedded in either
+    schema (only CUSIP) — resolved from issuer_cik via cik_ticker_map.py,
+    same as Form 144.
+
+    Surfaced ticker-wide (not owner-correlated like Form 144/3 — 13D/13G
+    filers are typically institutions/activists, not the same individuals
+    filing Form 4s) as general market color on insider alerts for that name.
+    """
+
+    __tablename__ = "beneficial_ownership"
+    __table_args__ = (
+        UniqueConstraint("accession", "person_index", name="uq_beneficial_ownership_accession_person"),
+        Index("idx_beneficial_ownership_ticker", "ticker"),
+    )
+
+    ownership_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    accession = Column(String(25), nullable=False)
+    person_index = Column(Integer, nullable=False, server_default="0")
+    is_13d = Column(Boolean, nullable=False, server_default="true")
+    is_amendment = Column(Boolean, nullable=False, server_default="false")
+    ticker = Column(String(20), nullable=True)
+    issuer_cik = Column(String(10), nullable=True)
+    issuer_name = Column(String(256), nullable=True)
+    filer_cik = Column(String(10), nullable=True)
+    filer_name = Column(String(256), nullable=True)
+    shares_owned = Column(Numeric(20, 4), nullable=True)
+    pct_owned = Column(Numeric(8, 4), nullable=True)
+    event_date = Column(Date, nullable=True)
+    purpose_text = Column(Text, nullable=True)
+    filing_url = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class EightKFiling(Base):
+    """One Form 8-K (Material Event) ingested from EDGAR, for tracked
+    tickers only.
+
+    Unlike Form 4/144/3/13D-13G, item codes (which material event
+    triggered the filing — M&A, executive changes, earnings, bankruptcy,
+    etc.) come straight from EDGAR's getcurrent atom <summary> text, not a
+    per-filing XML/document fetch — see form8k_edgar.py. 8-K volume is
+    dozens per 5-minute tick across every US issuer, so form8k_monitor.py
+    resolves each entry's issuer CIK to a ticker and discards anything not
+    already tracked (open positions + insider filers) *before* storing —
+    this table only ever holds filings for names the user actually cares
+    about, never the market-wide firehose.
+
+    items is a JSONB list of {"code": "5.02", "description": "..."} — kept
+    as-is rather than normalized into a join table since it's small and
+    read-only display data, not queried by item code anywhere yet.
+    """
+
+    __tablename__ = "eight_k_filings"
+    __table_args__ = (
+        UniqueConstraint("accession", name="uq_eight_k_filings_accession"),
+        Index("idx_eight_k_filings_ticker", "ticker"),
+    )
+
+    filing_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    accession = Column(String(25), nullable=False)
+    ticker = Column(String(20), nullable=False)
+    issuer_cik = Column(String(10), nullable=True)
+    issuer_name = Column(String(256), nullable=True)
+    is_amendment = Column(Boolean, nullable=False, server_default="false")
+    items = Column(JSONB, nullable=True)
+    filed_at = Column(DateTime(timezone=True), nullable=True)
+    filing_url = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class Form13FHolding(Base):
+    """One tracked-ticker holding from a Form 13F-HR (quarterly
+    institutional holdings, >$100M AUM, filed 45 days after quarter-end).
+
+    Positioning data, not a trading signal — filings roll in as a burst
+    around the 45-day deadline, not evenly through the quarter, and can
+    already be over a month stale the day they're filed. Reported by CUSIP,
+    not ticker — resolved via cusip_ticker_map.py (the free OpenFIGI API),
+    since 13F's own schema (verified live) doesn't reliably expose a
+    composite/exchange-level FIGI the same lookup could use directly.
+
+    form13f_monitor.py resolves every CUSIP in a filing's information
+    table and discards holdings that don't match an already-tracked ticker
+    (open positions + insider filers) before storing — same "filter before
+    storing" principle as Form 8-K, since a single filer can hold hundreds
+    of positions. One row per (accession, cusip): a filer's information
+    table lists each holding once.
+    """
+
+    __tablename__ = "form13f_holdings"
+    __table_args__ = (
+        UniqueConstraint("accession", "cusip", name="uq_form13f_holdings_accession_cusip"),
+        Index("idx_form13f_holdings_ticker", "ticker"),
+    )
+
+    holding_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    accession = Column(String(25), nullable=False)
+    filer_cik = Column(String(10), nullable=True)
+    filer_name = Column(String(256), nullable=True)
+    ticker = Column(String(20), nullable=False)
+    cusip = Column(String(9), nullable=False)
+    issuer_name = Column(String(256), nullable=True)
+    shares = Column(Numeric(20, 2), nullable=True)
+    value_usd = Column(Numeric(20, 2), nullable=True)
+    is_amendment = Column(Boolean, nullable=False, server_default="false")
+    filed_at = Column(DateTime(timezone=True), nullable=True)
+    filing_url = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

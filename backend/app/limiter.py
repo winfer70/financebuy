@@ -16,11 +16,9 @@ import os
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-# Redis-backed storage so rate limits survive worker restarts and are
-# shared across multiple uvicorn processes / container replicas.
-_redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+_storage_uri = os.getenv("RATE_LIMIT_STORAGE") or os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 limiter = Limiter(
     key_func=get_remote_address,
-    storage_uri=_redis_url,
+    storage_uri=_storage_uri,
 )

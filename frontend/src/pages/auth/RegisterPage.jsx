@@ -4,7 +4,7 @@
  * Extracted component from App.jsx
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import api from "../../api/client";
 import { Ic } from "../../components/common/Icons";
 import { Sparkline } from "../../components/charts";
@@ -22,6 +22,23 @@ export function RegisterPage({ onLogin, onBack, backendOk, onNavigate }) {
   const [err,       setErr]       = useState("");
   const [registered, setRegistered] = useState(false);
 
+  // Telegram invite gate — only present when this register link was shared
+  // with a specific ?invite=<code> query param. Checked against the server
+  // (not just "is there a code in the URL") so a stale/used/expired link
+  // silently falls back to the normal registration form.
+  const [inviteCode, setInviteCode] = useState(null);
+  const [telegramGateOpen, setTelegramGateOpen] = useState(false);
+  const [telegramLink, setTelegramLink] = useState(null); // {link_code, bot_username} once registered
+
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get("invite");
+    if (!code) return;
+    setInviteCode(code);
+    api.checkTelegramInvite(code)
+      .then((res) => setTelegramGateOpen(!!res?.valid))
+      .catch(() => setTelegramGateOpen(false));
+  }, []);
+
   const handleRegister = async () => {
     if (!firstName)       { setErr("FIRST NAME REQUIRED"); return; }
     if (!email)           { setErr("EMAIL REQUIRED"); return; }
@@ -30,7 +47,17 @@ export function RegisterPage({ onLogin, onBack, backendOk, onNavigate }) {
     if (pwd !== pwd2)     { setErr("PASSWORDS DO NOT MATCH"); return; }
     setErr(""); setLoading(true);
     try {
-      await api.register({ email, password: pwd, first_name: firstName, last_name: lastName });
+      const payload = { email, password: pwd, first_name: firstName, last_name: lastName };
+      if (telegramGateOpen && inviteCode) {
+        payload.telegram_invite_code = inviteCode;
+      }
+      const res = await api.register(payload);
+      if (res?.telegram_link_code) {
+        setTelegramLink({
+          linkCode: res.telegram_link_code,
+          botUsername: res.telegram_bot_username,
+        });
+      }
       setRegistered(true);
     } catch(e) {
       setErr(e.message || "REGISTRATION FAILED");
@@ -102,12 +129,58 @@ export function RegisterPage({ onLogin, onBack, backendOk, onNavigate }) {
               Please check your inbox (and spam folder) and click the verification
               link to activate your account.
             </div>
+            {telegramLink && (
+              <div style={{
+                textAlign: "left", background: "rgba(15,125,64,0.08)",
+                border: "1px solid var(--green)", borderRadius: 4,
+                padding: 16, marginBottom: 24, fontFamily: "var(--font-mono)",
+              }}>
+                <div style={{ color: "var(--green)", fontSize: 12, fontWeight: 600, letterSpacing: 0.5, marginBottom: 8 }}>
+                  CONNECT YOUR TELEGRAM ALERTS
+                </div>
+                <div style={{ color: "var(--muted)", fontSize: 11, lineHeight: 1.6, marginBottom: 10 }}>
+                  Message{" "}
+                  {telegramLink.botUsername ? (
+                    <a
+                      href={`https://t.me/${telegramLink.botUsername.replace(/^@/, "")}`}
+                      target="_blank" rel="noreferrer"
+                      style={{ color: "var(--amber)", fontWeight: 600 }}
+                    >
+                      @{telegramLink.botUsername.replace(/^@/, "")}
+                    </a>
+                  ) : "the tickerTap bot"}{" "}
+                  on Telegram and send this command — it links this chat to your
+                  account only, nothing else is shared:
+                </div>
+                <div style={{
+                  background: "var(--bg3, #111)", border: "1px solid var(--border, #333)",
+                  borderRadius: 3, padding: "8px 12px", color: "var(--text, #eee)",
+                  fontSize: 13, fontWeight: 600, letterSpacing: 0.5, userSelect: "all",
+                }}>
+                  /link {telegramLink.linkCode}
+                </div>
+                <div style={{ color: "var(--muted)", fontSize: 10, marginTop: 8 }}>
+                  This code expires in 30 minutes. You can also do this later — it's
+                  optional.
+                </div>
+              </div>
+            )}
             <button className="btn btn-amber login-btn-full" onClick={onBack}>
               BACK TO SIGN IN
             </button>
           </div>
         ) : (
           <form className="login-form" onSubmit={e=>{e.preventDefault();handleRegister();}}>
+            {telegramGateOpen && (
+              <div style={{
+                background: "rgba(15,125,64,0.08)", border: "1px solid var(--green)",
+                borderRadius: 4, padding: "10px 12px", fontFamily: "var(--font-mono)",
+                fontSize: 11, color: "var(--green)", lineHeight: 1.5,
+              }}>
+                You're registering via an invite link — after signing up you'll be
+                able to connect your own Telegram chat for alerts.
+              </div>
+            )}
             <div style={{display:"flex",gap:12}}>
               <div className="form-field" style={{flex:1}}>
                 <label className="form-label">First Name</label>

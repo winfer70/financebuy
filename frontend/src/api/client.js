@@ -133,6 +133,16 @@ const api = {
   register: (payload) =>
     apiFetch("/auth/register", { method: "POST", body: payload }),
 
+  /**
+   * Check whether a Telegram invite code is currently valid (unused, not
+   * expired) — used by the register page to decide whether to show the
+   * Telegram-connect step. Public, unauthenticated.
+   * @param {string} code
+   * @returns {Promise<{valid: boolean}>}
+   */
+  checkTelegramInvite: (code) =>
+    apiFetch(`/telegram-invites/${encodeURIComponent(code)}`),
+
   /** @param {string} email */
   forgotPassword: (email) =>
     apiFetch("/auth/forgot-password", { method: "POST", body: { email } }),
@@ -340,6 +350,45 @@ const api = {
    */
   getNewsByTicker: (ticker, token, limit = 25, offset = 0) =>
     apiFetch(`/news/tickers/${encodeURIComponent(ticker)}?limit=${limit}&offset=${offset}`, { token }),
+
+  // ── Insider (Form 4) ───────────────────────────────────────────────────────
+  /**
+   * Paginated Form 4 filings with sort/filter.
+   * @returns {Promise<{total: number, items: Array}>}
+   */
+  getInsiderFilings: (token, {
+    ticker = null, owner_cik = null, code = null, days = 90,
+    sort = "transaction_date", order = "desc", limit = 50, offset = 0,
+  } = {}) => {
+    let url = `/insider/filings?days=${days}&sort=${encodeURIComponent(sort)}&order=${encodeURIComponent(order)}&limit=${limit}&offset=${offset}`;
+    if (ticker) url += `&ticker=${encodeURIComponent(ticker)}`;
+    if (owner_cik) url += `&owner_cik=${encodeURIComponent(owner_cik)}`;
+    if (code) url += `&code=${encodeURIComponent(code)}`;
+    return apiFetch(url, { token });
+  },
+
+  /**
+   * Per-person Form 4 breakdown (buys/sells, cadence, 10b5-1 share).
+   */
+  getInsiderOwner: (ownerCik, token, { ticker = null, days = 365 } = {}) => {
+    let url = `/insider/owners/${encodeURIComponent(ownerCik)}?days=${days}`;
+    if (ticker) url += `&ticker=${encodeURIComponent(ticker)}`;
+    return apiFetch(url, { token });
+  },
+
+  /**
+   * Unified Form 144 / Form 3 / Schedule 13D-13G / 8-K / 13F browser —
+   * normalized rows, sortable/filterable by source.
+   * @returns {Promise<{total: number, items: Array}>}
+   */
+  getAllFilings: (token, {
+    ticker = null, source = "all", days = 90,
+    sort = "date", order = "desc", limit = 50, offset = 0,
+  } = {}) => {
+    let url = `/insider/filings-all?source=${encodeURIComponent(source)}&days=${days}&sort=${encodeURIComponent(sort)}&order=${encodeURIComponent(order)}&limit=${limit}&offset=${offset}`;
+    if (ticker) url += `&ticker=${encodeURIComponent(ticker)}`;
+    return apiFetch(url, { token });
+  },
 
   // ── Guide ──────────────────────────────────────────────────────────────────
   /**
@@ -1048,6 +1097,15 @@ const api = {
   /** List all users (admin). */
   adminListUsers: (token) =>
     apiFetch("/admin/users", { token }),
+
+  /**
+   * Mint a one-time Telegram-invite registration link (admin). Share the
+   * returned register_url — it unlocks the Telegram-connect step on
+   * /register for exactly one signup, then stops working.
+   * @returns {Promise<{code: string, expires_at: string, register_url: string}>}
+   */
+  adminCreateTelegramInvite: (token) =>
+    apiFetch("/admin/telegram-invites", { method: "POST", token }),
 
   /** Lock (deactivate) a user. */
   adminLockUser: (userId, token) =>

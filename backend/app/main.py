@@ -48,6 +48,7 @@ from .routes import (
     guide,
     holdings,
     import_routes,
+    insider,
     internal_portfolio,
     market,
     metrics as metrics_routes,
@@ -58,6 +59,7 @@ from .routes import (
     portfolio_rules,
     reports,
     scanner,
+    telegram_invites,
     transactions,
     trading,
     watchlists,
@@ -347,6 +349,8 @@ app.include_router(admin.router, prefix=_V1)
 app.include_router(market.router, prefix=f"{_V1}/market", tags=["market"])
 app.include_router(holdings.router, prefix=f"{_V1}/holdings", tags=["holdings"])
 app.include_router(news.router, prefix=_V1)
+app.include_router(insider.router, prefix=_V1)
+app.include_router(telegram_invites.router, prefix=_V1)
 app.include_router(portfolio_manager.router, prefix=_V1)
 app.include_router(portfolio_rules.router, prefix=_V1)
 app.include_router(chart_templates.router, prefix=_V1)

@@ -3,8 +3,11 @@ worker.py — TickerTap background news worker for the remote worker host.
 
 Main loop:
     1. Flush any pending articles from the local SQLite queue.
-    2. Optionally refresh learned scoring rules from Server A.
-    3. Fetch news from all 4 sources (Yahoo, Google, Finviz, MarketWatch).
+    2. Optionally refresh learned scoring rules and the watch-ticker list
+       (open positions + recent Form 4 filers) from Server A.
+    3. Fetch news from all 4 general sources (Yahoo, Google, Finviz,
+       MarketWatch), plus a targeted Google News search per watch ticker —
+       general feeds rarely mention small/micro-cap names by symbol.
     4. Deduplicate against already-seen URLs (local in-memory set).
     5. For each new article:
        a. Build an LLM prompt with headline + summary + learned rules.
@@ -57,8 +60,9 @@ logger = logging.getLogger("tickertap-worker")
 # Configuration from environment
 # ---------------------------------------------------------------------------
 API_URL = os.getenv("TICKERTAP_API_URL", "http://localhost:8000")
-INTERNAL_KEY = os.getenv("TICKERTAP_INTERNAL_KEY", "")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3:8b-instruct-q4_K_M")
+INTERNAL_KEY = os.getenv("TICKERTAP_INTERNAL_KEY") or os.getenv("INTERNAL_NEWS_KEY", "")
+# llama3:8b is gone with the old worker host; score on the GPU box model that is actually pulled.
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "hermes3:8b")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
 # Internal ingestion endpoint on Server A.
@@ -67,9 +71,33 @@ _INGEST_ENDPOINT = f"{API_URL}/api/v1/news/internal/news"
 # Active scoring rules endpoint on Server A (feedback loop).
 _RULES_ENDPOINT = f"{API_URL}/api/v1/feedback/internal/rules/active"
 
+# Watch-ticker list endpoint on Server A (open positions + recent Form 4 filers).
+_WATCH_TICKERS_ENDPOINT = f"{API_URL}/api/v1/feedback/internal/watch-tickers"
+
 # How often to refresh learned scoring rules (every N cycles).
 # At 10-min cycles during market hours this is roughly every hour.
 _RULES_REFRESH_EVERY = 6
+
+# Same cadence for the watch-ticker list — it changes slowly (new position,
+# new filing) so there's no need to refetch every cycle.
+_WATCH_TICKERS_REFRESH_EVERY = 6
+
+# Bounds on the per-cycle targeted-search workload so a large watchlist can't
+# starve the general-news scoring pass or overload Ollama.
+_MAX_WATCH_TICKERS_PER_CYCLE = 15
+_MAX_TICKER_ARTICLES_PER_CYCLE = 20
+
+# Server A returns watch tickers ordered by most-recent Form 4 filing first,
+# so a brand-new filing (the exact case a Telegram alert fires for) starts
+# at the front of the list. But always taking the first N every cycle would
+# still starve anything past position N once the list grows — e.g. a busy
+# day of filings pushed a real position 16+ deep and it never got searched.
+# A per-ticker cooldown fixes both: freshest tickers are eligible immediately
+# (cooldown never hit), so they get searched on the very next cycle, and once
+# searched they free up their slot for the next-most-urgent ticker instead of
+# blocking it for hours.
+_TICKER_SEARCH_COOLDOWN_SECONDS = 2 * 60 * 60
+_ticker_last_searched: dict = {}
 
 # Sleep intervals in seconds.
 _SLEEP_MARKET_HOURS = 600    # 10 minutes
@@ -133,6 +161,12 @@ _cached_rules_text: Optional[str] = None
 # Cycle counter for rules refresh (fetches on first cycle, then every N).
 _rules_refresh_counter: int = 0
 
+# Cached watch-ticker list from Server A (None = never fetched).
+_cached_watch_tickers: Optional[list] = None
+
+# Cycle counter for watch-ticker refresh (fetches on first cycle, then every N).
+_watch_tickers_refresh_counter: int = 0
+
 
 def _fetch_active_rules() -> Optional[str]:
     """Fetch the currently active scoring rules from Server A.
@@ -183,7 +217,45 @@ def _maybe_refresh_rules() -> None:
         _rules_refresh_counter = 0
 
 
-def _build_prompt(title: str, summary: str) -> str:
+def _fetch_watch_tickers() -> list:
+    """Fetch the current watch-ticker list from Server A.
+
+    Calls ``GET /api/v1/feedback/internal/watch-tickers``, which returns
+    tickers with an open position or a recent Form 4 filing — names that
+    matter to the user but rarely surface in general-market RSS feeds.
+
+    Returns:
+        List of upper-cased ticker strings, or [] on error.
+    """
+    headers = {"X-Internal-Key": INTERNAL_KEY}
+    try:
+        resp = requests.get(_WATCH_TICKERS_ENDPOINT, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            logger.warning(
+                "Failed to fetch watch tickers: status=%d", resp.status_code
+            )
+            return []
+        tickers = resp.json().get("tickers", [])
+        if not isinstance(tickers, list):
+            return []
+        logger.info("Fetched %d watch tickers for targeted search.", len(tickers))
+        return tickers
+    except requests.RequestException as exc:
+        logger.warning("Could not reach Server A for watch tickers: %s", exc)
+        return []
+
+
+def _maybe_refresh_watch_tickers() -> None:
+    """Refresh the cached watch-ticker list if the refresh interval has elapsed."""
+    global _cached_watch_tickers, _watch_tickers_refresh_counter
+
+    _watch_tickers_refresh_counter += 1
+    if _watch_tickers_refresh_counter >= _WATCH_TICKERS_REFRESH_EVERY or _cached_watch_tickers is None:
+        _cached_watch_tickers = _fetch_watch_tickers()
+        _watch_tickers_refresh_counter = 0
+
+
+def _build_prompt(title: str, summary: str, hint_ticker: Optional[str] = None) -> str:
     """Build the full LLM scoring prompt, optionally injecting learned rules.
 
     If the worker has cached scoring rules from the learner, they are
@@ -211,6 +283,13 @@ def _build_prompt(title: str, summary: str) -> str:
             summary=summary or "No summary available.",
         )
     )
+
+    if hint_ticker:
+        parts.append(
+            f"\n\nThis article was found via a targeted search for {hint_ticker}. "
+            f"If it is genuinely relevant to {hint_ticker}, include it in \"tickers\" "
+            f"with \"symbol\" set to exactly \"{hint_ticker}\" (not the company name)."
+        )
 
     return "".join(parts)
 
@@ -251,7 +330,7 @@ def _is_market_hours() -> bool:
     return False
 
 
-def _score_with_ollama(title: str, summary: str) -> dict:
+def _score_with_ollama(title: str, summary: str, hint_ticker: Optional[str] = None) -> dict:
     """Call the local Ollama API to score a news article with the LLM.
 
     Builds a prompt from the article headline and summary (plus any learned
@@ -259,8 +338,12 @@ def _score_with_ollama(title: str, summary: str) -> dict:
     and parses the JSON response.
 
     Args:
-        title:   Article headline text.
-        summary: Article summary text (may be empty/None).
+        title:       Article headline text.
+        summary:     Article summary text (may be empty/None).
+        hint_ticker: If this article came from a targeted per-ticker search
+            (rather than the general feed), the ticker it was searched for —
+            forces that symbol into the result even if the LLM's own
+            extraction misses or misnames it (see _validate_score).
 
     Returns:
         Parsed dict with keys: general_score, general_reasoning, tickers.
@@ -270,7 +353,7 @@ def _score_with_ollama(title: str, summary: str) -> dict:
         requests.RequestException: On network/connection errors.
     """
     # Build the prompt with optional learned rules injection.
-    prompt = _build_prompt(title, summary)
+    prompt = _build_prompt(title, summary, hint_ticker=hint_ticker)
 
     payload = {
         "model": OLLAMA_MODEL,
@@ -294,17 +377,18 @@ def _score_with_ollama(title: str, summary: str) -> dict:
 
     # Attempt to extract JSON from the LLM output.  The model may wrap it
     # in markdown code fences or include preamble text.
-    return _parse_llm_json(raw_text)
+    return _parse_llm_json(raw_text, hint_ticker=hint_ticker)
 
 
-def _parse_llm_json(raw_text: str) -> dict:
+def _parse_llm_json(raw_text: str, hint_ticker: Optional[str] = None) -> dict:
     """Extract and parse a JSON object from raw LLM output.
 
     Handles common LLM quirks: markdown code fences, trailing commas,
     preamble text before the JSON block.
 
     Args:
-        raw_text: Raw text response from the LLM.
+        raw_text:    Raw text response from the LLM.
+        hint_ticker: Forwarded to _validate_score — see _score_with_ollama.
 
     Returns:
         Parsed dict with validated structure.
@@ -353,17 +437,23 @@ def _parse_llm_json(raw_text: str) -> dict:
         ) from e
 
     # Validate and clamp the structure.
-    return _validate_score(data)
+    return _validate_score(data, hint_ticker=hint_ticker)
 
 
-def _validate_score(data: dict) -> dict:
+def _validate_score(data: dict, hint_ticker: Optional[str] = None) -> dict:
     """Validate and sanitise the parsed LLM scoring output.
 
     Ensures scores are clamped to [-5, +5] and the structure matches what
     Server A's ingestion endpoint expects.
 
     Args:
-        data: Parsed JSON dict from the LLM.
+        data:        Parsed JSON dict from the LLM.
+        hint_ticker: If set, this article came from a targeted per-ticker
+            search, so it's already known to be about this symbol. The LLM
+            sometimes names the company instead of the ticker, mis-cases it,
+            or omits it from "tickers" even while scoring it in general terms
+            — in each case the caller already knows the true symbol, so it's
+            force-included here rather than silently lost.
 
     Returns:
         Validated dict with correct types and ranges.
@@ -397,6 +487,16 @@ def _validate_score(data: dict) -> dict:
                 "ticker": symbol,
                 "score": score,
                 "reasoning": reasoning[:500],  # Cap reasoning length
+            })
+
+    if hint_ticker:
+        hint_upper = hint_ticker.strip().upper()
+        if hint_upper and not any(t["ticker"] == hint_upper for t in tickers):
+            tickers.append({
+                "ticker": hint_upper,
+                "score": general_score,
+                "reasoning": "Found via targeted search for this ticker; "
+                             "LLM did not separately name it in its analysis.",
             })
 
     return {
@@ -521,16 +621,46 @@ def _run_cycle() -> None:
     """
     global _seen_urls
 
-    # 0. Refresh learned scoring rules from Server A (every N cycles).
+    # 0. Refresh learned scoring rules and the watch-ticker list from Server A
+    # (every N cycles each).
     _maybe_refresh_rules()
+    _maybe_refresh_watch_tickers()
 
     # 1. Flush any pending articles from the local queue first.
     _flush_queue()
 
-    # 2. Fetch news from all sources.
+    # 2. Fetch news from all general sources.
     logger.info("Fetching news from all sources...")
     raw_articles = sources.fetch_all_news()
     logger.info("Fetched %d unique articles from sources.", len(raw_articles))
+
+    # 2b. Targeted per-ticker search for the watchlist (open positions + recent
+    # Form 4 filers) — the general feeds above rarely mention these by name.
+    # Each article is tagged with the ticker it was searched for so scoring
+    # can force that symbol in even if the LLM's own extraction misses it.
+    ticker_articles = []
+    now_ts = time.time()
+    eligible_tickers = [
+        t for t in (_cached_watch_tickers or [])
+        if now_ts - _ticker_last_searched.get(t, 0) >= _TICKER_SEARCH_COOLDOWN_SECONDS
+    ]
+    watch_tickers = eligible_tickers[:_MAX_WATCH_TICKERS_PER_CYCLE]
+    for ticker in watch_tickers:
+        _ticker_last_searched[ticker] = now_ts
+        if len(ticker_articles) >= _MAX_TICKER_ARTICLES_PER_CYCLE:
+            break
+        for article in sources.fetch_google_news_for_ticker(ticker):
+            article["_hint_ticker"] = ticker
+            ticker_articles.append(article)
+    if watch_tickers:
+        logger.info(
+            "Targeted search over %d watch tickers (%s) found %d candidate articles.",
+            len(watch_tickers),
+            ", ".join(watch_tickers),
+            len(ticker_articles),
+        )
+
+    raw_articles = raw_articles + ticker_articles
 
     if not raw_articles:
         logger.info("No articles fetched this cycle.")
@@ -565,6 +695,7 @@ def _run_cycle() -> None:
     scored_payloads = []
     for i, article in enumerate(articles_to_process, 1):
         title = article.get("title", "Untitled")
+        hint_ticker = article.get("_hint_ticker")
         logger.info(
             "[%d/%d] Scoring: %.80s",
             i,
@@ -572,16 +703,23 @@ def _run_cycle() -> None:
             title,
         )
         try:
-            scores = _score_with_ollama(title, article.get("summary"))
+            scores = _score_with_ollama(title, article.get("summary"), hint_ticker=hint_ticker)
             payload = _build_ingest_payload(article, scores)
             scored_payloads.append(payload)
         except ValueError as exc:
             logger.warning("LLM parse error for '%.60s': %s", title, exc)
             # Assign a neutral score rather than dropping the article entirely.
+            # A targeted-search hit still carries its known ticker even though
+            # the LLM's own JSON came back unparsable.
+            fallback_tickers = [{
+                "ticker": hint_ticker.strip().upper(),
+                "score": 0,
+                "reasoning": "Found via targeted search for this ticker — LLM parse failure.",
+            }] if hint_ticker else []
             payload = _build_ingest_payload(article, {
                 "general_score": 0,
                 "general_reasoning": "Unable to score — LLM parse failure.",
-                "tickers": [],
+                "tickers": fallback_tickers,
             })
             scored_payloads.append(payload)
         except requests.RequestException as exc:

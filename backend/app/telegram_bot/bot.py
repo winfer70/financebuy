@@ -14,6 +14,7 @@ Bot token loaded from TELEGRAM_BOT_TOKEN env var.
 """
 
 import asyncio
+import functools
 import logging
 import os
 from decimal import Decimal, InvalidOperation
@@ -31,6 +32,30 @@ _PAPER_PORTFOLIO_ID = os.getenv("AI_PAPER_PORTFOLIO_ID", "")
 _BOT_USER_ID = os.getenv("BOT_USER_ID", "")
 _HEADERS = {"X-Bot-Api-Key": _BOT_API_KEY}
 _TIMEOUT = httpx.Timeout(300.0, connect=10.0)
+
+# This bot's token is the only thing gating who can message it — anyone who
+# discovers the bot's public @username (which now happens on purpose, via
+# Telegram invite links shared for /link) can otherwise send it commands.
+# Trading/account commands must therefore be restricted to the configured
+# owner chat; /start and /link are intentionally exempt since their entire
+# purpose is to work from a chat that isn't the owner's yet.
+_OWNER_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+
+
+def _owner_only(handler):
+    """Decorator: reject the command unless it's from the owner's chat."""
+
+    @functools.wraps(handler)
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        chat_id = str(update.effective_chat.id) if update.effective_chat else ""
+        if not _OWNER_CHAT_ID or chat_id != _OWNER_CHAT_ID:
+            logger.warning("Rejected command from non-owner chat_id=%s", chat_id)
+            if update.message:
+                await update.message.reply_text("Not authorized.")
+            return
+        await handler(update, context)
+
+    return wrapper
 
 
 # ── API helpers ───────────────────────────────────────────────────────────────
@@ -76,6 +101,7 @@ def _fmt_pct(v) -> str:
 
 # ── /analyze ─────────────────────────────────────────────────────────────────
 
+@_owner_only
 async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not context.args:
         await update.message.reply_text("Usage: /analyze <TICKER>")
@@ -128,6 +154,7 @@ async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 # ── /buy ─────────────────────────────────────────────────────────────────────
 
+@_owner_only
 async def cmd_buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if len(context.args) < 3:
         await update.message.reply_text("Usage: /buy <TICKER> <QTY> <PRICE>")
@@ -174,6 +201,7 @@ async def cmd_buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 # ── /sell ─────────────────────────────────────────────────────────────────────
 
+@_owner_only
 async def cmd_sell(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if len(context.args) < 3:
         await update.message.reply_text("Usage: /sell <TICKER> <QTY> <PRICE>")
@@ -237,6 +265,7 @@ async def cmd_sell(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 # ── /positions ────────────────────────────────────────────────────────────────
 
+@_owner_only
 async def cmd_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _PAPER_PORTFOLIO_ID:
         await update.message.reply_text("AI_PAPER_PORTFOLIO_ID not configured")
@@ -270,6 +299,7 @@ async def cmd_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 # ── /pnl ──────────────────────────────────────────────────────────────────────
 
+@_owner_only
 async def cmd_pnl(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _PAPER_PORTFOLIO_ID:
         await update.message.reply_text("AI_PAPER_PORTFOLIO_ID not configured")
@@ -315,6 +345,7 @@ async def cmd_pnl(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 # ── /alerts ───────────────────────────────────────────────────────────────────
 
+@_owner_only
 async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         data = await _api_get("/alerts", params={"active_only": True})
@@ -341,6 +372,7 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 # ── /refinements ──────────────────────────────────────────────────────────────
 
+@_owner_only
 async def cmd_refinements(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """List pending rule refinement suggestions from weekly meta-analysis."""
     try:
@@ -376,6 +408,7 @@ async def cmd_refinements(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 # ── /approve_refinement ───────────────────────────────────────────────────────
 
+@_owner_only
 async def cmd_approve_refinement(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Approve a rule refinement and apply suggested rules to investment_rules.json."""
     if not context.args:
@@ -401,6 +434,51 @@ async def cmd_approve_refinement(update: Update, context: ContextTypes.DEFAULT_T
     )
 
 
+# ── /start, /link — deliberately NOT @_owner_only ───────────────────────────
+# These are the only commands meant to work from a chat that isn't the owner's
+# yet: /start is the generic Telegram greeting, and /link is how a new account
+# (registered via a Telegram invite) claims this chat as its own notification
+# target. Neither one can read or change anything about another user's data —
+# /link only succeeds if the caller has the current, unexpired code that was
+# shown to exactly one account at registration time.
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        "Welcome to tickerTap. If you registered with a Telegram invite link, "
+        "send /link <code> here to connect this chat and start getting your "
+        "own alerts."
+    )
+
+
+async def cmd_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.args:
+        await update.message.reply_text("Usage: /link <code>")
+        return
+    if not update.effective_chat:
+        return
+
+    code = context.args[0].strip()
+    chat_id = str(update.effective_chat.id)
+    try:
+        data = await _api_post("/internal/telegram/link", {"code": code, "chat_id": chat_id})
+    except httpx.HTTPStatusError as e:
+        await update.message.reply_text(f"Failed: {e.response.status_code} {e.response.text[:200]}")
+        return
+    except Exception as e:
+        await update.message.reply_text(f"Failed: {e}")
+        return
+
+    if data.get("linked"):
+        name = data.get("first_name") or "there"
+        await update.message.reply_text(
+            f"✅ Linked, {name}! You'll get your own tickerTap alerts in this chat from now on."
+        )
+    else:
+        await update.message.reply_text(
+            "That code is invalid or has expired — ask for a new invite link."
+        )
+
+
 # ── Bot lifecycle ─────────────────────────────────────────────────────────────
 
 _application: Optional[Application] = None
@@ -421,6 +499,8 @@ async def start_bot() -> None:
         .build()
     )
 
+    _application.add_handler(CommandHandler("start", cmd_start))
+    _application.add_handler(CommandHandler("link", cmd_link))
     _application.add_handler(CommandHandler("analyze", cmd_analyze))
     _application.add_handler(CommandHandler("buy", cmd_buy))
     _application.add_handler(CommandHandler("sell", cmd_sell))

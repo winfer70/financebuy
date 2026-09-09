@@ -33,7 +33,7 @@ from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from ..auth import hash_password, verify_password, create_access_token, decode_access_token
 from ..db import AsyncSessionLocal, get_db
@@ -45,7 +45,12 @@ from ..email import (
     send_verification_email,
 )
 from ..limiter import limiter
-from ..models import AuditLog, EmailVerificationToken, PasswordResetToken, RefreshToken, User
+from ..models import AuditLog, EmailVerificationToken, PasswordResetToken, RefreshToken, TelegramInvite, User
+
+# Keep in sync with telegram_invites.LINK_CODE_TTL_MINUTES — duplicated here
+# rather than imported to avoid a circular import (telegram_invites imports
+# get_current_admin/get_current_user_or_bot from this module).
+LINK_CODE_TTL_MINUTES = 30
 from ..schemas import (
     AccountDeleteRequest,
     DeactivateRequest,
@@ -240,6 +245,12 @@ async def register_user(
         )
 
     user = User(
+        # Generate explicitly rather than relying on the column's
+        # default=uuid.uuid4 — that only fires at flush/INSERT time, but
+        # the Telegram-invite handling below needs a real user_id right
+        # away (to record on TelegramInvite.used_by) well before this user
+        # is ever added to the session.
+        user_id=uuid4(),
         email=payload.email,
         password_hash=hash_password(payload.password),
         first_name=payload.first_name,
@@ -248,6 +259,24 @@ async def register_user(
     )
     # Override model default — new registrations require email verification.
     user.email_verified = False
+
+    # If registration came through a valid, unused Telegram invite link,
+    # consume it and hand the new account a one-time code to link its own
+    # Telegram chat — the bot token itself is never exposed to them, only
+    # the bot's public @username (see telegram_invites.py).
+    telegram_invite = None
+    if payload.telegram_invite_code:
+        invite_result = await db.execute(
+            select(TelegramInvite).where(TelegramInvite.code == payload.telegram_invite_code[:32])
+        )
+        candidate = invite_result.scalar_one_or_none()
+        now = datetime.now(timezone.utc)
+        if candidate and candidate.used_by is None and candidate.expires_at > now:
+            telegram_invite = candidate
+            telegram_invite.used_by = user.user_id
+            telegram_invite.used_at = now
+            user.telegram_link_code = secrets.token_urlsafe(6)[:16]
+            user.telegram_link_code_expires_at = now + timedelta(minutes=LINK_CODE_TTL_MINUTES)
 
     audit = AuditLog(
         user_id=user.user_id,
@@ -287,6 +316,11 @@ async def register_user(
     except Exception as exc:
         # Don't expose SMTP errors to the client, but log for debugging.
         logger.error("Failed to send verification email to %s: %s", user.email, exc)
+
+    if telegram_invite is not None:
+        # Transient attribute (not a DB column) — orm_mode picks it up for
+        # this one response so the frontend knows which bot to message.
+        user.telegram_bot_username = os.getenv("TELEGRAM_BOT_USERNAME")  # type: ignore[attr-defined]
 
     return user
 
@@ -723,6 +757,8 @@ async def get_profile(current_user: User = Depends(get_current_user)):
     prefs = UserPreferences(**{
         "currency": raw.get("currency", "USD"),
         "language": raw.get("language", "en"),
+        "sidebar_collapsed": raw.get("sidebar_collapsed", False),
+        "tutorial_done": raw.get("tutorial_done", False),
     })
     return UserProfileOut(
         email=current_user.email,
@@ -772,6 +808,10 @@ async def update_preferences(
         existing["currency"] = payload.currency
     if payload.language:
         existing["language"] = payload.language
+    if payload.sidebar_collapsed is not None:
+        existing["sidebar_collapsed"] = payload.sidebar_collapsed
+    if payload.tutorial_done is not None:
+        existing["tutorial_done"] = payload.tutorial_done
 
     current_user.preferences = existing
     await db.commit()
@@ -781,6 +821,8 @@ async def update_preferences(
     return UserPreferences(
         currency=raw.get("currency", "USD"),
         language=raw.get("language", "en"),
+        sidebar_collapsed=raw.get("sidebar_collapsed", False),
+        tutorial_done=raw.get("tutorial_done", False),
     )
 
 
@@ -1274,6 +1316,8 @@ async def update_profile(
     prefs = UserPreferences(**{
         "currency": raw.get("currency", "USD"),
         "language": raw.get("language", "en"),
+        "sidebar_collapsed": raw.get("sidebar_collapsed", False),
+        "tutorial_done": raw.get("tutorial_done", False),
     })
     return UserProfileOut(
         email=current_user.email,
