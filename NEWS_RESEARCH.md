@@ -3,6 +3,18 @@
 **Date**: 2026-03-16  
 **Status**: Research (source-expansion options). Live scoring path is already `server-b-worker/` → Ollama → `POST /api/v1/news/internal/news`. **Not FinBERT.**
 
+**Shipped (2026-09-08)**: Fixed the "0 articles scored" bug — `server-b-worker/worker.py`
+was slicing a flat, alphabetically-ordered watch-ticker list to `_MAX_WATCH_TICKERS_PER_CYCLE`
+every cycle, so tickers late in the alphabet (or added later) were starved of per-ticker
+search entirely. Fixed with two changes: `feedback.py::get_watch_tickers()` now orders
+Form-4 filers by most-recent transaction date first (`func.max(InsiderFiling.transaction_date)`
+GROUP BY, re-sorted in Python) instead of alphabetically, with held positions appended after
+(capped at `_WATCH_TICKER_LIMIT = 60`); and `worker.py` added a `_TICKER_SEARCH_COOLDOWN_SECONDS
+= 2 * 60 * 60` per-ticker cooldown (`_ticker_last_searched: dict`) so the slice rotates through
+the full watch list over time instead of always hitting the same head-of-list tickers. No new
+source, no schema change — purely a scheduling/ordering fix in the existing pipeline described
+below.
+
 ---
 
 ## Current Setup

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TickerTap is a Bloomberg-terminal-inspired stock trading platform. FastAPI async backend + React 19 SPA frontend, backed by PostgreSQL 15 (TimescaleDB) and Redis 7, orchestrated via Docker Compose on a private bridge network.
 
-Canonical git branch: **`main`**. New work starts as `feature/<name>` from a pulled `main`. Alembic head is **0032**.
+Canonical git branch: **`main`**. New work starts as `feature/<name>` from a pulled `main`. Alembic head is **0041**.
 
 ### Request Flow
 ```
@@ -103,7 +103,7 @@ All business API routes live under `/api/v1`. The `/health` endpoint is unversio
 
 ### Backend layering (`backend/app/`)
 - **`main.py`** — FastAPI app creation, middleware stack (rate limit → CORS → security headers → body size → request logging), startup validation (JWT_SECRET check, DB connection)
-- **`routes/`** — 20+ route modules under `/api/v1` (`main.py` `include_router` list). Auth, portfolios, DeGiro, news ingest, scanner, analysis, alerts, trading, etc.
+- **`routes/`** — 20+ route modules under `/api/v1` (`main.py` `include_router` list). Auth, portfolios, DeGiro, news ingest, scanner, analysis, alerts, trading, insider (`insider.py` — Form 4/144/3/13D/13G/8-K/13F, unified `GET /insider/filings-all`), etc.
 - **`models.py`** — SQLAlchemy ORM models. UUIDs as PKs. Decimal precision for financial amounts. CHECK constraints on balance/amount/quantity
 - **`schemas.py`** — Pydantic v1 request/response validation (`orm_mode = True`, `condecimal`). EmailStr for emails, field limits enforce business rules
 - **`auth.py`** — JWT creation/verification (python-jose), Argon2id password hashing, `get_current_user`/`get_current_admin` dependencies
@@ -117,7 +117,7 @@ All business API routes live under `/api/v1`. The `/health` endpoint is unversio
 - **`components/common/index.jsx`** — Shared UI: SkeletonRow, ApiError, ToastContainer, Clock, Footer, TickerStrip
 
 ### Database schema
-Alembic **0001–0032**. Core: users, accounts, holdings, orders. Portfolio manager: `portfolios` / `portfolio_positions` (UUID PKs, `hard_stop_loss` + `soft_stop_loss`). News: `news_articles` + `news_article_tickers` (Ollama scores −5…+5). Scanner: `scan_results`. Rule engine: `rule_alerts` (migration 0024, `RuleAlert` model). AI: `trade_analyses`, `rule_refinements`. Do not treat README “12 tables” snapshots as current.
+Alembic **0001–0041**. Core: users, accounts, holdings, orders. Portfolio manager: `portfolios` / `portfolio_positions` (UUID PKs, `hard_stop_loss` + `soft_stop_loss`). News: `news_articles` + `news_article_tickers` (Ollama scores −5…+5). Scanner: `scan_results`. Rule engine: `rule_alerts` (migration 0024, `RuleAlert` model). AI: `trade_analyses`, `rule_refinements`. Insider/SEC filings (migrations 0033–0041): `InsiderFiling` (Form 4), `Form144Notice`, `Form3Statement`, `BeneficialOwnership` (13D/13G), `EightKFiling`, `Form13FHolding`, `ShortInterestSnapshot` (FINRA) — see `TICKERTAP_SUMMARY.md` for the full model/column reference. Do not treat README “12 tables” snapshots as current.
 
 ### Middleware stack (order matters)
 SlowAPI rate limiter → CORSMiddleware → SecurityHeadersMiddleware (HSTS, X-Frame-Options DENY) → RequestBodySizeMiddleware (10MB) → RequestLoggingMiddleware (redacts passwords/tokens)

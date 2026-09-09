@@ -32,7 +32,7 @@ const STEPS = [
   },
   {
     title: "FORM 4",
-    body: "Insider (Form 4) filings from SEC EDGAR — sortable, filterable, and click any row for that person's buy/sell breakdown and historical track record.",
+    body: "Insider filings from SEC EDGAR. The FORM 4 tab covers buy/sell transactions; ALL FILINGS adds Form 144 planned sales, Form 3 initial stakes, 13D/13G ownership, 8-K material events, and 13F fund holdings in one sortable, source-filterable table. Click any row for that person's breakdown, short-interest, and pending-144 data. Alerts fire for both your portfolio and your watchlist tickers.",
   },
   {
     title: "Orders & Trading",
