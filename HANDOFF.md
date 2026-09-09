@@ -1,7 +1,7 @@
 # tickerTap HANDOFF — 2026-09-09
 
 ## Branch
-`feature/insider-monitor-briefings` (off `main`, pushed to origin). PR open into `tradingAI0.1`. Do not `release.sh` / do not `docker compose down` (network-subnet mismatch in `docker-compose.labserver.yml` breaks a full `up`/`build` — see Known Issues).
+`feature/insider-monitor-briefings` (off `main`, pushed to origin, up to date). PR into `tradingAI0.1` not yet opened — no `gh` CLI on this machine, open manually via https://github.com/winfer70/tickerTap/compare/tradingAI0.1...feature/insider-monitor-briefings?expand=1. Do not `release.sh` / do not `docker compose down` (network-subnet mismatch in `docker-compose.labserver.yml` breaks a full `up`/`build` — see Known Issues).
 
 ## Infra
 Prod is **labserver** (192.168.0.241), Docker Compose + Cloudflare Tunnel as sole ingress (no host nginx, no published ports). Checkout at `/home/kamilo/tickerTap/`.
@@ -24,5 +24,5 @@ Prod is **labserver** (192.168.0.241), Docker Compose + Cloudflare Tunnel as sol
 - Stale duplicate checkout at `Desktop/Finances and shit/tickerTap` with 26 never-pushed local commits — not investigated, left alone.
 
 ## Next
-- Review/merge the open PR into `tradingAI0.1` (31 commits, all live in prod already but not merged).
+- Open the PR into `tradingAI0.1` (link above; 31 commits, all live in prod already but not merged) and merge once reviewed.
 - No compose-up of the whole stack — labserver's subnet mismatch will break it.
