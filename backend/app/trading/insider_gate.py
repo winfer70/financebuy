@@ -26,6 +26,12 @@ class BookSnapshot:
     min_buy_usd: Decimal = DEFAULT_MIN_BUY_USD
     # ticker -> {quantity, purchase_price, hard_stop, soft_stop}
     positions: dict = field(default_factory=dict)
+    # Watchlist-only tickers (no real position) — full gating parity with
+    # held_tickers (a watchlist ticker's insider sell/buy alerts the same
+    # way a real holding's would), but kept separate so advice text can
+    # still say "on your watchlist" instead of "already in the book" when
+    # there's no actual position behind it.
+    watchlist_tickers: set = field(default_factory=set)
 
 
 @dataclass
@@ -72,7 +78,7 @@ def evaluate_filing(
     ticker = (filing.get("ticker") or "").upper()
     notional = _notional(filing)
     reasons: list[str] = []
-    held = ticker in book.held_tickers
+    held = ticker in book.held_tickers or ticker in book.watchlist_tickers
 
     sector_pct = None
     if ticker_sector and book.total_value > 0:

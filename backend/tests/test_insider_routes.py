@@ -23,7 +23,7 @@ COVERAGE SCOPE:
 """
 import os
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -414,3 +414,178 @@ class TestOwnerBreakdownShortInterest:
         resp = client.get("/api/v1/insider/owners/0001214156")
         assert resp.status_code == 200
         assert resp.json()["short_interest"] is None
+
+
+def _mock_144(**overrides):
+    row = MagicMock()
+    defaults = dict(
+        ticker="AAPL", owner_name="Jane Doe", owner_cik="0001111111", relationships="Officer",
+        shares=Decimal("1000"), aggregate_value=Decimal("50000"),
+        approx_sale_date=date(2026, 9, 5), notice_date=date(2026, 9, 1),
+        filing_url="https://sec.gov/144.xml",
+    )
+    defaults.update(overrides)
+    for k, v in defaults.items():
+        setattr(row, k, v)
+    return row
+
+
+def _mock_form3(**overrides):
+    row = MagicMock()
+    defaults = dict(
+        ticker="AAPL", owner_name="John Smith", owner_cik="0001222222", officer_title="CFO",
+        is_director=False, is_officer=True, shares_owned=Decimal("5000"),
+        period_of_report=date(2026, 8, 15), filing_url="https://sec.gov/form3.xml",
+    )
+    defaults.update(overrides)
+    for k, v in defaults.items():
+        setattr(row, k, v)
+    return row
+
+
+def _mock_ownership(**overrides):
+    row = MagicMock()
+    defaults = dict(
+        ticker="AAPL", is_13d=True, is_amendment=False, filer_name="Activist Fund",
+        filer_cik="0001333333",
+        pct_owned=Decimal("6.5"), event_date=date(2026, 8, 20), shares_owned=Decimal("200000"),
+        purpose_text="Seeking board representation.", filing_url="https://sec.gov/13d.xml",
+    )
+    defaults.update(overrides)
+    for k, v in defaults.items():
+        setattr(row, k, v)
+    return row
+
+
+def _mock_8k(**overrides):
+    row = MagicMock()
+    defaults = dict(
+        ticker="AAPL", is_amendment=False,
+        items=[{"code": "5.02", "description": "Departure of Directors"}],
+        filed_at=datetime(2026, 9, 3, tzinfo=timezone.utc),
+        filing_url="https://sec.gov/8k.htm",
+    )
+    defaults.update(overrides)
+    for k, v in defaults.items():
+        setattr(row, k, v)
+    return row
+
+
+def _mock_13f(**overrides):
+    row = MagicMock()
+    defaults = dict(
+        ticker="AAPL", filer_name="Big Fund LLC", shares=Decimal("30000"),
+        value_usd=Decimal("6000000"), is_amendment=False,
+        filed_at=datetime(2026, 9, 2, tzinfo=timezone.utc),
+        filing_url="https://sec.gov/13f.xml",
+    )
+    defaults.update(overrides)
+    for k, v in defaults.items():
+        setattr(row, k, v)
+    return row
+
+
+class TestListAllFilings:
+    """Unified Form 144 + Form 3 + Schedule 13D/13G + 8-K + 13F browser —
+    see FREE_FILINGS_RESEARCH.md for what each source actually reports."""
+
+    def test_all_sources_normalized_and_sorted_by_date_desc(self, auth_client):
+        client, db, _user = auth_client
+        db.execute.side_effect = [
+            make_scalars_result([_mock_144()]),
+            make_scalars_result([_mock_form3()]),
+            make_scalars_result([_mock_ownership()]),
+            make_scalars_result([_mock_8k()]),
+            make_scalars_result([_mock_13f()]),
+        ]
+
+        resp = client.get("/api/v1/insider/filings-all")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 5
+        sources = {item["source"] for item in body["items"]}
+        assert sources == {"form144", "form3", "13d", "8k", "13f"}
+        by_source = {item["source"]: item for item in body["items"]}
+        assert by_source["form144"]["owner_cik"] == "0001111111"
+        assert by_source["form3"]["owner_cik"] == "0001222222"
+        assert by_source["13d"]["owner_cik"] == "0001333333"
+        assert by_source["8k"]["owner_cik"] is None
+        # Most recent first: 144 (Sep 1) < form3 (Aug 15) < 13d (Aug 20) < 8k (Sep 3) < 13f (Sep 2)
+        dates = [item["filing_date"] for item in body["items"]]
+        assert dates == sorted(dates, reverse=True)
+
+    def test_source_filter_only_queries_that_source(self, auth_client):
+        client, db, _user = auth_client
+        db.execute.side_effect = [make_scalars_result([_mock_8k()])]
+
+        resp = client.get("/api/v1/insider/filings-all", params={"source": "8k"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["items"][0]["source"] == "8k"
+        assert db.execute.call_count == 1
+
+    def test_13g_filtered_separately_from_13d(self, auth_client):
+        client, db, _user = auth_client
+        db.execute.side_effect = [make_scalars_result([_mock_ownership(is_13d=False, filer_name="Index Fund")])]
+
+        resp = client.get("/api/v1/insider/filings-all", params={"source": "13g"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["items"][0]["source"] == "13g"
+
+    def test_invalid_source_returns_400(self, auth_client):
+        client, _db, _user = auth_client
+        resp = client.get("/api/v1/insider/filings-all", params={"source": "bogus"})
+        assert resp.status_code == 400
+
+    def test_sort_by_ticker_ascending(self, auth_client):
+        client, db, _user = auth_client
+        db.execute.side_effect = [
+            make_scalars_result([_mock_8k(ticker="ZZZZ")]),
+            make_scalars_result([_mock_13f(ticker="AAAA")]),
+        ]
+
+        resp = client.get(
+            "/api/v1/insider/filings-all",
+            params={"source": "8k,13f", "sort": "ticker", "order": "asc"},
+        )
+        assert resp.status_code == 200
+        tickers = [item["ticker"] for item in resp.json()["items"]]
+        assert tickers == ["AAAA", "ZZZZ"]
+
+    def test_pagination_respects_limit_and_offset(self, auth_client):
+        client, db, _user = auth_client
+        db.execute.side_effect = [make_scalars_result([_mock_8k(), _mock_8k()])]
+
+        resp = client.get(
+            "/api/v1/insider/filings-all", params={"source": "8k", "limit": 1, "offset": 1}
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 2
+        assert len(body["items"]) == 1
+
+    def test_8k_headline_uses_first_item_description(self, auth_client):
+        client, db, _user = auth_client
+        db.execute.side_effect = [
+            make_scalars_result(
+                [_mock_8k(items=[
+                    {"code": "1.01", "description": "Entry into a Material Definitive Agreement"},
+                    {"code": "9.01", "description": "Financial Statements and Exhibits"},
+                ])]
+            )
+        ]
+
+        resp = client.get("/api/v1/insider/filings-all", params={"source": "8k"})
+        item = resp.json()["items"][0]
+        assert "Entry into a Material Definitive Agreement" in item["headline"]
+        assert item["detail"] == "Financial Statements and Exhibits"
+
+    def test_13f_labeled_as_positioning_data(self, auth_client):
+        client, db, _user = auth_client
+        db.execute.side_effect = [make_scalars_result([_mock_13f()])]
+
+        resp = client.get("/api/v1/insider/filings-all", params={"source": "13f"})
+        item = resp.json()["items"][0]
+        assert "stale" in item["detail"].lower()

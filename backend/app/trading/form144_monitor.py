@@ -1,11 +1,20 @@
-"""form144_monitor.py — Poll EDGAR Form 144 notices, resolve ticker, store.
+"""form144_monitor.py — Poll EDGAR Form 144 notices, resolve ticker, store,
+and alert directly for tracked tickers.
 
-Cron on trading-worker at a slower cadence than Form 4 — a 144 alone
-doesn't fire its own Telegram alert (FREE_FILINGS_RESEARCH.md: "surface it,
-don't auto-alert on it yet"). insider_monitor.py's sell-gate path calls
-get_recent_144_notice() to correlate a Form 4 sell against a matching 144,
-turning "insider sold" into "insider sold, and pre-announced it N days
-earlier via Form 144" in the advice text.
+Cron on trading-worker at a slower cadence than Form 4. Originally this
+only stored notices for insider_monitor.py's sell-gate path to correlate
+against a later Form 4 sell (FREE_FILINGS_RESEARCH.md's "surface it, don't
+auto-alert on it yet" — see get_recent_144_notice() below, still used for
+that). But a Form 144 *is* a real SEC concept for "planned sell" — the
+closest thing to advance notice of an insider trade that exists — so a
+tracked ticker (portfolio position or watchlist item) now gets its own
+"planned_sell" alert the moment the notice lands, not just after-the-fact
+context on a Form 4 that may or may not follow.
+
+Deliberately lighter than the Form 4 alert pipeline: no news/volume/
+consensus/track-record fetch, since a 144 is a notice of intent, not a
+completed transaction — those data-fetching dependencies would add a lot
+of surface area for an event that might not even result in a trade.
 """
 from __future__ import annotations
 
@@ -21,9 +30,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from ..models import Form144Notice
+from .book_loader import load_books
 from .cik_ticker_map import resolve_ticker
 from .form144_edgar import FORM144_ATOM_URL, parse_form144_xml
 from .insider_edgar import EdgarFetcher, parse_atom_accessions, xml_doc_url_from_index_html
+from .notifications import notify_soft_stop
 
 logger = structlog.get_logger("form144_monitor")
 
@@ -80,6 +91,45 @@ async def get_recent_144_notice(
     return res.scalar_one_or_none()
 
 
+def _format_planned_sell_title(ticker: str, notice_data: dict) -> str:
+    owner = notice_data.get("owner_name") or "Insider"
+    return f"🟡 {ticker} planned sale — {owner}"[:200]
+
+
+def _format_planned_sell_body(notice_data: dict, *, held: bool, watched: bool) -> str:
+    parts = []
+    owner = notice_data.get("owner_name") or "Unknown owner"
+    rel = notice_data.get("relationships")
+    parts.append(f"{owner}, {rel}" if rel else owner)
+    shares = notice_data.get("shares")
+    value = notice_data.get("aggregate_value")
+    if shares:
+        line = f"Proposed sale: {float(shares):,.0f} sh"
+        if value:
+            line += f" (~${float(value):,.0f})"
+        parts.append(line)
+    if notice_data.get("broker"):
+        parts.append(f"Broker: {notice_data['broker']}")
+    dates = []
+    if notice_data.get("notice_date"):
+        dates.append(f"Notice date: {notice_data['notice_date']}")
+    if notice_data.get("approx_sale_date"):
+        dates.append(f"Proposed sale date: {notice_data['approx_sale_date']}")
+    if dates:
+        parts.append(" | ".join(dates))
+    parts.append(
+        "This is a notice of intent, not a completed sale — the matching "
+        "Form 4 sale (if filed) typically follows within days."
+    )
+    if held:
+        parts.append("You hold this position.")
+    elif watched:
+        parts.append("This ticker is on your watchlist (not an open position).")
+    if notice_data.get("filing_url"):
+        parts.append(f"Filing: {notice_data['filing_url']}")
+    return "\n\n".join(parts)[:3500]
+
+
 async def poll_form144_filings(ctx: dict) -> dict:
     """arq cron entrypoint. No-op without SEC_USER_AGENT."""
     ua = (os.getenv("SEC_USER_AGENT") or "").strip()
@@ -88,8 +138,9 @@ async def poll_form144_filings(ctx: dict) -> dict:
         return {"skipped": True, "reason": "no_user_agent"}
 
     fetcher = EdgarFetcher(ua)
-    stats = {"fetched": 0, "new": 0, "stored": 0, "errors": 0}
+    stats = {"fetched": 0, "new": 0, "stored": 0, "notified": 0, "errors": 0}
     async with _SessionLocal() as session:
+        books, _sectors = await load_books(session)
         try:
             atom_xml = await fetcher.get(FORM144_ATOM_URL)
         except Exception:
@@ -150,6 +201,29 @@ async def poll_form144_filings(ctx: dict) -> dict:
                     )
                 )
                 stats["stored"] += 1
+
+                if ticker:
+                    targets = {
+                        uid
+                        for uid, b in books.items()
+                        if ticker in b.held_tickers or ticker in b.watchlist_tickers
+                    }
+                    for uid in targets:
+                        held = ticker in books[uid].held_tickers
+                        watched = ticker in books[uid].watchlist_tickers
+                        await notify_soft_stop(
+                            db=session,
+                            user_id=uid,
+                            event_type="planned_sell",
+                            title=_format_planned_sell_title(ticker, parsed),
+                            body=_format_planned_sell_body(parsed, held=held, watched=watched),
+                            metadata={"source": "form144_monitor", "ticker": ticker},
+                            ntfy_priority=4,
+                            send_in_app=True,
+                            send_telegram=True,
+                            send_ntfy=True,
+                        )
+                        stats["notified"] += 1
             except Exception:
                 stats["errors"] += 1
                 logger.exception("form144_entry_failed", accession=entry.get("accession"))

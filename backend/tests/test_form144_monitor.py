@@ -10,7 +10,9 @@ Covers poll_form144_filings() (fetch -> dedupe -> parse -> resolve ticker
 ============================================================================
 """
 import os
+import uuid
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 os.environ.setdefault(
@@ -175,6 +177,143 @@ async def test_poll_continues_after_per_entry_error(monkeypatch):
     assert stats["errors"] == 1
     assert stats["stored"] == 0
     session.commit.assert_awaited_once()  # still commits whatever *did* succeed
+
+
+def _fake_book(held_tickers=None, watchlist_tickers=None):
+    from app.trading.insider_gate import BookSnapshot
+
+    return BookSnapshot(
+        total_value=Decimal("0"),
+        sector_values={},
+        held_tickers=held_tickers or set(),
+        avoid_tickers=set(),
+        watchlist_tickers=watchlist_tickers or set(),
+    )
+
+
+class TestPlannedSellAlert:
+    """A Form 144 is a real SEC "planned sell" concept — a tracked ticker
+    (portfolio position or watchlist item) now gets its own alert the
+    moment the notice lands, not just after-the-fact context on a later
+    Form 4 sale."""
+
+    @pytest.mark.asyncio
+    async def test_sends_planned_sell_alert_to_holder(self, monkeypatch):
+        monkeypatch.setenv("SEC_USER_AGENT", "TickerTap Test test@example.com")
+        holder = uuid.uuid4()
+        session = AsyncMock()
+        session.add = MagicMock()
+        session.commit = AsyncMock()
+        already_stored = MagicMock()
+        already_stored.scalar_one_or_none.return_value = None
+        session.execute = AsyncMock(return_value=already_stored)
+
+        mock_notify = AsyncMock(return_value={"telegram": True, "ntfy": True, "in_app": True})
+
+        with (
+            patch("app.trading.form144_monitor.EdgarFetcher", _FakeFetcher),
+            patch("app.trading.form144_monitor._SessionLocal", _session_cm(session)),
+            patch("app.trading.form144_monitor.resolve_ticker", return_value="CRCL"),
+            patch(
+                "app.trading.form144_monitor.load_books",
+                AsyncMock(return_value=({holder: _fake_book(held_tickers={"CRCL"})}, {})),
+            ),
+            patch("app.trading.form144_monitor.notify_soft_stop", mock_notify),
+        ):
+            stats = await form144_monitor.poll_form144_filings({})
+
+        assert stats["notified"] == 1
+        mock_notify.assert_awaited_once()
+        kwargs = mock_notify.call_args.kwargs
+        assert kwargs["user_id"] == holder
+        assert kwargs["event_type"] == "planned_sell"
+        assert "CRCL" in kwargs["title"]
+        assert "You hold this position." in kwargs["body"]
+        assert kwargs["metadata"] == {"source": "form144_monitor", "ticker": "CRCL"}
+
+    @pytest.mark.asyncio
+    async def test_sends_planned_sell_alert_to_watchlister_with_correct_wording(self, monkeypatch):
+        monkeypatch.setenv("SEC_USER_AGENT", "TickerTap Test test@example.com")
+        watcher = uuid.uuid4()
+        session = AsyncMock()
+        session.add = MagicMock()
+        session.commit = AsyncMock()
+        already_stored = MagicMock()
+        already_stored.scalar_one_or_none.return_value = None
+        session.execute = AsyncMock(return_value=already_stored)
+
+        mock_notify = AsyncMock(return_value={"telegram": True, "ntfy": True, "in_app": True})
+
+        with (
+            patch("app.trading.form144_monitor.EdgarFetcher", _FakeFetcher),
+            patch("app.trading.form144_monitor._SessionLocal", _session_cm(session)),
+            patch("app.trading.form144_monitor.resolve_ticker", return_value="CRCL"),
+            patch(
+                "app.trading.form144_monitor.load_books",
+                AsyncMock(return_value=({watcher: _fake_book(watchlist_tickers={"CRCL"})}, {})),
+            ),
+            patch("app.trading.form144_monitor.notify_soft_stop", mock_notify),
+        ):
+            await form144_monitor.poll_form144_filings({})
+
+        kwargs = mock_notify.call_args.kwargs
+        assert kwargs["user_id"] == watcher
+        assert "on your watchlist" in kwargs["body"].lower()
+        assert "you hold this position" not in kwargs["body"].lower()
+
+    @pytest.mark.asyncio
+    async def test_no_alert_when_ticker_not_tracked_by_anyone(self, monkeypatch):
+        monkeypatch.setenv("SEC_USER_AGENT", "TickerTap Test test@example.com")
+        session = AsyncMock()
+        session.add = MagicMock()
+        session.commit = AsyncMock()
+        already_stored = MagicMock()
+        already_stored.scalar_one_or_none.return_value = None
+        session.execute = AsyncMock(return_value=already_stored)
+
+        mock_notify = AsyncMock()
+
+        with (
+            patch("app.trading.form144_monitor.EdgarFetcher", _FakeFetcher),
+            patch("app.trading.form144_monitor._SessionLocal", _session_cm(session)),
+            patch("app.trading.form144_monitor.resolve_ticker", return_value="CRCL"),
+            patch(
+                "app.trading.form144_monitor.load_books",
+                AsyncMock(return_value=({uuid.uuid4(): _fake_book(held_tickers={"MSFT"})}, {})),
+            ),
+            patch("app.trading.form144_monitor.notify_soft_stop", mock_notify),
+        ):
+            stats = await form144_monitor.poll_form144_filings({})
+
+        assert stats["notified"] == 0
+        mock_notify.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_no_alert_when_ticker_unresolved(self, monkeypatch):
+        monkeypatch.setenv("SEC_USER_AGENT", "TickerTap Test test@example.com")
+        session = AsyncMock()
+        session.add = MagicMock()
+        session.commit = AsyncMock()
+        already_stored = MagicMock()
+        already_stored.scalar_one_or_none.return_value = None
+        session.execute = AsyncMock(return_value=already_stored)
+
+        mock_notify = AsyncMock()
+
+        with (
+            patch("app.trading.form144_monitor.EdgarFetcher", _FakeFetcher),
+            patch("app.trading.form144_monitor._SessionLocal", _session_cm(session)),
+            patch("app.trading.form144_monitor.resolve_ticker", return_value=None),
+            patch(
+                "app.trading.form144_monitor.load_books",
+                AsyncMock(return_value=({uuid.uuid4(): _fake_book(held_tickers={"MSFT"})}, {})),
+            ),
+            patch("app.trading.form144_monitor.notify_soft_stop", mock_notify),
+        ):
+            stats = await form144_monitor.poll_form144_filings({})
+
+        assert stats["notified"] == 0
+        mock_notify.assert_not_called()
 
 
 class TestGetRecent144Notice:

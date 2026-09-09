@@ -19,8 +19,8 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from ..models import InsiderFiling, Portfolio, PortfolioPosition, RuleAlert
-from .briefing_advice import load_investment_rules
+from ..models import InsiderFiling, RuleAlert
+from .book_loader import load_avoid_tickers, load_books
 from .heartbeat import write_worker_heartbeat
 from .insider_briefing import (
     ConsensusBrief,
@@ -40,7 +40,7 @@ from .form3_monitor import get_form3_baseline
 from .schedule13_monitor import get_recent_beneficial_ownership
 from .form8k_monitor import get_recent_8k_filings
 from .form13f_monitor import get_recent_13f_holders
-from .insider_gate import BookSnapshot, GateResult, Integrity, evaluate_filing, sector_exposure
+from .insider_gate import BookSnapshot, GateResult, Integrity, evaluate_filing
 from .insider_track_record import compute_track_record
 from .market_context import (
     fetch_price_history_bars,
@@ -323,72 +323,6 @@ def _txn_date(row: dict) -> Optional[date]:
         return None
 
 
-def load_avoid_tickers() -> set:
-    return {str(t).upper() for t in load_investment_rules().get("avoid_tickers", [])}
-
-
-async def load_books(session: AsyncSession) -> tuple[dict, dict]:
-    """Open positions → one BookSnapshot per user who holds any, keyed by
-    user_id, plus a shared ticker->sector map (issuer-level metadata, not
-    user-specific, so it's fine to pool across everyone's positions).
-
-    Replaces the old single-aggregate load_book(), which combined every
-    user's positions into one BookSnapshot and picked "whichever user_id
-    was encountered first" for every notification — meaning a second user
-    (e.g. a friend with their own linked Telegram chat) never got their own
-    personalized gate/advice, and could even have their position silently
-    overwritten in the shared `positions` dict if they and another user both
-    held the same ticker (dict keys are ticker, not (user, ticker)).
-    """
-    res = await session.execute(
-        select(PortfolioPosition, Portfolio.user_id)
-        .join(Portfolio, Portfolio.portfolio_id == PortfolioPosition.portfolio_id)
-        .where(
-            PortfolioPosition.closed_at.is_(None),
-            PortfolioPosition.is_excluded.is_(False),
-        )
-    )
-    rows = res.all()
-    by_user: dict = {}
-    sectors: dict[str, str] = {}
-    for pos, uid in rows:
-        by_user.setdefault(uid, []).append(pos)
-        ticker = (pos.ticker or "").upper()
-        if pos.sector:
-            sectors[ticker] = pos.sector
-
-    avoid = load_avoid_tickers()
-    books: dict = {}
-    for uid, user_positions in by_user.items():
-        pos_dicts = []
-        held = set()
-        positions: dict = {}
-        for pos in user_positions:
-            ticker = (pos.ticker or "").upper()
-            held.add(ticker)
-            if pos.t2_usd is not None:
-                mv = Decimal(str(pos.t2_usd))
-            else:
-                mv = Decimal(str(pos.purchase_price or 0)) * Decimal(str(pos.quantity or 0))
-            pos_dicts.append({"sector": pos.sector or "Unknown", "market_value": mv})
-            positions[ticker] = {
-                "quantity": float(pos.quantity or 0),
-                "purchase_price": float(pos.purchase_price or 0),
-                "hard_stop": float(pos.hard_stop_loss) if pos.hard_stop_loss is not None else None,
-                "soft_stop": float(pos.soft_stop_loss) if pos.soft_stop_loss is not None else None,
-                "date_entered": pos.date_entered,
-            }
-        total = sum((p["market_value"] for p in pos_dicts), Decimal("0"))
-        books[uid] = BookSnapshot(
-            total_value=total,
-            sector_values=sector_exposure(pos_dicts, total),
-            held_tickers=held,
-            avoid_tickers=avoid,
-            positions=positions,
-        )
-    return books, sectors
-
-
 def fetch_integrity_sync(ticker: str) -> Integrity:
     try:
         import yfinance as yf
@@ -528,6 +462,16 @@ def _format_13f_note(rows: list) -> Optional[str]:
     return " ".join(parts)
 
 
+def _format_watchlist_note(ticker_held: bool, ticker_watched: bool) -> Optional[str]:
+    """Distinguishes a real position from a watchlist-only ticker in the
+    advice text — both get full gating parity (see book_loader.py) so the
+    alert itself fires the same way, but "already in the book" would be
+    misleading for shares you don't actually own."""
+    if ticker_held or not ticker_watched:
+        return None
+    return "This ticker is on your watchlist (not an open position)."
+
+
 async def run_insider_cycle(
     fetcher: EdgarFetcher,
     store: FilingStore,
@@ -619,12 +563,20 @@ async def run_insider_cycle(
                 integrity = await _maybe_await(deps.fetch_integrity(ticker))
 
                 # Evaluate against every user who actually holds this ticker
-                # — each gets their own sector_pct/held/position, hence their
-                # own personalized advice and their own Telegram chat. A BUY
-                # ("new idea") filing on a ticker nobody holds yet still goes
-                # to the primary/owner user, since that's inherently about
-                # their personal watchlist/rules config, not a holding.
-                targets = {uid: b for uid, b in books.items() if ticker in b.held_tickers}
+                # OR has it on a watchlist — full gating parity, so a
+                # watchlist-only ticker's insider sell/buy alerts the same
+                # way a real holding's would (see book_loader.py). Each
+                # target gets their own sector_pct/held/position, hence
+                # their own personalized advice and their own Telegram
+                # chat. A BUY ("new idea") filing on a ticker nobody holds
+                # or watches yet still goes to the primary/owner user,
+                # since that's inherently about their personal rules
+                # config, not a holding.
+                targets = {
+                    uid: b
+                    for uid, b in books.items()
+                    if ticker in b.held_tickers or ticker in b.watchlist_tickers
+                }
                 if code == "P" and primary_uid is not None and primary_uid not in targets:
                     targets[primary_uid] = books.get(primary_uid, empty_book)
 
@@ -748,6 +700,11 @@ async def run_insider_cycle(
                             body = f"{body}\n\n{eightk_label}"
                         if thirteenf_label:
                             body = f"{body}\n\n{thirteenf_label}"
+                        watchlist_note = _format_watchlist_note(
+                            ticker in book.held_tickers, ticker in book.watchlist_tickers
+                        )
+                        if watchlist_note:
+                            body = f"{body}\n\n{watchlist_note}"
                     if gate.in_app:
                         await store.add_rule_alert(uid, gate, row, body)
                         stats["in_app"] += 1

@@ -172,6 +172,27 @@ def test_gate_sell_unheld_is_silent():
     assert g.in_app is False
 
 
+def test_gate_sell_watchlist_only_alerts_same_as_held():
+    """Full parity: a watchlist-only ticker (no real position) gates a sell
+    exactly like a held one — the closest available signal for "planned
+    buy/sell" on a name the user is tracking but doesn't own yet."""
+    filing = parse_form4_xml(FORM4)[0]
+    filing["transaction_code"] = "S"
+    filing["is_10b5_1"] = False
+    g = evaluate_filing(filing, _book(watchlist_tickers={"AAPL"}), ticker_sector="Technology")
+    assert g.worth_telegram is True
+    assert g.severity == "critical"
+
+
+def test_gate_sell_neither_held_nor_watchlisted_is_silent():
+    filing = parse_form4_xml(FORM4)[0]
+    filing["transaction_code"] = "S"
+    g = evaluate_filing(
+        filing, _book(held_tickers=set(), watchlist_tickers={"MSFT"}), ticker_sector="Technology"
+    )
+    assert g.worth_telegram is False
+
+
 def test_gate_critical_de_blocks_buy():
     filing = parse_form4_xml(FORM4)[0]
     g = evaluate_filing(

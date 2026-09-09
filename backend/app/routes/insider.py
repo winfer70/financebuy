@@ -15,7 +15,14 @@ from sqlalchemy import asc, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..models import Form144Notice, InsiderFiling
+from ..models import (
+    BeneficialOwnership,
+    EightKFiling,
+    Form3Statement,
+    Form13FHolding,
+    Form144Notice,
+    InsiderFiling,
+)
 from ..trading.finra_short_interest import get_latest_short_interest
 from ..trading.insider_track_record import compute_track_record
 from .auth_routes import get_current_user
@@ -397,3 +404,222 @@ async def owner_breakdown(
         pending_144=pending_144,
         short_interest=short_interest,
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Unified "All Filings" browser — Form 144, Form 3, Schedule 13D/13G,
+# Form 8-K, Form 13F normalized into one sortable/filterable list.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_ALL_SOURCES = ("form144", "form3", "13d", "13g", "8k", "13f")
+
+
+class AllFilingOut(BaseModel):
+    """One row from any of the five non-Form-4 filing types, normalized to
+    a common shape so the frontend can sort/filter across all of them at
+    once. `detail`/`person`/`amount`/`value_usd` are populated per-source —
+    see FREE_FILINGS_RESEARCH.md for what each type actually reports."""
+
+    source: str
+    ticker: Optional[str] = None
+    filing_date: Optional[date] = None
+    headline: str
+    detail: Optional[str] = None
+    person: Optional[str] = None
+    # CIK of the person/filer behind this row (owner_cik for 144/3, filer_cik
+    # for 13D/13G/13F) — lets the frontend link into the same owner-breakdown
+    # panel Form 4 rows already use. None for 8-K, which has no person concept.
+    owner_cik: Optional[str] = None
+    amount: Optional[float] = None
+    value_usd: Optional[float] = None
+    is_amendment: bool = False
+    filing_url: Optional[str] = None
+
+
+class AllFilingsListOut(BaseModel):
+    total: int
+    items: list[AllFilingOut]
+
+
+async def _fetch_form144_rows(db: AsyncSession, ticker: Optional[str], since: date) -> list[AllFilingOut]:
+    filters = [Form144Notice.notice_date >= since]
+    if ticker:
+        filters.append(Form144Notice.ticker == ticker.upper())
+    res = await db.execute(select(Form144Notice).where(*filters))
+    out = []
+    for n in res.scalars().all():
+        out.append(
+            AllFilingOut(
+                source="form144",
+                ticker=n.ticker,
+                filing_date=n.notice_date,
+                headline=f"Form 144: {n.owner_name or 'Insider'} proposed sale",
+                detail=(
+                    f"{n.relationships or ''} — proposed sale date {n.approx_sale_date.isoformat()}"
+                    if n.approx_sale_date
+                    else n.relationships
+                ),
+                person=n.owner_name,
+                owner_cik=n.owner_cik,
+                amount=_f(n.shares),
+                value_usd=_f(n.aggregate_value),
+                filing_url=n.filing_url,
+            )
+        )
+    return out
+
+
+async def _fetch_form3_rows(db: AsyncSession, ticker: Optional[str], since: date) -> list[AllFilingOut]:
+    filters = [Form3Statement.period_of_report >= since]
+    if ticker:
+        filters.append(Form3Statement.ticker == ticker.upper())
+    res = await db.execute(select(Form3Statement).where(*filters))
+    out = []
+    for s in res.scalars().all():
+        role = s.officer_title or ("Director" if s.is_director else "Officer" if s.is_officer else "Insider")
+        out.append(
+            AllFilingOut(
+                source="form3",
+                ticker=s.ticker,
+                filing_date=s.period_of_report,
+                headline=f"Form 3: {s.owner_name or 'Insider'} initial statement",
+                detail=f"{role} — starting position",
+                person=s.owner_name,
+                owner_cik=s.owner_cik,
+                amount=_f(s.shares_owned),
+                filing_url=s.filing_url,
+            )
+        )
+    return out
+
+
+async def _fetch_schedule13_rows(
+    db: AsyncSession, ticker: Optional[str], since: date, want_13d: bool, want_13g: bool
+) -> list[AllFilingOut]:
+    if not want_13d and not want_13g:
+        return []
+    filters = [BeneficialOwnership.event_date >= since]
+    if ticker:
+        filters.append(BeneficialOwnership.ticker == ticker.upper())
+    if want_13d and not want_13g:
+        filters.append(BeneficialOwnership.is_13d.is_(True))
+    elif want_13g and not want_13d:
+        filters.append(BeneficialOwnership.is_13d.is_(False))
+    res = await db.execute(select(BeneficialOwnership).where(*filters))
+    out = []
+    for o in res.scalars().all():
+        kind = "13D (activist)" if o.is_13d else "13G (passive)"
+        headline = f"Schedule {kind}: {o.filer_name or 'Filer'}"
+        if o.pct_owned:
+            headline += f" — {float(o.pct_owned):.1f}%"
+        out.append(
+            AllFilingOut(
+                source="13d" if o.is_13d else "13g",
+                ticker=o.ticker,
+                filing_date=o.event_date,
+                headline=headline,
+                detail=(o.purpose_text or "")[:280] or None,
+                person=o.filer_name,
+                owner_cik=o.filer_cik,
+                amount=_f(o.shares_owned),
+                is_amendment=bool(o.is_amendment),
+                filing_url=o.filing_url,
+            )
+        )
+    return out
+
+
+async def _fetch_8k_rows(db: AsyncSession, ticker: Optional[str], since: date) -> list[AllFilingOut]:
+    since_dt = datetime.combine(since, datetime.min.time(), tzinfo=timezone.utc)
+    filters = [EightKFiling.filed_at >= since_dt]
+    if ticker:
+        filters.append(EightKFiling.ticker == ticker.upper())
+    res = await db.execute(select(EightKFiling).where(*filters))
+    out = []
+    for f in res.scalars().all():
+        items = f.items or []
+        descriptions = [i.get("description", "") for i in items if i.get("description")]
+        out.append(
+            AllFilingOut(
+                source="8k",
+                ticker=f.ticker,
+                filing_date=f.filed_at.date() if f.filed_at else None,
+                headline=f"8-K: {descriptions[0] if descriptions else 'Material event'}",
+                detail="; ".join(descriptions[1:3]) or None,
+                is_amendment=bool(f.is_amendment),
+                filing_url=f.filing_url,
+            )
+        )
+    return out
+
+
+async def _fetch_13f_rows(db: AsyncSession, ticker: Optional[str], since: date) -> list[AllFilingOut]:
+    since_dt = datetime.combine(since, datetime.min.time(), tzinfo=timezone.utc)
+    filters = [Form13FHolding.filed_at >= since_dt]
+    if ticker:
+        filters.append(Form13FHolding.ticker == ticker.upper())
+    res = await db.execute(select(Form13FHolding).where(*filters))
+    out = []
+    for h in res.scalars().all():
+        out.append(
+            AllFilingOut(
+                source="13f",
+                ticker=h.ticker,
+                filing_date=h.filed_at.date() if h.filed_at else None,
+                headline=f"13F: {h.filer_name or 'Fund'} holds this name",
+                detail="positioning data, up to 45 days stale",
+                person=h.filer_name,
+                amount=_f(h.shares),
+                value_usd=_f(h.value_usd),
+                is_amendment=bool(h.is_amendment),
+                filing_url=h.filing_url,
+            )
+        )
+    return out
+
+
+@router.get("/filings-all", response_model=AllFilingsListOut)
+async def list_all_filings(
+    ticker: Optional[str] = Query(None),
+    source: str = Query("all", description="all|form144|form3|13d|13g|8k|13f"),
+    days: int = Query(90, ge=1, le=730),
+    sort: str = Query("date", description="date|ticker|source"),
+    order: str = Query("desc"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Form 144 + Form 3 + Schedule 13D/13G + 8-K + 13F, normalized into one
+    sortable/filterable list — every non-Form-4 filing type ingested by the
+    trading-worker pollers documented in FREE_FILINGS_RESEARCH.md, in one
+    place instead of six separate endpoints.
+    """
+    wanted = {s.strip().lower() for s in source.split(",")} if source != "all" else set(_ALL_SOURCES)
+    unknown = wanted - set(_ALL_SOURCES)
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Unknown source(s): {', '.join(sorted(unknown))}")
+
+    since = datetime.now(timezone.utc).date() - timedelta(days=days)
+    items: list[AllFilingOut] = []
+    if "form144" in wanted:
+        items += await _fetch_form144_rows(db, ticker, since)
+    if "form3" in wanted:
+        items += await _fetch_form3_rows(db, ticker, since)
+    if "13d" in wanted or "13g" in wanted:
+        items += await _fetch_schedule13_rows(db, ticker, since, "13d" in wanted, "13g" in wanted)
+    if "8k" in wanted:
+        items += await _fetch_8k_rows(db, ticker, since)
+    if "13f" in wanted:
+        items += await _fetch_13f_rows(db, ticker, since)
+
+    sort_key = {
+        "date": lambda x: x.filing_date or date.min,
+        "ticker": lambda x: x.ticker or "",
+        "source": lambda x: x.source,
+    }.get(sort, lambda x: x.filing_date or date.min)
+    items.sort(key=sort_key, reverse=(order.lower() != "asc"))
+
+    total = len(items)
+    page = items[offset : offset + limit]
+    return AllFilingsListOut(total=total, items=page)

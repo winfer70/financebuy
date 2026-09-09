@@ -684,6 +684,74 @@ async def test_no_13f_note_when_fetch_unset():
 
 
 @pytest.mark.asyncio
+async def test_watchlist_only_sell_alerts_with_watchlist_note():
+    """Full gating parity: a watchlist-only user (no real position) gets
+    the same sell alert a holder would, but the advice text says "on your
+    watchlist" instead of implying a real position exists."""
+    xml = FORM4.replace("<transactionCode>P</transactionCode>", "<transactionCode>S</transactionCode>")
+    watcher = uuid.uuid4()
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi({watcher: _book(watchlist_tickers={"AAPL"})})
+    stats = await run_insider_cycle(MapFetcher(_mapping(xml=xml)), store, deps)
+
+    assert stats["telegram"] == 1
+    assert len(notifies) == 1
+    assert notifies[0]["user_id"] == watcher
+    assert notifies[0]["event"] == "insider_sell"
+    assert "on your watchlist" in notifies[0]["body"].lower()
+    assert "already in the book" not in notifies[0]["body"].lower()
+
+
+@pytest.mark.asyncio
+async def test_watchlist_only_buy_gets_personalized_alert_not_just_primary():
+    """A buy on a watchlist-only ticker should target the actual watcher,
+    not just fall through to the primary/owner user as a generic ping —
+    the practical substitute for a "planned buy" signal, since there's no
+    SEC filing that telegraphs an intended purchase the way Form 144 does
+    for sells."""
+    watcher, primary = uuid.uuid4(), uuid.uuid4()
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi(
+        {watcher: _book(watchlist_tickers={"AAPL"})}, primary_user_id=primary
+    )
+    await run_insider_cycle(MapFetcher(_mapping()), store, deps)  # default FORM4 is a "P" buy
+
+    # primary_uid always gets a "new idea" ping on any buy (pre-existing
+    # behavior) in addition to — not instead of — the watcher's own
+    # personalized copy, which is the thing this test actually guards.
+    by_user = {n["user_id"]: n for n in notifies}
+    assert watcher in by_user
+    assert primary in by_user
+    assert "on your watchlist" in by_user[watcher]["body"].lower()
+    assert "on your watchlist" not in by_user[primary]["body"].lower()
+
+
+@pytest.mark.asyncio
+async def test_held_position_shows_no_watchlist_note():
+    """Regression guard: a real portfolio position must not pick up the
+    watchlist-only note just because it isn't separately in watchlist_tickers."""
+    xml = FORM4.replace("<transactionCode>P</transactionCode>", "<transactionCode>S</transactionCode>")
+    holder = uuid.uuid4()
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi({holder: _book(held_tickers={"AAPL"})})
+    await run_insider_cycle(MapFetcher(_mapping(xml=xml)), store, deps)
+
+    assert len(notifies) == 1
+    assert "on your watchlist" not in notifies[0]["body"].lower()
+
+
+@pytest.mark.asyncio
+async def test_neither_held_nor_watchlisted_gets_no_sell_alert():
+    xml = FORM4.replace("<transactionCode>P</transactionCode>", "<transactionCode>S</transactionCode>")
+    store = MemoryFilingStore()
+    deps, notifies = _deps_multi({uuid.uuid4(): _book(held_tickers={"MSFT"})})
+    stats = await run_insider_cycle(MapFetcher(_mapping(xml=xml)), store, deps)
+
+    assert stats["telegram"] == 0
+    assert len(notifies) == 0
+
+
+@pytest.mark.asyncio
 async def test_poll_skips_without_user_agent(monkeypatch):
     monkeypatch.delenv("SEC_USER_AGENT", raising=False)
     result = await poll_insider_filings({})

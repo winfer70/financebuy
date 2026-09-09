@@ -376,6 +376,20 @@ const api = {
     return apiFetch(url, { token });
   },
 
+  /**
+   * Unified Form 144 / Form 3 / Schedule 13D-13G / 8-K / 13F browser —
+   * normalized rows, sortable/filterable by source.
+   * @returns {Promise<{total: number, items: Array}>}
+   */
+  getAllFilings: (token, {
+    ticker = null, source = "all", days = 90,
+    sort = "date", order = "desc", limit = 50, offset = 0,
+  } = {}) => {
+    let url = `/insider/filings-all?source=${encodeURIComponent(source)}&days=${days}&sort=${encodeURIComponent(sort)}&order=${encodeURIComponent(order)}&limit=${limit}&offset=${offset}`;
+    if (ticker) url += `&ticker=${encodeURIComponent(ticker)}`;
+    return apiFetch(url, { token });
+  },
+
   // ── Guide ──────────────────────────────────────────────────────────────────
   /**
    * Submit a question to the AI guide (Ollama proxy).
