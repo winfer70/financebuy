@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback } from "react";
 import api from "../api/client";
 import { Ic } from "../components/common/Icons";
 import Pagination from "../components/common/Pagination";
+import { MODAL_BACKDROP } from "../styles/shared";
 
 const PAGE_SIZES = [25, 50, 100];
 const CODE_FILTERS = [
@@ -125,6 +126,33 @@ function roleLabel(row) {
   return bits.join(" · ") || "—";
 }
 
+// Buy/Sell classification — P and S are the SEC's own codes for genuine
+// open-market purchase/sale; D is a sale/transfer to the issuer (also a
+// disposal). Everything else (grants, exercises, gifts, tax withholding,
+// etc.) is neither a market buy nor sell, so it's classified OTHER rather
+// than defaulting to green/buy-colored the way a naive "not S" check would.
+const BUY_CODES = new Set(["P"]);
+const SELL_CODES = new Set(["S", "D"]);
+
+function classifyTxn(code) {
+  const c = (code || "").toUpperCase();
+  if (BUY_CODES.has(c)) return "BUY";
+  if (SELL_CODES.has(c)) return "SELL";
+  return "OTHER";
+}
+
+function classColor(cls) {
+  return cls === "BUY" ? "var(--green)" : cls === "SELL" ? "var(--red)" : "var(--mid)";
+}
+
+function txnHeadline(row) {
+  const cls = classifyTxn(row.transaction_code);
+  const verb = cls === "BUY" ? "bought" : cls === "SELL" ? "sold" : "reported";
+  const who = row.owner_name || "An insider";
+  const shares = row.shares != null ? `${fmtNum(row.shares)} sh` : "shares";
+  return `${who} ${verb} ${shares} of ${row.ticker}`;
+}
+
 export function InsiderPage({ token, onViewChart }) {
   const [tab, setTab] = useState("form4"); // "form4" | "all"
 
@@ -154,6 +182,7 @@ export function InsiderPage({ token, onViewChart }) {
   const [owner, setOwner] = useState(null);
   const [ownerLoading, setOwnerLoading] = useState(false);
   const [ownerError, setOwnerError] = useState(null);
+  const [txnDetail, setTxnDetail] = useState(null);
 
   const load = useCallback(async () => {
     if (!token || tab !== "form4") return;
@@ -369,7 +398,22 @@ export function InsiderPage({ token, onViewChart }) {
                 <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'IBM Plex Mono',monospace", fontSize: 11 }}>
                   <thead>
                     <tr style={{ position: "sticky", top: 0, background: "var(--bg3)", zIndex: 1 }}>
-                      {COLUMNS.map((c) => (
+                      {COLUMNS.slice(0, 3).map((c) => (
+                        <th
+                          key={c.key}
+                          onClick={() => onSort(c.key)}
+                          style={{
+                            textAlign: "left", padding: "8px 10px", cursor: "pointer",
+                            color: sort === c.key ? "var(--green)" : "var(--mid)",
+                            borderBottom: "1px solid var(--border)", letterSpacing: 0.6, whiteSpace: "nowrap",
+                          }}
+                        >
+                          {c.label}{sort === c.key ? (order === "asc" ? " ↑" : " ↓") : ""}
+                        </th>
+                      ))}
+                      <th style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)", color: "var(--mid)", letterSpacing: 0.6, whiteSpace: "nowrap" }}>ROLE</th>
+                      <th style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)", color: "var(--mid)", letterSpacing: 0.6, whiteSpace: "nowrap" }}>TYPE</th>
+                      {COLUMNS.slice(3).map((c) => (
                         <th
                           key={c.key}
                           onClick={() => onSort(c.key)}
@@ -384,18 +428,19 @@ export function InsiderPage({ token, onViewChart }) {
                         </th>
                       ))}
                       <th style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)", color: "var(--mid)" }}>10b5-1</th>
+                      <th style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)", color: "var(--mid)", letterSpacing: 0.6, whiteSpace: "nowrap" }}>TRANSACTION</th>
                       <th style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)", color: "var(--mid)" }} />
                     </tr>
                   </thead>
                   <tbody>
                     {loading && (
-                      <tr><td colSpan={10} style={{ padding: 20, color: "var(--mid)" }}>Loading…</td></tr>
+                      <tr><td colSpan={13} style={{ padding: 20, color: "var(--mid)" }}>Loading…</td></tr>
                     )}
                     {!loading && items.length === 0 && (
-                      <tr><td colSpan={10} style={{ padding: 20, color: "var(--mid)" }}>No Form 4 rows in this window.</td></tr>
+                      <tr><td colSpan={13} style={{ padding: 20, color: "var(--mid)" }}>No Form 4 rows in this window.</td></tr>
                     )}
                     {!loading && items.map((row) => {
-                      const sell = (row.transaction_code || "").toUpperCase() === "S";
+                      const cls = classifyTxn(row.transaction_code);
                       return (
                         <tr
                           key={row.filing_id}
@@ -415,13 +460,25 @@ export function InsiderPage({ token, onViewChart }) {
                               {row.ticker}
                             </button>
                           </td>
-                          <td style={{ padding: "7px 10px", color: "var(--text)", maxWidth: 180 }}>
+                          <td style={{ padding: "7px 10px", color: "var(--text)", maxWidth: 160 }}>
                             <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.owner_name || "—"}</div>
-                            <div style={{ color: "var(--mid)", fontSize: 10 }}>{roleLabel(row)}</div>
+                          </td>
+                          <td style={{ padding: "7px 10px", color: "var(--mid)", maxWidth: 140 }}>
+                            <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{roleLabel(row)}</div>
+                          </td>
+                          <td style={{ padding: "7px 10px" }}>
+                            <span style={{
+                              display: "inline-block", padding: "2px 8px", borderRadius: 3,
+                              fontWeight: 700, fontSize: 10, letterSpacing: 0.5,
+                              color: classColor(cls),
+                              background: cls === "BUY" ? "rgba(34,197,94,.12)" : cls === "SELL" ? "rgba(239,68,68,.12)" : "rgba(255,255,255,.06)",
+                            }}>
+                              {cls}
+                            </span>
                           </td>
                           <td
                             title={codeTitle(row.transaction_code)}
-                            style={{ padding: "7px 10px", color: sell ? "var(--red)" : "var(--green)", fontWeight: 600, cursor: "help" }}
+                            style={{ padding: "7px 10px", color: classColor(cls), fontWeight: 600, cursor: "help" }}
                           >
                             {row.transaction_code}
                           </td>
@@ -431,6 +488,21 @@ export function InsiderPage({ token, onViewChart }) {
                           <td style={{ padding: "7px 10px", color: "var(--text)" }}>{fmtPct(row.stake_pct)}</td>
                           <td style={{ padding: "7px 10px", color: "var(--mid)" }}>
                             {row.is_10b5_1 === true ? "Y" : row.is_10b5_1 === false ? "N" : "—"}
+                          </td>
+                          <td style={{ padding: "7px 10px", maxWidth: 260 }}>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setTxnDetail(row); }}
+                              style={{
+                                background: "none", border: "none", cursor: "pointer", padding: 0,
+                                color: "var(--text)", fontFamily: "inherit", fontSize: "inherit",
+                                textAlign: "left", textDecoration: "underline dotted",
+                                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block", width: "100%",
+                              }}
+                              title="Click for transaction details"
+                            >
+                              {txnHeadline(row)}
+                            </button>
                           </td>
                           <td style={{ padding: "7px 10px" }}>
                             {row.filing_url && (
@@ -717,6 +789,86 @@ export function InsiderPage({ token, onViewChart }) {
             </div>
           )}
         </aside>
+      </div>
+
+      {txnDetail && (
+        <TransactionDetailModal row={txnDetail} onClose={() => setTxnDetail(null)} onViewChart={onViewChart} />
+      )}
+    </div>
+  );
+}
+
+function TransactionDetailModal({ row, onClose, onViewChart }) {
+  const cls = classifyTxn(row.transaction_code);
+  return (
+    <div
+      className="modal-overlay"
+      style={MODAL_BACKDROP}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="modal-box" style={{ maxWidth: 440, fontFamily: "'IBM Plex Mono',monospace" }}>
+        <div className="modal-top">
+          <div className="modal-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            TRANSACTION DETAIL
+          </div>
+          <button className="modal-close" onClick={onClose}><Ic.close /></button>
+        </div>
+        <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 12, fontSize: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <button
+              type="button"
+              onClick={() => { onViewChart?.(row.ticker); onClose(); }}
+              style={{
+                background: "none", border: "none", cursor: "pointer", padding: 0,
+                color: "var(--green)", fontFamily: "inherit", fontSize: 16, fontWeight: 700,
+              }}
+            >
+              {row.ticker}
+            </button>
+            <span style={{
+              display: "inline-block", padding: "3px 10px", borderRadius: 3,
+              fontWeight: 700, fontSize: 11, letterSpacing: 0.5,
+              color: classColor(cls),
+              background: cls === "BUY" ? "rgba(34,197,94,.12)" : cls === "SELL" ? "rgba(239,68,68,.12)" : "rgba(255,255,255,.06)",
+            }}>
+              {cls}
+            </span>
+          </div>
+
+          <div>
+            <div style={{ color: "var(--text)", fontWeight: 600 }}>{row.owner_name || "—"}</div>
+            <div style={{ color: "var(--mid)", fontSize: 11 }}>{roleLabel(row)} · CIK {row.owner_cik || "—"}</div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <Stat label="TRADE DATE" value={fmtDate(row.transaction_date)} />
+            <Stat label="CODE" value={`${row.transaction_code} — ${cls}`} color={classColor(cls)} />
+            <Stat label="SHARES" value={fmtNum(row.shares)} />
+            <Stat label="PRICE" value={row.price != null ? "$" + fmtNum(row.price, 2) : "—"} />
+            <Stat label="NOTIONAL" value={fmtMoney(row.notional)} />
+            <Stat label="STAKE %" value={fmtPct(row.stake_pct)} />
+            <Stat label="SHARES AFTER" value={fmtNum(row.shares_after)} />
+            <Stat label="10b5-1 PLAN" value={row.is_10b5_1 === true ? "Yes" : row.is_10b5_1 === false ? "No" : "—"} />
+          </div>
+
+          <div style={{ color: "var(--mid)", fontSize: 10, lineHeight: 1.5 }}>
+            {codeTitle(row.transaction_code)}
+          </div>
+
+          {row.filing_url && (
+            <a
+              href={row.filing_url}
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: "#3d7ef5", textDecoration: "none", fontSize: 11 }}
+            >
+              View original SEC filing →
+            </a>
+          )}
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={onClose}>CLOSE</button>
+        </div>
       </div>
     </div>
   );
